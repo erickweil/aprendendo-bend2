@@ -1,0 +1,11 @@
+{
+  "name": "aprendendo-bend2",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "bend": "node bend-engine/cli.js run $1"
+  },
+  "keywords": [],
+  "type": "module"
+}
