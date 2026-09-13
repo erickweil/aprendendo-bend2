@@ -1,12 +1,5 @@
 import Base
 
-def pick(-A: Type, c: Bool, a: A, b: A) -> A:
-  match c:
-    case True{}:
-      a
-    case False{}:
-      b
-
 # Uma String é uma lista encadeada de caracteres apontando para os próximos da frente
 # type Char is Data:
 #   Chr{code: U32}
