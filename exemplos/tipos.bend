@@ -11,7 +11,7 @@ def valor_u32() -> U32:
 def valor_nat() -> Nat:
   7n
 
-def main() -> Nat:
+def main() -> IO(Unit):
   # Por padrão, é como se os valores fossem sem Clone e Copy do Rust, mas aqui a variável decide isso
   # Se você quer poder reusar uma variável mais de uma vez, precisa marcar com +, ou irá dar erro 'consumed more than once'
   +quanto = valor_u32()
@@ -27,4 +27,4 @@ def main() -> Nat:
   # E aqui a variável quanto foi redeclarada com OUTRO TIPO, o tipo Nat
   quanto = (U32.to_nat(quanto) + valor_nat() : Nat)
 
-  quanto
+  IO.print(Nat.show(quanto))

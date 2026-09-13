@@ -29,7 +29,7 @@ def pick(-A: Type, c: Bool, a: A, b: A) -> A:
 def maior(+a: U32, +b: U32) -> U32:
   pick(U32, (a > b : U32), a, b)
   
-def main() -> String:
+def main() -> IO(Unit):
   nota1 = valor(40)
   nota2 = valor(70)
   rec1 = valor(80)
@@ -43,4 +43,4 @@ def main() -> String:
 
   anual = media(sem1, sem2)
     
-  pick(String, (anual > 60 : U32), "Passou", "Reprovou")
+  IO.print(pick(String, (anual > 60 : U32), "Passou", "Reprovou"))
