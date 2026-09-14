@@ -1,0 +1,5 @@
+{
+  "python.analysis.autoIndent": false,
+  "problems.visibility": false,
+  "mypy-type-checker.ignorePatterns": ["*.bend"]
+}
