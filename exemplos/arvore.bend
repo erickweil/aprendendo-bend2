@@ -31,17 +31,17 @@ type Arvore<-T: Data> is Data:
   Vazia{}
   No{valor: T, esquerda: Arvore<T>, direita: Arvore<T>}
 
-def Arvore.inserir(~T: Data, ~cmp: @a: T -> @b: T -> Cmp, +a: Arvore<T>, +novo: T) -> Arvore<T>:
+def inserir(~T: Data, ~cmp: @a: T -> @b: T -> Cmp, +a: Arvore<T>, +novo: T) -> Arvore<T>:
   match a:
     case Vazia{}:
       No{novo, Vazia{}, Vazia{}}
     case No{valor, esquerda, direita}:
       pick(Arvore<T>, Cmp.is_lt(cmp(novo, valor)),
-        No{valor, Arvore.inserir(~T, ~cmp, esquerda, novo), direita},
-        No{valor, esquerda, Arvore.inserir(~T, ~cmp, direita, novo)}
+        No{valor, inserir(~T, ~cmp, esquerda, novo), direita},
+        No{valor, esquerda, inserir(~T, ~cmp, direita, novo)}
       )
 
-def Arvore.buscar(~T: Data, ~cmp: @a: T -> @b: T -> Cmp, +a: Arvore<T>, +busca: T) -> Maybe<&2, T>:
+def buscar(~T: Data, ~cmp: @a: T -> @b: T -> Cmp, +a: Arvore<T>, +busca: T) -> Maybe<&2, T>:
   match a:
     case Vazia{}:
       None{}
@@ -49,28 +49,28 @@ def Arvore.buscar(~T: Data, ~cmp: @a: T -> @b: T -> Cmp, +a: Arvore<T>, +busca: 
       pick(Maybe<&2, T>, Cmp.is_eq(cmp(busca, valor)),
         Some{valor},
         pick(Maybe<&2, T>, Cmp.is_lt(cmp(busca, valor)),
-          Arvore.buscar(~T, ~cmp, esquerda, busca),
-          Arvore.buscar(~T, ~cmp, direita, busca)
+          buscar(~T, ~cmp, esquerda, busca),
+          buscar(~T, ~cmp, direita, busca)
         )
       )
   
-def Arvore.travessia(~T: Data, ~S: Data, ~f: @+a: S -> @+x: T -> S, arvore: Arvore<T>, acc: S) -> S:
+def travessia(~T: Data, ~S: Data, ~f: @+a: S -> @+x: T -> S, arvore: Arvore<T>, acc: S) -> S:
   match arvore:
     case Vazia{}:
       acc
     case No{valor, esquerda, direita}:
-      acc1 = Arvore.travessia(~T, ~S, ~f, esquerda, acc)
+      acc1 = travessia(~T, ~S, ~f, esquerda, acc)
       acc2 = f(acc1, valor)
-      Arvore.travessia(~T, ~S, ~f, direita, acc2)
+      travessia(~T, ~S, ~f, direita, acc2)
 
 def valores() -> List<&2, U32>:
   [5, 777, 8, 1, 4, 7, 2, 6, 9, 666, 3]
 
 def main() -> IO(Unit):
-  +arvore = reduce(~U32, ~Arvore<U32>, ~(acc => x => Arvore.inserir(~U32, ~U32.cmp, acc, x)), valores(), Vazia{})
+  +arvore = reduce(~U32, ~Arvore<U32>, ~(acc => x => inserir(~U32, ~U32.cmp, acc, x)), valores(), Vazia{})
 
-  +ordenados = Arvore.travessia(~U32, ~String, ~(acc => x => acc ++ U32.show(x) ++ " "), arvore, "")
-  contem = Arvore.buscar(~U32, ~U32.cmp, arvore, 0)
+  +ordenados = travessia(~U32, ~String, ~(acc => x => acc ++ U32.show(x) ++ " "), arvore, "")
+  contem = buscar(~U32, ~U32.cmp, arvore, 0)
   IO.print(
     "Árvore contém 0? " ++ Maybe.map_or(U32, String, contem, num => U32.show(num), "Não encontrado") ++ "\n" ++
     "Valores em ordem na árvore: " ++ ordenados ++ "\n"
