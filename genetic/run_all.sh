@@ -40,7 +40,11 @@ run_scenario "2" "Ordenar Números (Number Sorting)" "src/scenario2_sorting.bend
 run_scenario "3" "Caixeiro Viajante (TSP)" "src/scenario3_tsp.bend"
 run_scenario "4" "Sudoku Solver" "src/scenario4_sudoku.bend"
 run_scenario "5" "Solver de Horário Escolar" "src/scenario5_horario.bend"
+run_scenario "6" "Problema das 8-Rainhas (N-Queens)" "src/scenario6_nqueens.bend"
+run_scenario "7" "Problema da Mochila (0/1 Knapsack)" "src/scenario7_knapsack.bend"
+run_scenario "8" "Evolução de Strings (Dawkins Weasel)" "src/scenario8_weasel.bend"
+run_scenario "PGA" "Modelo de Ilhas Paralelas (Island Model)" "src/island_ga.bend"
 
 echo "================================================================"
-echo "    TODOS OS 5 CENÁRIOS FORAM EXECUTADOS COM SUCESSO!           "
+echo "    TODOS OS CENÁRIOS FORAM EXECUTADOS COM SUCESSO!             "
 echo "================================================================"

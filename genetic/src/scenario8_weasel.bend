@@ -1,0 +1,270 @@
+import Base
+
+type String16 is Data:
+  S16{
+    c0: U32, c1: U32, c2: U32, c3: U32,
+    c4: U32, c5: U32, c6: U32, c7: U32,
+    c8: U32, c9: U32, c10: U32, c11: U32,
+    c12: U32, c13: U32, c14: U32, c15: U32
+  }
+
+# Xorshift32 PRNG
+def step(+x: U32) -> U32:
+  +b = U32.xor(x, U32.shln(x, 13n))
+  +d = U32.xor(b, U32.shrn(b, 17n))
+  U32.xor(d, U32.shln(d, 5n))
+
+def split.fst(+seed: U32) -> U32:
+  step(seed)
+
+def split.snd(+seed: U32) -> U32:
+  step(U32.xor(step(seed), 2654435761))
+
+def char_match(+c: U32, +target: U32) -> U32:
+  Bool.pick(U32, U32.is_eq(c, target), 1, 0)
+
+# Target: "BEND IS PARALLEL"
+# 'B'=66, 'E'=69, 'N'=78, 'D'=68, ' '=32
+# 'I'=73, 'S'=83, ' '=32
+# 'P'=80, 'A'=65, 'R'=82, 'A'=65
+# 'L'=76, 'L'=76, 'E'=69, 'L'=76
+def fitness(s: String16) -> U32:
+  S16{
+    c0, c1, c2, c3,
+    c4, c5, c6, c7,
+    c8, c9, c10, c11,
+    c12, c13, c14, c15
+  } = s
+  +m0 = char_match(c0, 66)
+  +m1 = char_match(c1, 69)
+  +m2 = char_match(c2, 78)
+  +m3 = char_match(c3, 68)
+  +m4 = char_match(c4, 32)
+  +m5 = char_match(c5, 73)
+  +m6 = char_match(c6, 83)
+  +m7 = char_match(c7, 32)
+  +m8 = char_match(c8, 80)
+  +m9 = char_match(c9, 65)
+  +m10 = char_match(c10, 82)
+  +m11 = char_match(c11, 65)
+  +m12 = char_match(c12, 76)
+  +m13 = char_match(c13, 76)
+  +m14 = char_match(c14, 69)
+  +m15 = char_match(c15, 76)
+
+  (m0 + m1 + m2 + m3 + m4 + m5 + m6 + m7 + m8 + m9 + m10 + m11 + m12 + m13 + m14 + m15 : U32)
+
+type Ind is Data:
+  Ind{gene: String16, fit: U32}
+
+def Ind.gene(ind: Ind) -> String16:
+  Ind{g, _} = ind
+  g
+
+def Ind.fit(ind: Ind) -> U32:
+  Ind{_, f} = ind
+  f
+
+type PopTree is Data:
+  Leaf{ind: Ind}
+  Node{left: PopTree, right: PopTree}
+
+def eval_pop(tree: PopTree) -> PopTree:
+  match tree:
+    case Leaf{ind}:
+      Ind{g, _} = ind
+      +gene = g
+      Leaf{Ind{gene, fitness(gene)}}
+    case Node{left, right}:
+      l r = eval_pop(left) eval_pop(right)
+      Node{l, r}
+
+def pick_better(+a: Ind, +b: Ind) -> Ind:
+  +fa = Ind.fit(a)
+  +fb = Ind.fit(b)
+  Bool.pick(Ind, U32.is_ge(fa, fb), a, b)
+
+def best_pop(tree: PopTree) -> Ind:
+  match tree:
+    case Leaf{ind}:
+      ind
+    case Node{left, right}:
+      bl br = best_pop(left) best_pop(right)
+      pick_better(bl, br)
+
+# Random character: 26 letters ('A'..'Z' = 65..90) or ' ' (32)
+def random_char(+s: U32) -> U32:
+  +r = U32.mod(s, 27)
+  Bool.pick(U32, U32.is_eq(r, 26), 32, (65 + r : U32))
+
+def random_string(+s: U32) -> String16:
+  +s0 = step(s)
+  +s1 = step(s0); +s2 = step(s1); +s3 = step(s2); +s4 = step(s3)
+  +s5 = step(s4); +s6 = step(s5); +s7 = step(s6); +s8 = step(s7)
+  +s9 = step(s8); +s10 = step(s9); +s11 = step(s10); +s12 = step(s11)
+  +s13 = step(s12); +s14 = step(s13); +s15 = step(s14)
+  S16{
+    random_char(s0), random_char(s1), random_char(s2), random_char(s3),
+    random_char(s4), random_char(s5), random_char(s6), random_char(s7),
+    random_char(s8), random_char(s9), random_char(s10), random_char(s11),
+    random_char(s12), random_char(s13), random_char(s14), random_char(s15)
+  }
+
+def gen_pop(d: Nat, +seed: U32) -> PopTree:
+  match d:
+    case 0n:
+      +g = random_string(seed)
+      Leaf{Ind{g, fitness(g)}}
+    case 1n+p:
+      +p = p
+      +seed = seed
+      l r = gen_pop(p, split.fst(seed)) gen_pop(p, split.snd(seed))
+      Node{l, r}
+
+# Set character at index
+def String16.set(s: String16, +idx: U32, +val: U32) -> String16:
+  S16{
+    c0, c1, c2, c3,
+    c4, c5, c6, c7,
+    c8, c9, c10, c11,
+    c12, c13, c14, c15
+  } = s
+  S16{
+    Bool.pick(U32, U32.is_eq(idx, 0), val, c0),
+    Bool.pick(U32, U32.is_eq(idx, 1), val, c1),
+    Bool.pick(U32, U32.is_eq(idx, 2), val, c2),
+    Bool.pick(U32, U32.is_eq(idx, 3), val, c3),
+    Bool.pick(U32, U32.is_eq(idx, 4), val, c4),
+    Bool.pick(U32, U32.is_eq(idx, 5), val, c5),
+    Bool.pick(U32, U32.is_eq(idx, 6), val, c6),
+    Bool.pick(U32, U32.is_eq(idx, 7), val, c7),
+    Bool.pick(U32, U32.is_eq(idx, 8), val, c8),
+    Bool.pick(U32, U32.is_eq(idx, 9), val, c9),
+    Bool.pick(U32, U32.is_eq(idx, 10), val, c10),
+    Bool.pick(U32, U32.is_eq(idx, 11), val, c11),
+    Bool.pick(U32, U32.is_eq(idx, 12), val, c12),
+    Bool.pick(U32, U32.is_eq(idx, 13), val, c13),
+    Bool.pick(U32, U32.is_eq(idx, 14), val, c14),
+    Bool.pick(U32, U32.is_eq(idx, 15), val, c15)
+  }
+
+# Mutate 1 random character
+def mutate_string(+s: String16, +rnd: U32) -> String16:
+  +s1 = step(rnd)
+  +s2 = step(s1)
+  +idx = U32.mod(s1, 16)
+  +new_char = random_char(s2)
+  String16.set(s, idx, new_char)
+
+# Crossover between parent and elite
+def crossover_string(a: String16, b: String16, +mask: U32) -> String16:
+  S16{
+    a0, a1, a2, a3, a4, a5, a6, a7,
+    a8, a9, a10, a11, a12, a13, a14, a15
+  } = a
+  S16{
+    b0, b1, b2, b3, b4, b5, b6, b7,
+    b8, b9, b10, b11, b12, b13, b14, b15
+  } = b
+  S16{
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 1), 0), a0, b0),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 2), 0), a1, b1),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 4), 0), a2, b2),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 8), 0), a3, b3),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 16), 0), a4, b4),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 32), 0), a5, b5),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 64), 0), a6, b6),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 128), 0), a7, b7),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 256), 0), a8, b8),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 512), 0), a9, b9),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 1024), 0), a10, b10),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 2048), 0), a11, b11),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 4096), 0), a12, b12),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 8192), 0), a13, b13),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 16384), 0), a14, b14),
+    Bool.pick(U32, U32.is_ne(U32.and(mask, 32768), 0), a15, b15)
+  }
+
+def reproduce(tree: PopTree, +seed: U32, +elite: Ind) -> PopTree:
+  match tree:
+    case Leaf{ind}:
+      Ind{g, _} = ind
+      Ind{ge, _} = elite
+      +s1 = step(seed)
+      +s2 = step(s1)
+      +crossed = crossover_string(g, ge, s1)
+      +child = mutate_string(crossed, s2)
+      Leaf{Ind{child, fitness(child)}}
+    case Node{left, right}:
+      +seed = seed
+      +elite = elite
+      l r = reproduce(left, split.fst(seed), elite) reproduce(right, split.snd(seed), elite)
+      Node{l, r}
+
+def inject_elite(tree: PopTree, +elite: Ind) -> PopTree:
+  match tree:
+    case Leaf{_}:
+      Leaf{elite}
+    case Node{left, right}:
+      Node{inject_elite(left, elite), right}
+
+def step_gen(tree: PopTree, +seed: U32) -> PopTree:
+  +evaluated = eval_pop(tree)
+  +best = best_pop(evaluated)
+  +next_pop = reproduce(evaluated, seed, best)
+  inject_elite(next_pop, best)
+
+def run_ga(g: Nat, tree: PopTree, +seed: U32) -> PopTree:
+  match g:
+    case 0n:
+      tree
+    case 1n+p:
+      +next_seed = step(seed)
+      +next_tree = step_gen(tree, seed)
+      run_ga(p, next_tree, next_seed)
+
+def String16.show(s: String16) -> String:
+  S16{
+    c0, c1, c2, c3,
+    c4, c5, c6, c7,
+    c8, c9, c10, c11,
+    c12, c13, c14, c15
+  } = s
+  "\"" ++
+  Char.show(Char.from_u32(c0)) ++ Char.show(Char.from_u32(c1)) ++
+  Char.show(Char.from_u32(c2)) ++ Char.show(Char.from_u32(c3)) ++
+  Char.show(Char.from_u32(c4)) ++ Char.show(Char.from_u32(c5)) ++
+  Char.show(Char.from_u32(c6)) ++ Char.show(Char.from_u32(c7)) ++
+  Char.show(Char.from_u32(c8)) ++ Char.show(Char.from_u32(c9)) ++
+  Char.show(Char.from_u32(c10)) ++ Char.show(Char.from_u32(c11)) ++
+  Char.show(Char.from_u32(c12)) ++ Char.show(Char.from_u32(c13)) ++
+  Char.show(Char.from_u32(c14)) ++ Char.show(Char.from_u32(c15)) ++
+  "\""
+
+def main_seed() -> U32:
+  991122
+
+def main() -> IO(Unit):
+  +s0 = main_seed()
+  # Depth 6 = 64 individuals in the parallel population tree
+  +pop0 = gen_pop(6n, s0)
+  +eval0 = eval_pop(pop0)
+  +best0 = best_pop(eval0)
+  +g0 = Ind.gene(best0)
+  +f0 = Ind.fit(best0)
+
+  # Run for 75 generations
+  +pop_final = run_ga(75n, eval0, step(s0))
+  +eval_final = eval_pop(pop_final)
+  +best_fin = best_pop(eval_final)
+  +g_fin = Ind.gene(best_fin)
+  +f_fin = Ind.fit(best_fin)
+
+  IO.print(
+    "=== CENÁRIO 8: EVOLUÇÃO DE STRINGS (DAWKINS WEASEL) ===\n" ++
+    "Alvo: \"BEND IS PARALLEL\" (16 caracteres)\n" ++
+    "População: 64 indivíduos (árvore binária profundidade 6)\n" ++
+    "Geração 0  - " ++ String16.show(g0) ++ " | Fitness: " ++ U32.show(f0) ++ " / 16\n" ++
+    "Geração 75 - " ++ String16.show(g_fin) ++ " | Fitness: " ++ U32.show(f_fin) ++ " / 16\n" ++
+    "Alvo Alcançado? " ++ Bool.show(U32.is_eq(f_fin, 16)) ++ "\n"
+  )
