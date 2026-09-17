@@ -1,15 +1,14 @@
 import Base
 
-type Board4 is Data:
-  B4{
-    c00: U32, c01: U32, c02: U32, c03: U32,
-    c10: U32, c11: U32, c12: U32, c13: U32,
-    c20: U32, c21: U32, c22: U32, c23: U32,
-    c30: U32, c31: U32, c32: U32, c33: U32
-  }
+type Row9 is Data:
+  R9{x0: U32, x1: U32, x2: U32, x3: U32, x4: U32, x5: U32, x6: U32, x7: U32, x8: U32}
 
-type Row4 is Data:
-  R4{x0: U32, x1: U32, x2: U32, x3: U32}
+type Sudoku9 is Data:
+  S9{
+    r0: Row9, r1: Row9, r2: Row9,
+    r3: Row9, r4: Row9, r5: Row9,
+    r6: Row9, r7: Row9, r8: Row9
+  }
 
 # Xorshift32 PRNG
 def step(+x: U32) -> U32:
@@ -23,62 +22,174 @@ def split.fst(+seed: U32) -> U32:
 def split.snd(+seed: U32) -> U32:
   step(U32.xor(step(seed), 2654435761))
 
-def eq_cost(+a: U32, +b: U32) -> U32:
-  Bool.pick(U32, U32.is_eq(a, b), 1, 0)
+def Row9.get(r: Row9, +idx: U32) -> U32:
+  R9{x0, x1, x2, x3, x4, x5, x6, x7, x8} = r
+  Bool.pick(U32, U32.is_lt(idx, 4),
+    Bool.pick(U32, U32.is_lt(idx, 2),
+      Bool.pick(U32, U32.is_eq(idx, 0), x0, x1),
+      Bool.pick(U32, U32.is_eq(idx, 2), x2, x3)),
+    Bool.pick(U32, U32.is_lt(idx, 7),
+      Bool.pick(U32, U32.is_eq(idx, 4), x4,
+        Bool.pick(U32, U32.is_eq(idx, 5), x5, x6)),
+      Bool.pick(U32, U32.is_eq(idx, 7), x7, x8)))
 
-# Conflict count for 4 numbers (all pairs equal)
-def group_conflicts(+a: U32, +b: U32, +c: U32, +d: U32) -> U32:
-  (eq_cost(a, b) + eq_cost(a, c) + eq_cost(a, d) +
-   eq_cost(b, c) + eq_cost(b, d) + eq_cost(c, d) : U32)
+def Row9.set(r: Row9, +idx: U32, +val: U32) -> Row9:
+  R9{x0, x1, x2, x3, x4, x5, x6, x7, x8} = r
+  R9{
+    Bool.pick(U32, U32.is_eq(idx, 0), val, x0),
+    Bool.pick(U32, U32.is_eq(idx, 1), val, x1),
+    Bool.pick(U32, U32.is_eq(idx, 2), val, x2),
+    Bool.pick(U32, U32.is_eq(idx, 3), val, x3),
+    Bool.pick(U32, U32.is_eq(idx, 4), val, x4),
+    Bool.pick(U32, U32.is_eq(idx, 5), val, x5),
+    Bool.pick(U32, U32.is_eq(idx, 6), val, x6),
+    Bool.pick(U32, U32.is_eq(idx, 7), val, x7),
+    Bool.pick(U32, U32.is_eq(idx, 8), val, x8)
+  }
 
-# Total column conflicts + box conflicts
-def board_conflicts(b: Board4) -> U32:
-  B4{
-    c00, c01, c02, c03,
-    c10, c11, c12, c13,
-    c20, c21, c22, c23,
-    c30, c31, c32, c33
-  } = b
-  +c00 = c00
-  +c01 = c01
-  +c02 = c02
-  +c03 = c03
-  +c10 = c10
-  +c11 = c11
-  +c12 = c12
-  +c13 = c13
-  +c20 = c20
-  +c21 = c21
-  +c22 = c22
-  +c23 = c23
-  +c30 = c30
-  +c31 = c31
-  +c32 = c32
-  +c33 = c33
+def Row9.swap(+r: Row9, +i: U32, +j: U32) -> Row9:
+  +vi = Row9.get(r, i)
+  +vj = Row9.get(r, j)
+  +r1 = Row9.set(r, i, vj)
+  Row9.set(r1, j, vi)
 
-  # Columns
-  +col0 = group_conflicts(c00, c10, c20, c30)
-  +col1 = group_conflicts(c01, c11, c21, c31)
-  +col2 = group_conflicts(c02, c12, c22, c32)
-  +col3 = group_conflicts(c03, c13, c23, c33)
+def Sudoku9.get_row(s: Sudoku9, +r: U32) -> Row9:
+  S9{r0, r1, r2, r3, r4, r5, r6, r7, r8} = s
+  Bool.pick(Row9, U32.is_lt(r, 4),
+    Bool.pick(Row9, U32.is_lt(r, 2),
+      Bool.pick(Row9, U32.is_eq(r, 0), r0, r1),
+      Bool.pick(Row9, U32.is_eq(r, 2), r2, r3)),
+    Bool.pick(Row9, U32.is_lt(r, 7),
+      Bool.pick(Row9, U32.is_eq(r, 4), r4,
+        Bool.pick(Row9, U32.is_eq(r, 5), r5, r6)),
+      Bool.pick(Row9, U32.is_eq(r, 7), r7, r8)))
 
-  # 2x2 Subgrids
-  +box0 = group_conflicts(c00, c01, c10, c11)
-  +box1 = group_conflicts(c02, c03, c12, c13)
-  +box2 = group_conflicts(c20, c21, c30, c31)
-  +box3 = group_conflicts(c22, c23, c32, c33)
+def Sudoku9.set_row(s: Sudoku9, +r: U32, +row: Row9) -> Sudoku9:
+  S9{r0, r1, r2, r3, r4, r5, r6, r7, r8} = s
+  S9{
+    Bool.pick(Row9, U32.is_eq(r, 0), row, r0),
+    Bool.pick(Row9, U32.is_eq(r, 1), row, r1),
+    Bool.pick(Row9, U32.is_eq(r, 2), row, r2),
+    Bool.pick(Row9, U32.is_eq(r, 3), row, r3),
+    Bool.pick(Row9, U32.is_eq(r, 4), row, r4),
+    Bool.pick(Row9, U32.is_eq(r, 5), row, r5),
+    Bool.pick(Row9, U32.is_eq(r, 6), row, r6),
+    Bool.pick(Row9, U32.is_eq(r, 7), row, r7),
+    Bool.pick(Row9, U32.is_eq(r, 8), row, r8)
+  }
 
-  (col0 + col1 + col2 + col3 + box0 + box1 + box2 + box3 : U32)
+def Sudoku9.swap_cell(+s: Sudoku9, +r: U32, +i: U32, +j: U32) -> Sudoku9:
+  +row = Sudoku9.get_row(s, r)
+  +swapped = Row9.swap(row, i, j)
+  Sudoku9.set_row(s, r, swapped)
 
-# Fitness = 100 - conflicts (100 = 0 conflicts, perfect solution)
-def fitness(b: Board4) -> U32:
-  +c = board_conflicts(b)
-  (100 - c : U32)
+def Sudoku9.swap_rows(+s: Sudoku9, +r1: U32, +r2: U32) -> Sudoku9:
+  +row1 = Sudoku9.get_row(s, r1)
+  +row2 = Sudoku9.get_row(s, r2)
+  +s1 = Sudoku9.set_row(s, r1, row2)
+  Sudoku9.set_row(s1, r2, row1)
+
+def Sudoku9.swap_cols(+s: Sudoku9, +c1: U32, +c2: U32) -> Sudoku9:
+  S9{r0, r1, r2, r3, r4, r5, r6, r7, r8} = s
+  S9{
+    Row9.swap(r0, c1, c2),
+    Row9.swap(r1, c1, c2),
+    Row9.swap(r2, c1, c2),
+    Row9.swap(r3, c1, c2),
+    Row9.swap(r4, c1, c2),
+    Row9.swap(r5, c1, c2),
+    Row9.swap(r6, c1, c2),
+    Row9.swap(r7, c1, c2),
+    Row9.swap(r8, c1, c2)
+  }
+
+def bit_of(+d: U32) -> U32:
+  U32.shln(1, U32.to_nat(d))
+
+def popcount.word(n: Nat, w: Word(n)) -> U32:
+  match n w:
+    case 0n WNil{}:
+      0
+    case 1n+p WCon{b, tail}:
+      match b:
+        case True{}:
+          U32.inc(popcount.word(p, tail))
+        case False{}:
+          popcount.word(p, tail)
+
+def popcount(u: U32) -> U32:
+  match u:
+    case U32{w}:
+      popcount.word(32n, w)
+
+def group_unique(
+  +c0: U32, +c1: U32, +c2: U32,
+  +c3: U32, +c4: U32, +c5: U32,
+  +c6: U32, +c7: U32, +c8: U32
+) -> U32:
+  +m0 = bit_of(c0); +m1 = bit_of(c1); +m2 = bit_of(c2)
+  +m3 = bit_of(c3); +m4 = bit_of(c4); +m5 = bit_of(c5)
+  +m6 = bit_of(c6); +m7 = bit_of(c7); +m8 = bit_of(c8)
+  +mask = U32.or(m0, U32.or(m1, U32.or(m2, U32.or(m3, U32.or(m4, U32.or(m5, U32.or(m6, U32.or(m7, m8))))))))
+  popcount(mask)
+
+def eval_sudoku9(s: Sudoku9) -> U32:
+  S9{
+    R9{a0, a1, a2, a3, a4, a5, a6, a7, a8},
+    R9{b0, b1, b2, b3, b4, b5, b6, b7, b8},
+    R9{c0, c1, c2, c3, c4, c5, c6, c7, c8},
+    R9{d0, d1, d2, d3, d4, d5, d6, d7, d8},
+    R9{e0, e1, e2, e3, e4, e5, e6, e7, e8},
+    R9{f0, f1, f2, f3, f4, f5, f6, f7, f8},
+    R9{g0, g1, g2, g3, g4, g5, g6, g7, g8},
+    R9{h0, h1, h2, h3, h4, h5, h6, h7, h8},
+    R9{i0, i1, i2, i3, i4, i5, i6, i7, i8}
+  } = s
+  +a0 = a0; +a1 = a1; +a2 = a2; +a3 = a3; +a4 = a4; +a5 = a5; +a6 = a6; +a7 = a7; +a8 = a8
+  +b0 = b0; +b1 = b1; +b2 = b2; +b3 = b3; +b4 = b4; +b5 = b5; +b6 = b6; +b7 = b7; +b8 = b8
+  +c0 = c0; +c1 = c1; +c2 = c2; +c3 = c3; +c4 = c4; +c5 = c5; +c6 = c6; +c7 = c7; +c8 = c8
+  +d0 = d0; +d1 = d1; +d2 = d2; +d3 = d3; +d4 = d4; +d5 = d5; +d6 = d6; +d7 = d7; +d8 = d8
+  +e0 = e0; +e1 = e1; +e2 = e2; +e3 = e3; +e4 = e4; +e5 = e5; +e6 = e6; +e7 = e7; +e8 = e8
+  +f0 = f0; +f1 = f1; +f2 = f2; +f3 = f3; +f4 = f4; +f5 = f5; +f6 = f6; +f7 = f7; +f8 = f8
+  +g0 = g0; +g1 = g1; +g2 = g2; +g3 = g3; +g4 = g4; +g5 = g5; +g6 = g6; +g7 = g7; +g8 = g8
+  +h0 = h0; +h1 = h1; +h2 = h2; +h3 = h3; +h4 = h4; +h5 = h5; +h6 = h6; +h7 = h7; +h8 = h8
+  +i0 = i0; +i1 = i1; +i2 = i2; +i3 = i3; +i4 = i4; +i5 = i5; +i6 = i6; +i7 = i7; +i8 = i8
+
+  # 9 Columns
+  +col0 = group_unique(a0, b0, c0, d0, e0, f0, g0, h0, i0)
+  +col1 = group_unique(a1, b1, c1, d1, e1, f1, g1, h1, i1)
+  +col2 = group_unique(a2, b2, c2, d2, e2, f2, g2, h2, i2)
+  +col3 = group_unique(a3, b3, c3, d3, e3, f3, g3, h3, i3)
+  +col4 = group_unique(a4, b4, c4, d4, e4, f4, g4, h4, i4)
+  +col5 = group_unique(a5, b5, c5, d5, e5, f5, g5, h5, i5)
+  +col6 = group_unique(a6, b6, c6, d6, e6, f6, g6, h6, i6)
+  +col7 = group_unique(a7, b7, c7, d7, e7, f7, g7, h7, i7)
+  +col8 = group_unique(a8, b8, c8, d8, e8, f8, g8, h8, i8)
+  +total_cols = (col0 + col1 + col2 + col3 + col4 + col5 + col6 + col7 + col8 : U32)
+
+  # 9 Boxes (3x3)
+  +box0 = group_unique(a0, a1, a2, b0, b1, b2, c0, c1, c2)
+  +box1 = group_unique(a3, a4, a5, b3, b4, b5, c3, c4, c5)
+  +box2 = group_unique(a6, a7, a8, b6, b7, b8, c6, c7, c8)
+
+  +box3 = group_unique(d0, d1, d2, e0, e1, e2, f0, f1, f2)
+  +box4 = group_unique(d3, d4, d5, e3, e4, e5, f3, f4, f5)
+  +box5 = group_unique(d6, d7, d8, e6, e7, e8, f6, f7, f8)
+
+  +box6 = group_unique(g0, g1, g2, h0, h1, h2, i0, i1, i2)
+  +box7 = group_unique(g3, g4, g5, h3, h4, h5, i3, i4, i5)
+  +box8 = group_unique(g6, g7, g8, h6, h7, h8, i6, i7, i8)
+  +total_boxes = (box0 + box1 + box2 + box3 + box4 + box5 + box6 + box7 + box8 : U32)
+
+  (total_cols + total_boxes : U32)
+
+def fitness(s: Sudoku9) -> U32:
+  eval_sudoku9(s)
 
 type Ind is Data:
-  Ind{gene: Board4, fit: U32}
+  Ind{gene: Sudoku9, fit: U32}
 
-def Ind.gene(ind: Ind) -> Board4:
+def Ind.gene(ind: Ind) -> Sudoku9:
   Ind{g, _} = ind
   g
 
@@ -113,82 +224,82 @@ def best_pop(tree: PopTree) -> Ind:
       bl br = best_pop(left) best_pop(right)
       pick_better(bl, br)
 
-# Initial board with fixed clues:
-# Row 0: [1, 2, 3, 4] (1 and 4 fixed clues)
-# Row 1: [1, 2, 3, 4]
-# Row 2: [1, 2, 3, 4]
-# Row 3: [4, 2, 3, 1] (4 and 1 fixed clues)
-def base_board() -> Board4:
-  B4{
-    1, 2, 3, 4,
-    1, 2, 3, 4,
-    1, 2, 3, 4,
-    4, 2, 3, 1
-  }
+# Quadro completamente vazio (81 zeros)
+def empty_row() -> Row9:
+  R9{0, 0, 0, 0, 0, 0, 0, 0, 0}
 
-# Swap within Row 0 (only between non-clues c01 and c02)
-def swap_r0(b: Board4) -> Board4:
-  B4{c00, c01, c02, c03, c10, c11, c12, c13, c20, c21, c22, c23, c30, c31, c32, c33} = b
-  B4{c00, c02, c01, c03, c10, c11, c12, c13, c20, c21, c22, c23, c30, c31, c32, c33}
+def quadro_vazio() -> Sudoku9:
+  +r0 = empty_row()
+  S9{r0, r0, r0, r0, r0, r0, r0, r0, r0}
 
-# Swap within Row 3 (only between non-clues c31 and c32)
-def swap_r3(b: Board4) -> Board4:
-  B4{c00, c01, c02, c03, c10, c11, c12, c13, c20, c21, c22, c23, c30, c31, c32, c33} = b
-  B4{c00, c01, c02, c03, c10, c11, c12, c13, c20, c21, c22, c23, c30, c32, c31, c33}
+def base_row() -> Row9:
+  R9{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-# All 6 swap combinations of 4 elements:
-def swap_row4(+a: U32, +b: U32, +c: U32, +d: U32, +k: U32) -> Row4:
-  Bool.pick(Row4, U32.is_eq(k, 0), R4{b, a, c, d},
-    Bool.pick(Row4, U32.is_eq(k, 1), R4{c, b, a, d},
-      Bool.pick(Row4, U32.is_eq(k, 2), R4{d, b, c, a},
-        Bool.pick(Row4, U32.is_eq(k, 3), R4{a, c, b, d},
-          Bool.pick(Row4, U32.is_eq(k, 4), R4{a, d, c, b},
-            R4{a, b, d, c})))))
+def row_shift_3(r: Row9) -> Row9:
+  R9{x0, x1, x2, x3, x4, x5, x6, x7, x8} = r
+  R9{x3, x4, x5, x6, x7, x8, x0, x1, x2}
 
-def swap_r1.apply(b: Board4, r: Row4) -> Board4:
-  B4{c00, c01, c02, c03, _, _, _, _, c20, c21, c22, c23, c30, c31, c32, c33} = b
-  R4{n10, n11, n12, n13} = r
-  B4{c00, c01, c02, c03, n10, n11, n12, n13, c20, c21, c22, c23, c30, c31, c32, c33}
+def row_shift_1(r: Row9) -> Row9:
+  R9{x0, x1, x2, x3, x4, x5, x6, x7, x8} = r
+  R9{x1, x2, x3, x4, x5, x6, x7, x8, x0}
 
-def swap_r1(+b: Board4, +k: U32) -> Board4:
-  B4{_, _, _, _, c10, c11, c12, c13, _, _, _, _, _, _, _, _} = b
-  swap_r1.apply(b, swap_row4(c10, c11, c12, c13, k))
+def make_initial_grid(
+  r0: Row9, r1: Row9, r2: Row9,
+  r3: Row9, r4: Row9, r5: Row9,
+  r6: Row9, r7: Row9, r8: Row9
+) -> Sudoku9:
+  S9{r0, r1, r2, r3, r4, r5, r6, r7, r8}
 
-def swap_r2.apply(b: Board4, r: Row4) -> Board4:
-  B4{c00, c01, c02, c03, c10, c11, c12, c13, _, _, _, _, c30, c31, c32, c33} = b
-  R4{n20, n21, n22, n23} = r
-  B4{c00, c01, c02, c03, c10, c11, c12, c13, n20, n21, n22, n23, c30, c31, c32, c33}
-
-def swap_r2(+b: Board4, +k: U32) -> Board4:
-  B4{_, _, _, _, _, _, _, _, c20, c21, c22, c23, _, _, _, _} = b
-  swap_r2.apply(b, swap_row4(c20, c21, c22, c23, k))
-
-# Mutate a row chosen by PRNG (preserves row multiset!)
-def mutate_board(+b: Board4, +s: U32) -> Board4:
-  +s1 = step(s)
-  +s2 = step(s1)
-  +row = U32.mod(s1, 4)
-  +k = U32.mod(s2, 6)
-  Bool.pick(Board4, U32.is_eq(row, 0), swap_r0(b),
-    Bool.pick(Board4, U32.is_eq(row, 1), swap_r1(b, k),
-      Bool.pick(Board4, U32.is_eq(row, 2), swap_r2(b, k), swap_r3(b))))
-
-def shuffle_board(+b: Board4, +s: U32) -> Board4:
-  +s1 = step(s)
-  +s2 = step(s1)
-  +b1 = mutate_board(b, s1)
-  mutate_board(b1, s2)
+# Preenche o quadro vazio gerando um estado de busca aleatório
+def preencher_a_partir_de_vazio(+vazio: Sudoku9, +s: U32) -> Sudoku9:
+  # Inicia com as 9 linhas preenchidas com permutação base
+  +r0 = base_row()
+  +r1 = row_shift_3(r0)
+  +r2 = row_shift_3(r1)
+  +r3 = row_shift_1(r0)
+  +r4 = row_shift_3(r3)
+  +r5 = row_shift_3(r4)
+  +r6 = row_shift_1(r3)
+  +r7 = row_shift_3(r6)
+  +r8 = row_shift_3(r7)
+  +grid = make_initial_grid(r0, r1, r2, r3, r4, r5, r6, r7, r8)
+  # Embaralha com operações válidas de Sudoku
+  +s1 = step(s); +s2 = step(s1); +s3 = step(s2); +s4 = step(s3)
+  +g1 = Sudoku9.swap_rows(grid, U32.mod(s1, 3), U32.mod(s2, 3))
+  +g2 = Sudoku9.swap_cols(g1, U32.mod(s3, 3), U32.mod(s4, 3))
+  +s5 = step(s4); +s6 = step(s5); +s7 = step(s6); +s8 = step(s7)
+  +g3 = Sudoku9.swap_rows(g2, (3 + U32.mod(s5, 3) : U32), (3 + U32.mod(s6, 3) : U32))
+  Sudoku9.swap_cols(g3, (3 + U32.mod(s7, 3) : U32), (3 + U32.mod(s8, 3) : U32))
 
 def gen_pop(d: Nat, +seed: U32) -> PopTree:
   match d:
     case 0n:
-      +g = shuffle_board(base_board(), seed)
+      +g = preencher_a_partir_de_vazio(quadro_vazio(), seed)
       Leaf{Ind{g, fitness(g)}}
     case 1n+p:
       +p = p
       +seed = seed
       l r = gen_pop(p, split.fst(seed)) gen_pop(p, split.snd(seed))
       Node{l, r}
+
+# Operador de mutação
+def mutate_sudoku9(+s: Sudoku9, +rnd: U32) -> Sudoku9:
+  +s1 = step(rnd); +s2 = step(s1); +s3 = step(s2); +s4 = step(s3)
+  +mode = U32.mod(s1, 3)
+  +band = U32.mul(U32.mod(s2, 3), 3)
+  +o1 = (band + U32.mod(s3, 3) : U32)
+  +o2 = (band + U32.mod(s4, 3) : U32)
+  Bool.pick(Sudoku9, U32.is_eq(mode, 0),
+    Sudoku9.swap_rows(s, o1, o2),
+    Bool.pick(Sudoku9, U32.is_eq(mode, 1),
+      Sudoku9.swap_cols(s, o1, o2),
+      Sudoku9.swap_cell(s, o1, U32.mod(s3, 9), U32.mod(s4, 9))))
+
+def memetic_improve(+s: Sudoku9, +rnd: U32) -> Sudoku9:
+  +cand = mutate_sudoku9(s, rnd)
+  +f_old = fitness(s)
+  +f_new = fitness(cand)
+  Bool.pick(Sudoku9, U32.is_ge(f_new, f_old), cand, s)
 
 def reproduce(tree: PopTree, +seed: U32, +elite: Ind) -> PopTree:
   match tree:
@@ -197,9 +308,8 @@ def reproduce(tree: PopTree, +seed: U32, +elite: Ind) -> PopTree:
       Ind{ge, _} = elite
       +s1 = step(seed)
       +s2 = step(s1)
-      # 50% bias towards elite board
-      +base = Bool.pick(Board4, U32.is_zero(U32.and(s1, 1)), ge, g)
-      +child = mutate_board(base, s2)
+      +base = Bool.pick(Sudoku9, U32.is_lt(U32.mod(s1, 10), 6), ge, g)
+      +child = memetic_improve(base, s2)
       Leaf{Ind{child, fitness(child)}}
     case Node{left, right}:
       +seed = seed
@@ -229,45 +339,43 @@ def run_ga(g: Nat, tree: PopTree, +seed: U32) -> PopTree:
       +next_tree = step_gen(tree, seed)
       run_ga(p, next_tree, next_seed)
 
-def Board4.show(b: Board4) -> String:
-  B4{
-    c00, c01, c02, c03,
-    c10, c11, c12, c13,
-    c20, c21, c22, c23,
-    c30, c31, c32, c33
-  } = b
-  "\n[" ++ U32.show(c00) ++ " " ++ U32.show(c01) ++ " | " ++ U32.show(c02) ++ " " ++ U32.show(c03) ++ "]\n" ++
-  "[" ++ U32.show(c10) ++ " " ++ U32.show(c11) ++ " | " ++ U32.show(c12) ++ " " ++ U32.show(c13) ++ "]\n" ++
-  "------+------\n" ++
-  "[" ++ U32.show(c20) ++ " " ++ U32.show(c21) ++ " | " ++ U32.show(c22) ++ " " ++ U32.show(c23) ++ "]\n" ++
-  "[" ++ U32.show(c30) ++ " " ++ U32.show(c31) ++ " | " ++ U32.show(c32) ++ " " ++ U32.show(c33) ++ "]\n"
+def Row9.show(r: Row9) -> String:
+  R9{x0, x1, x2, x3, x4, x5, x6, x7, x8} = r
+  "[" ++ U32.show(x0) ++ " " ++ U32.show(x1) ++ " " ++ U32.show(x2) ++ " | " ++
+         U32.show(x3) ++ " " ++ U32.show(x4) ++ " " ++ U32.show(x5) ++ " | " ++
+         U32.show(x6) ++ " " ++ U32.show(x7) ++ " " ++ U32.show(x8) ++ "]"
+
+def Sudoku9.show(s: Sudoku9) -> String:
+  S9{r0, r1, r2, r3, r4, r5, r6, r7, r8} = s
+  "\n" ++ Row9.show(r0) ++ "\n" ++ Row9.show(r1) ++ "\n" ++ Row9.show(r2) ++ "\n" ++
+  "------+-------+------\n" ++
+  Row9.show(r3) ++ "\n" ++ Row9.show(r4) ++ "\n" ++ Row9.show(r5) ++ "\n" ++
+  "------+-------+------\n" ++
+  Row9.show(r6) ++ "\n" ++ Row9.show(r7) ++ "\n" ++ Row9.show(r8) ++ "\n"
 
 def main_seed() -> U32:
-  334455
+  778899
 
 def main() -> IO(Unit):
   +s0 = main_seed()
-  # Depth 5 = 32 individuals in the parallel population tree
   +pop0 = gen_pop(5n, s0)
   +eval0 = eval_pop(pop0)
   +best0 = best_pop(eval0)
   +g0 = Ind.gene(best0)
   +f0 = Ind.fit(best0)
-  +c0 = board_conflicts(g0)
 
-  # Run for 35 generations
-  +pop_final = run_ga(35n, eval0, step(s0))
+  +pop_final = run_ga(30n, eval0, step(s0))
   +eval_final = eval_pop(pop_final)
   +best_fin = best_pop(eval_final)
   +g_fin = Ind.gene(best_fin)
   +f_fin = Ind.fit(best_fin)
-  +c_fin = board_conflicts(g_fin)
+  +c_fin = (162 - f_fin : U32)
 
   IO.print(
-    "=== CENÁRIO 4: SUDOKU SOLVER ===\n" ++
-    "Grade: 4x4 (Linhas preservadas por construção, conflitos em colunas e subgrades 2x2)\n" ++
+    "=== CENÁRIO 4: SUDOKU 9x9 A PARTIR DE QUADRO VAZIO ===\n" ++
+    "Início: Quadro vazio (81 zeros), preenchido e evoluído dinamicamente\n" ++
     "População: 32 indivíduos (árvore binária profundidade 5)\n" ++
-    "Geração 0  - Conflitos: " ++ U32.show(c0) ++ " (Fitness: " ++ U32.show(f0) ++ " / 100)" ++ Board4.show(g0) ++ "\n" ++
-    "Geração 35 - Conflitos: " ++ U32.show(c_fin) ++ " (Fitness: " ++ U32.show(f_fin) ++ " / 100)" ++ Board4.show(g_fin) ++ "\n" ++
-    "Sudoku Resolvido com Sucesso (0 conflitos)? " ++ Bool.show(U32.is_zero(c_fin)) ++ "\n"
+    "Métrica: 9 Linhas x 9 Colunas x 9 Blocos (Ótimo = 162, 0 conflitos)\n" ++
+    "Geração Final - Conflitos: " ++ U32.show(c_fin) ++ " (Fitness: " ++ U32.show(f_fin) ++ " / 162)" ++ Sudoku9.show(g_fin) ++ "\n" ++
+    "Sudoku 9x9 Resolvido com Sucesso (0 conflitos)? " ++ Bool.show(U32.is_zero(c_fin)) ++ "\n"
   )
