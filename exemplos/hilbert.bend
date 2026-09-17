@@ -21,17 +21,6 @@ type Dir is Data:
   Sul{}
   Oeste{}
 
-def Dir.show(dir: Dir) -> String:
-  match dir:
-    case Norte{}:
-      "Norte"
-    case Leste{}:
-      "Leste"
-    case Sul{}:
-      "Sul"
-    case Oeste{}:
-      "Oeste"
-
 # -
 def Dir.horario(dir: Dir) -> Dir:
   match dir:
@@ -56,15 +45,21 @@ def Dir.anti_horario(dir: Dir) -> Dir:
     case Oeste{}:
       Sul{}
 
+def Dir.is_eq(a: Dir, b: Dir) -> Bool:
+  match a, b:
+    case Norte{}, Norte{}:
+      True{}
+    case Leste{}, Leste{}:
+      True{}
+    case Sul{}, Sul{}:
+      True{}
+    case Oeste{}, Oeste{}:
+      True{}
+    case _ _:
+      False{}
+
 type Vec2 is Data:
   Vec2{x: U32, y: U32}
-
-def Vec2.from_nat(x: Nat, y: Nat) -> Vec2:
-  Vec2{U32.from_nat(x), U32.from_nat(y)}
-
-def Vec2.show(vec: Vec2) -> String:
-  Vec2{x, y} = vec
-  U32.show(x) ++ ", " ++ U32.show(y)
 
 # F
 def Vec2.andar(vec: Vec2, dir: Dir) -> Vec2:
@@ -81,28 +76,28 @@ def Vec2.andar(vec: Vec2, dir: Dir) -> Vec2:
 
 type Estado is Data:
   EstadoFim{}
-  Estado{pos: Vec2, dir: Dir, acc: Estado}
+  Estado{pos: Vec2, dir: Dir, chegada: Dir, acc: Estado}
 
 def esquerda(estado: Estado) -> Estado:
     match estado:
     case EstadoFim{}:
       EstadoFim{}
-    case Estado{pos, dir, acc}:
-      Estado{pos, Dir.anti_horario(dir), acc}
+    case Estado{pos, dir, chegada, acc}:
+      Estado{pos, Dir.anti_horario(dir), chegada, acc}
 
 def direita(estado: Estado) -> Estado:
     match estado:
     case EstadoFim{}:
       EstadoFim{}
-    case Estado{pos, dir, acc}:
-      Estado{pos, Dir.horario(dir), acc}
+    case Estado{pos, dir, chegada, acc}:
+      Estado{pos, Dir.horario(dir), chegada, acc}
 
 def frente(+estado: Estado) -> Estado:
     match estado:
     case EstadoFim{}:
       EstadoFim{}
-    case Estado{pos, dir, acc}:
-      Estado{Vec2.andar(pos, dir), dir, estado}
+    case Estado{pos, dir, chegada, acc}:
+      Estado{Vec2.andar(pos, dir), dir, dir, estado}
 
 # iter_a e iter_b se chamam mutuamente, mas no Bend2 não dá para fazer, então por isso um função só
 def iter(+n: Nat, a_lado: Bool, estado: Estado) -> Estado:
@@ -141,9 +136,9 @@ def iter(+n: Nat, a_lado: Bool, estado: Estado) -> Estado:
           estado
 
 def Estado.inicial() -> Estado:
-  Estado{Vec2{0, 0}, Leste{}, EstadoFim{}}
+  Estado{Vec2{0, 0}, Leste{}, Leste{}, EstadoFim{}}
 
-def draw.char(last: Dir, dir: Dir) -> String:
+def build_tree.char(last: Dir, dir: Dir) -> String:
   match last, dir:
     case Leste{}, Leste{}:
       "─"
@@ -178,11 +173,11 @@ def draw.char(last: Dir, dir: Dir) -> String:
       "?"
 
 type Vec2Char is Data:
-  Vec2Char{pos: Vec2, char: String}
+  Vec2Char{pos: Vec2, char: String, liga_esquerda: Bool}
 
 def Vec2Char.cmp(a: Vec2Char, b: Vec2Char) -> Cmp:
   match a b:
-    case Vec2Char{Vec2{x1, y1}, _} Vec2Char{Vec2{x2, y2}, _}:
+    case Vec2Char{Vec2{x1, y1}, _, _} Vec2Char{Vec2{x2, y2}, _, _}:
       +x1 = x1
       +x2 = x2
       +y1 = y1
@@ -202,68 +197,57 @@ def Vec2Char.cmp(a: Vec2Char, b: Vec2Char) -> Cmp:
         )
       )
 
-def draw.go(result: Dir & A.Arvore<Vec2Char>, +pos: Vec2, +dir: Dir) -> Dir & A.Arvore<Vec2Char>:
-  (last, tree) = result
-  +last = last
-  tree = A.inserir(~Vec2Char, ~Vec2Char.cmp, tree, Vec2Char{pos, draw.char(last, dir)})
-  (dir, tree)
-
-def draw(estado: Estado, first: Dir) -> Dir & A.Arvore<Vec2Char>:
+def build_tree(estado: Estado) -> A.Arvore<Vec2Char>:
   match estado:
     case EstadoFim{}:
-      (first, A.Vazia{})
-    case Estado{pos, dir, acc}:
-      result = draw(acc, first)
-      draw.go(result, pos, dir)
+      A.Vazia{}
+    case Estado{pos, dir, chegada, acc}:
+      +dir = dir
+      +chegada = chegada
 
-def draw.tree.char(+valor: Maybe<&2, Vec2Char>, result: String & String) -> String & String:
+      char = build_tree.char(chegada, dir)
+      liga_esquerda = Dir.is_eq(chegada, Leste{}) || Dir.is_eq(dir, Oeste{})
+      A.inserir(~Vec2Char, ~Vec2Char.cmp, 
+        build_tree(acc), 
+        Vec2Char{pos, char, liga_esquerda}
+      )
+
+# liga_esquerda indica se deve ter o traço conectando ou não, para ficar quadrado no terminal
+def draw.tree.char(+valor: Maybe<&2, Vec2Char>, +line: String) -> String:
   match valor:
     case None{}:
-      (_, line) = result
-      ("\n", line ++ "\n")
-    case Some{Vec2Char{_, char}}:
-      (prev_char, line) = result
-      +prev_char = prev_char
-      +line = line
-      new_line = pick(String, String.eq(prev_char, "─") || String.eq(prev_char, "┌") || String.eq(prev_char, "└"),
-        line ++ "─" ++ char,
-        line ++ " " ++ char
-      )
-      (char, new_line)
+      line ++ "?"
+    case Some{Vec2Char{_, char, liga_esquerda}}:
+      match line:
+        case "":
+          char
+        case _:
+          pick(String, liga_esquerda, line ++ "─" ++ char, line ++ " " ++ char)
 
-def draw.tree.line(+x: Nat, +y: Nat, +tree: A.Arvore<Vec2Char>, result: String & String) -> String & String:
-  match x:
+def draw.tree.line(+n: Nat, +x: U32, +y: U32, +tree: A.Arvore<Vec2Char>, line: String) -> String:
+  match n:
     case 0n:
-      (_, line) = result
-      ("", line)
+      line
     case 1n+p:
-      +pos = Vec2.from_nat((x - 1n : Nat), (y - 1n : Nat))
-      result = draw.tree.line(p, y, tree, result)
-      draw.tree.char(A.buscar(~Vec2Char, ~Vec2Char.cmp, tree, Vec2Char{pos, ""}), result)
+      line = draw.tree.line(p, (x - 1 : U32), y, tree, line)
+      draw.tree.char(A.buscar(~Vec2Char, ~Vec2Char.cmp, tree, Vec2Char{Vec2{(x - 1 : U32),(y - 1 : U32)}, "", False{}}), line)
 
 # Trafega y de baixo para cima, e x da esquerda para direita
-def draw.tree(+y: Nat, +x: Nat, +tree: A.Arvore<Vec2Char>, result: String & String) -> String & String:
-  match y:
+def draw.tree(+n: Nat, +y: U32, +largura: U32, +tree: A.Arvore<Vec2Char>, result: String) -> String:
+  match n:
     case 0n:
       result
     case 1n+p:
-      (prev_char, line) = result
-      result = draw.tree.line(x, 1n+p, tree, ("", line))
-      result = draw.tree.char(None{}, result)
-      draw.tree(p, x, tree, result)
+      line = draw.tree.line(U32.to_nat(largura), largura, y, tree, "")
+      draw.tree(p, (y - 1 : U32), largura, tree, result ++ line ++ "\n")
 
-def draw.tree.fin(result: String & String) -> String:
-  (_, line) = result
-  line
-
-def draw.fin(profundidade: U32, last: Dir & A.Arvore<Vec2Char>) -> String:
-  (_, tree) = last
+def draw.fin(profundidade: U32, tree: A.Arvore<Vec2Char>) -> String:
   +largura = powerOfTwo(U32.to_nat(profundidade), 1)
-  draw.tree.fin(draw.tree(U32.to_nat(largura), U32.to_nat(largura), tree, ("", "")))
+  draw.tree(U32.to_nat(largura), largura, largura, tree, "")
 
 def profundidade() -> U32:
-  4
+  3
 
 def main() -> IO(Unit):
   estado = iter(U32.to_nat(profundidade()), True{}, Estado.inicial())
-  IO.write(draw.fin(profundidade(), draw(estado, Leste{})))
+  IO.write(draw.fin(profundidade(), build_tree(estado)))
