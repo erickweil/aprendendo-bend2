@@ -1,4 +1,6 @@
 bend-engine/
+bin/
+GUIDE.md
 
 # Logs
 logs

@@ -1,6 +1,8 @@
 # Todo código deve importar Base
 import Base
 
-# A função ponto de entrada do programa é chamada main
-def main() -> String:  
-  "Olá Bend2"
+def main() -> IO(Unit):
+  do IO<Unit>:
+    IO.print("Olá Bend2!")
+
+# Para rodar: bend ola.bend
