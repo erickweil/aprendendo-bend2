@@ -247,7 +247,69 @@ seção serial deixa de crescer com o tamanho do arquipélago.
 
 ---
 
-## 7. Em Aberto
+## 7. Abrir um Registro Compartilhado Custa uma Cópia
+
+Com os operadores já otimizados, uma ablação mostrou que **o motor era 56% do
+tempo** do `bench_perm` (261 ms de 467 ms) — mais caro que os operadores
+genéticos. Decompondo o laço geracional, sempre sobre os mesmos 2,56 milhões de
+indivíduos:
+
+| O que o laço faz | Custo |
+| :--- | ---: |
+| só reproduzir (percorre, aloca e reconstrói a árvore) | **28 ms** |
+| reproduzir + `tree_size` (percorre todos os nós, sem abrir indivíduos) | 29 ms |
+| reproduzir + compartilhar a árvore com um consumidor barato | 22 ms |
+| reproduzir + `best_ind` (busca do campeão) | **252 ms** |
+
+A busca do campeão custava **9x mais que a reprodução inteira**, apesar de não
+alocar nada. E não era por percorrer a árvore (`tree_size` percorre os mesmos
+nós e custa zero), nem por compartilhá-la.
+
+A causa é **abrir um registro compartilhado**. `pick_better` fazia
+`Ind.fit(a)` e `Ind.fit(b)` em valores `+`; destruir um nó com contagem de
+referências obriga o runtime a copiá-lo antes. São 2 cópias por comparação,
+126 por geração.
+
+> **Regra:** em Bend, percorrer uma estrutura compartilhada é de graça, mas
+> **abrir** um nó dela custa uma cópia. Se um valor precisa ser lido fora do
+> dono, carregue o campo escalar solto em vez do registro.
+
+### 7.1 A geração fundida
+
+A correção foi eliminar a segunda leitura. `breed_tree` faz numa travessia só:
+
+1. o cruzamento de cada indivíduo com o campeão,
+2. a injeção do elitismo (a folha de elite recebe o campeão em vez de ser
+   criada e depois sobrescrita por `inject_elite`),
+3. a descoberta do campeão da nova geração.
+
+A aptidão sobe a recursão como um `U32` solto dentro de `Gen{pop, bfit, bgene}`,
+então comparar é aritmética escalar e nenhum registro é aberto. O campeão
+atravessa as gerações dentro do `Gen`, e `best_ind` passa a ser chamado uma vez
+por ilha em vez de uma vez por geração.
+
+A semântica é exatamente a mesma: como o campeão ocupa a folha de elite, o
+máximo calculado durante a construção É o máximo da população resultante — o
+mesmo que `best_ind(inject_elite(...))` devolvia.
+
+Medido com os binários antigo e novo intercalados:
+
+| Benchmark | 1T | 4T |
+| :--- | ---: | ---: |
+| `bench_perm` | 441 ms → **251 ms** (1,76x) | 242 ms → 135 ms |
+| `bench_bits` | 285 ms → **102 ms** (2,79x) | 168 ms → 63 ms |
+| `bench_islands` | 582 ms → **348 ms** (1,67x) | 195 ms → 116 ms |
+
+`bench_bits` ganha mais porque seu genoma é um `U32` puro: quase todo o custo
+dele era o motor. Os 18 programas produzem saída byte a byte idêntica.
+
+Nessa reescrita o parâmetro `fork_d` foi removido — ele media pior em toda
+configuração testada (§6.1) e complicava o caminho quente fundido. A medição
+que o motivou continua registrada aqui.
+
+---
+
+## 8. Em Aberto
 
 - **`bench_gp` fica mais lento com threads** (0,77x em 4T). É o único benchmark com
   escala negativa e o único cujo genoma é uma árvore de tamanho variável — logo,

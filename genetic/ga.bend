@@ -86,80 +86,104 @@ def reevaluate_pop(~G: Type, ~fit: G -> U32, tree: T.PopTree<Ind<G>>) -> T.PopTr
 # OPERADORES GENÉTICOS E EVOLUÇÃO (ÁRVORE LOCAL)
 # ----------------------------------------------------------------
 
-# Profundidade de bifurcação DENTRO de cada ilha. O padrão é 0: a evolução
-# local é inteiramente sequencial, e o paralelismo vem só do arquipélago.
+# Resultado de uma geração: a nova população e o melhor indivíduo DELA,
+# carregado como aptidão e genoma soltos, não como um `Ind`.
 #
-# Isso é contra-intuitivo, porque o escalonador do Bend precisa de MUITAS
-# tarefas para preencher os cores — medido com trabalho puro e balanceado em
-# 4 cores, 4 tarefas dão 1,90x e 64 tarefas dão 2,92x. Mas naquele teste as
-# tarefas eram criadas UMA vez e viviam o programa inteiro. Aqui uma geração
-# é um fork-join completo: com fork_d = 3, 5.000 gerações x 8 ilhas viram
-# 320.000 episódios de bifurcação, cada um distribuindo microssegundos de
-# trabalho. Medido, fork_d = 3 custa de 2x a 3x:
+# Essa separação é o ponto do design. O laço geracional antes lia a árvore
+# duas vezes — `best_ind` para achar o campeão e `reproduce_tree` para gerar
+# os filhos. Medido com 2,56 milhões de indivíduos: reproduzir custa 28ms e
+# a busca do campeão custa 224ms, 9x mais, apesar de não alocar nada.
 #
-#     bench_perm  4T: 268ms (sequencial)  ->  855ms (fork_d = 3)
-#     bench_bits  4T: 199ms (sequencial)  -> 1008ms (fork_d = 3)
+# A causa não é percorrer a árvore (percorrer todos os nós sem abrir os
+# indivíduos custa 29ms), é ABRIR um registro compartilhado: `pick_better`
+# fazia `Ind.fit(a)` e `Ind.fit(b)` em valores `+`, e destruir um nó
+# compartilhado obriga o runtime a copiá-lo. São 126 cópias por geração.
 #
-# Ou seja: o que escala não é subdividir a geração, é ter mais ilhas — cada
-# ilha é uma tarefa longeva que roda milhares de gerações sem sincronizar.
-# O parâmetro continua exposto em `run_generations_at` para populações
-# gigantes com aptidão cara, onde a subdivisão pode compensar.
-# Ver PERFORMANCE.md §3.
-def default_fork_depth() -> Nat:
-  0n
+# Aqui a aptidão sobe a recursão como um `U32` solto, então comparar é
+# aritmética escalar e nenhum registro é aberto. O campeão é descoberto
+# durante a própria construção da população, numa travessia só.
+type Gen<-G: Data> is Data:
+  Gen{pop: T.PopTree<Ind<G>>, bfit: U32, bgene: G}
 
-# Reproduz uma árvore populacional aplicando a closure de reprodução.
-# `fork_d` é a granularidade: os `fork_d` níveis do topo bifurcam em paralelo
-# e todo o resto da subárvore roda sequencialmente, aproveitando a cache local
-# do core. Como a computação é pura e as sementes já são bifurcadas de forma
-# determinística, `fork_d` altera SÓ o escalonamento — o resultado é idêntico.
-def reproduce_tree(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
-                   tree: T.PopTree<Ind<G>>, fork_d: Nat,
-                   +seed: U32, +champ: Ind<G>) -> T.PopTree<Ind<G>>:
-  match tree fork_d:
-    case T.Leaf{ind} _:
-      +champ = champ
+def Gen.pop(-G: Data, g: Gen<G>) -> T.PopTree<Ind<G>>:
+  Gen{p, _, _} = g
+  p
+
+# Escolhe o melhor dos dois lados sem reconstruir o nó em cada ramo
+def pick_gen(-G: Data, cond: Bool, node: T.PopTree<Ind<G>>,
+             +lf: U32, +lg: G, +rf: U32, +rg: G) -> Gen<G>:
+  match cond:
+    case True{}:
+      Gen{node, lf, lg}
+    case False{}:
+      Gen{node, rf, rg}
+
+# Junta os dois lados numa geração só. Os dois `Gen` chegam como PARÂMETROS,
+# afins e recém-construídos, então abri-los não copia nada.
+def merge_gen(-G: Data, gl: Gen<G>, gr: Gen<G>) -> Gen<G>:
+  match gl gr:
+    case Gen{lp, lf, lg} Gen{rp, rf, rg}:
+      +lf = lf
+      +rf = rf
+      pick_gen(G, U32.is_ge(lf, rf), T.Node{lp, rp}, lf, lg, rf, rg)
+
+def init_gen(-G: Data, tree: T.PopTree<Ind<G>>, champ: Ind<G>) -> Gen<G>:
+  match champ:
+    case Ind{cg, cf}:
+      Gen{tree, cf, cg}
+
+# Reproduz a população inteira em UMA travessia, fazendo de uma vez só:
+#   1. o cruzamento de cada indivíduo com o campeão,
+#   2. a injeção do elitismo (a folha mais à esquerda recebe o campeão
+#      intacto, em vez de ser criada e depois sobrescrita),
+#   3. a descoberta do campeão da nova geração.
+#
+# `on_elite` marca o caminho até a folha de elite: verdadeiro na raiz, herdado
+# pelo filho esquerdo e falso no direito. Como o campeão ocupa aquela folha,
+# o máximo calculado aqui é o máximo da população resultante — exatamente o
+# que `best_ind(inject_elite(...))` devolvia antes.
+def breed_tree(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
+               tree: T.PopTree<Ind<G>>, on_elite: Bool,
+               +seed: U32, +champ_f: U32, +champ_g: G) -> Gen<G>:
+  match tree on_elite:
+    case T.Leaf{ind} True{}:
+      # slot de elite: o campeão sobrevive intacto (elitismo estrito)
+      Gen{T.Leaf{Ind{champ_g, champ_f}}, champ_f, champ_g}
+    case T.Leaf{ind} False{}:
       +parent_g = Ind.gene(G, ind)
-      +champ_g = Ind.gene(G, champ)
       +child_g = repro(parent_g, champ_g, seed)
       +child_f = fit(child_g)
-      T.Leaf{Ind{child_g, child_f}}
-    case T.Node{left, right} 0n:
-      # abaixo do corte: sequencial, sem criar descritores de tarefa
-      +seed = seed; +champ = champ
-      +l = reproduce_tree(~G, ~repro, ~fit, left, 0n, R.split.fst(seed), champ)
-      +r = reproduce_tree(~G, ~repro, ~fit, right, 0n, R.split.snd(seed), champ)
-      T.Node{l, r}
-    case T.Node{left, right} 1n+k:
-      # acima do corte: bifurcação paralela
-      +seed = seed; +champ = champ; +k = k
-      l r = reproduce_tree(~G, ~repro, ~fit, left, k, R.split.fst(seed), champ) reproduce_tree(~G, ~repro, ~fit, right, k, R.split.snd(seed), champ)
-      T.Node{l, r}
+      Gen{T.Leaf{Ind{child_g, child_f}}, child_f, child_g}
+    case T.Node{left, right} True{}:
+      +seed = seed; +champ_f = champ_f; +champ_g = champ_g
+      gl = breed_tree(~G, ~repro, ~fit, left, True{}, R.split.fst(seed), champ_f, champ_g)
+      gr = breed_tree(~G, ~repro, ~fit, right, False{}, R.split.snd(seed), champ_f, champ_g)
+      merge_gen(G, gl, gr)
+    case T.Node{left, right} False{}:
+      +seed = seed; +champ_f = champ_f; +champ_g = champ_g
+      gl = breed_tree(~G, ~repro, ~fit, left, False{}, R.split.fst(seed), champ_f, champ_g)
+      gr = breed_tree(~G, ~repro, ~fit, right, False{}, R.split.snd(seed), champ_f, champ_g)
+      merge_gen(G, gl, gr)
 
-# Um passo geracional completo com injeção de elitismo
-def step_generation(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
-                    +tree: T.PopTree<Ind<G>>, fork_d: Nat, +seed: U32) -> T.PopTree<Ind<G>>:
-  +champ = best_ind(G, tree)
-  +next_pop = reproduce_tree(~G, ~repro, ~fit, tree, fork_d, seed, champ)
-  T.inject_elite(Ind<G>, next_pop, champ)
-
-# Executa g gerações na ilha local com granularidade de bifurcação explícita
-def run_generations_at(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
-                       g: Nat, fork_d: Nat, tree: T.PopTree<Ind<G>>,
-                       +seed: U32) -> T.PopTree<Ind<G>>:
+# Laço geracional: o campeão atravessa as gerações dentro do `Gen`, então
+# `best_ind` é chamado uma vez por ilha e não uma vez por geração.
+def run_gen_loop(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
+                 g: Nat, gen: Gen<G>, +seed: U32) -> Gen<G>:
   match g:
     case 0n:
-      tree
+      gen
     case 1n+p:
-      +next_seed = R.step(seed)
-      +fork_d = fork_d
-      +next_tree = step_generation(~G, ~repro, ~fit, tree, fork_d, seed)
-      run_generations_at(~G, ~repro, ~fit, p, fork_d, next_tree, next_seed)
+      match gen:
+        case Gen{tree, cf, cg}:
+          +next_seed = R.step(seed)
+          run_gen_loop(~G, ~repro, ~fit, p,
+                       breed_tree(~G, ~repro, ~fit, tree, True{}, seed, cf, cg),
+                       next_seed)
 
-# Executa g gerações evolutivas na ilha local com a granularidade padrão
+# Executa g gerações evolutivas sequencialmente na ilha local
 def run_generations(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
-                    g: Nat, tree: T.PopTree<Ind<G>>, +seed: U32) -> T.PopTree<Ind<G>>:
-  run_generations_at(~G, ~repro, ~fit, g, default_fork_depth(), tree, seed)
+                    g: Nat, +tree: T.PopTree<Ind<G>>, +seed: U32) -> T.PopTree<Ind<G>>:
+  Gen.pop(G, run_gen_loop(~G, ~repro, ~fit, g, init_gen(G, tree, best_ind(G, tree)), seed))
 
 # ----------------------------------------------------------------
 # MODELO DE ARQUIPÉLAGO MULTI-ILHAS (PGA COARSE-GRAINED)
