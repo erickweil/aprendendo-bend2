@@ -309,13 +309,112 @@ que o motivou continua registrada aqui.
 
 ---
 
-## 8. Em Aberto
+## 8. Onde o Tempo Vai Agora, e Três Tentativas que Falharam
 
-- **`bench_gp` fica mais lento com threads** (0,77x em 4T). É o único benchmark com
-  escala negativa e o único cujo genoma é uma árvore de tamanho variável — logo,
-  ilhas com trabalho desbalanceado, que num escalonador sem work stealing custam
-  caro. Ainda não investigado.
-- `bench_bits` e `bench_perm` ainda escalam ~1,6-1,7x com 8 ilhas; re-dimensionar
-  os benchmarks para 64 ilhas deve levá-los ao mesmo patamar do `bench_islands`.
-- Empacotar `String16` (Cenário 8), `Row9`/`Sudoku9` (Cenário 4) e `Arr4`
-  (Cenário 12) da mesma forma que `Perm8`.
+Reperfilando o `bench_perm` depois da geração fundida (273 ms em 1 thread):
+
+| Parte | Custo | Fatia |
+| :--- | ---: | ---: |
+| motor (travessia, alocação, elitismo, campeão) | 66 ms | 24% |
+| `cross_perm_ox1` | ~104 ms | 38% |
+| mutações (`random_swap` / `reverse_segment`) | ~42 ms | 15% |
+| aptidão (`tour_distance`) | ~9 ms | 3% |
+
+O motor saiu de 56% para 24%: os operadores passaram a dominar. Três tentativas
+de atacá-los **não deram ganho nenhum** e foram revertidas — ficam registradas
+porque cada uma refuta uma teoria plausível.
+
+**Tentativa 1 — reescrever os operadores sobre a palavra crua.** O OX1 lê cada
+pai oito vezes; pela regra do §7, seriam 16 aberturas de registro compartilhado
+por crossover. Expor `word_get`/`word_set`/`word_swap` e desempacotar uma vez só
+mediu **1,01x**. Conclusão: abrir um registro de **1 campo escalar** é quase de
+graça. O custo do §7 vinha de o `Ind` ter um campo **ponteiro**, cujo refcount
+precisa ser incrementado na cópia. A regra do §7 vale para registros com
+ponteiros, não para qualquer registro.
+
+**Tentativa 2 — parar de recalcular o PRNG.** `cut_lo` e `cut_hi` refaziam cada
+um `R.step(seed)` e `R.step(R.step(seed))`, somando 6 chamadas de Xorshift por
+sorteio onde 2 bastavam. Empacotar o par num escalar mediu **1,01x**: o Xorshift
+é barato demais para aparecer.
+
+**Tentativa 3 — subdividir a geração** (`fork_d`, §6.1): 2x a 3x **mais lento**.
+
+O que sobra do OX1 são 16 iterações de laço por crossover, trabalho inerente ao
+algoritmo. A partir daqui o caminho seria desenrolar os laços, o que troca
+legibilidade por alguns por cento.
+
+---
+
+## 9. Por Que o GP Não Escala
+
+`bench_gp` é o único benchmark com escala negativa. Ele melhora com mais ilhas,
+mas nem de perto o suficiente:
+
+| Ilhas | 1 thread | 4 threads | escala |
+| ---: | ---: | ---: | ---: |
+| 4 | 367 ms | 537 ms | 0,68x |
+| 16 | 1421 ms | 1623 ms | 0,88x |
+| 64 | 4485 ms | 3931 ms | 1,14x |
+
+**Não é alocação.** Testado de propósito, com a contagem de tarefas fixa em 4096
+e variando só quanta memória cada tarefa aloca:
+
+| Trabalho por tarefa | 1T | 4T | escala |
+| :--- | ---: | ---: | ---: |
+| computação pura, zero alocação | 35 ms | 11 ms | 3,18x |
+| 511 nós alocados e consumidos | 11 ms | 5 ms | 2,20x |
+| 4.095 nós alocados e consumidos | 69 ms | 22 ms | **3,14x** |
+
+Alocar 16,8 milhões de nós escala **igual** a não alocar nada. O alocador do
+Bend não é o gargalo.
+
+O que resta é o genoma: o GP é o único cujo indivíduo é uma **árvore de tamanho
+variável**, com dezenas de nós e ponteiros a perseguir. Isso traz duas coisas
+que os demais não têm — uma pegada de memória por ilha grande o bastante para
+disputar cache compartilhada entre os cores, e **desbalanceamento**, porque o
+bloat faz ilhas diferentes convergirem para árvores de tamanhos diferentes. Num
+escalonador sem work stealing o tempo em 4 threads é o da ilha mais lenta.
+
+> **Corolário de projeto:** o que faz o motor escalar é o **genoma compacto**.
+> Cada passo nessa direção (empacotar `Perm8` numa palavra, carregar a aptidão
+> como escalar solto) melhorou os dois eixos ao mesmo tempo, single e multicore.
+
+---
+
+## 10. Resumo dos Ganhos
+
+Todos medidos com os binários antigo e novo intercalados, em 1 thread:
+
+| Benchmark | Início | Agora | Ganho |
+| :--- | ---: | ---: | ---: |
+| `bench_perm` | 1605 ms | **251 ms** | **6,4x** |
+| `bench_bits` | 299 ms | **102 ms** | **2,9x** |
+| `bench_gp` | 561 ms | **359 ms** | 1,6x |
+
+E em 4 threads, com o arquipélago bem dimensionado, `bench_islands` faz 4,20x
+sobre sua própria execução em 1 thread.
+
+Os três ganhos vieram de descobertas sobre o Bend, não de ajustes locais:
+
+1. **Não passe alternativas computadas para quem escolhe** (§2) — `Bool.pick`
+   avalia os dois ramos.
+2. **Agregados pequenos cabem numa palavra atrás de um construtor de 1 campo**,
+   sem custo e sem perder o tipo (§5).
+3. **Ler uma estrutura duas vezes custa uma cópia por nó aberto** (§7) — leia
+   uma vez, ou carregue o escalar solto.
+
+---
+
+## 11. Em Aberto
+
+- **Desenrolar os laços do OX1** (§8): 16 iterações por crossover, hoje 38% do
+  `bench_perm`. Troca legibilidade por alguns por cento.
+- **Aptidão avaliada três vezes por indivíduo** nos cenários meméticos (GP,
+  Sudoku, Evolução Diferencial): duas dentro do `reproduce`, para a seleção
+  gulosa, e uma terceira pelo motor, que não tem como receber a aptidão já
+  calculada. Uma variante de `run_generations` cujo operador devolva
+  `(genoma, aptidão)` eliminaria a terceira.
+- **Empacotar os genomas restantes** como se fez com `Perm8`: `String16`
+  (Cenário 8), `Row9`/`Sudoku9` (Cenário 4) e `Arr4` (Cenário 12).
+- `bench_bits` e `bench_perm` ainda usam 8 ilhas e escalam ~1,7x; re-dimensioná-los
+  para 64 ilhas deve levá-los ao patamar do `bench_islands`.
