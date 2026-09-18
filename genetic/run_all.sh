@@ -107,6 +107,7 @@ run_scenario "14" "Evolução Diferencial (DE)" "src/scenario14_differential_evo
 run_scenario "15" "Neuroevolução (Cart-Pole)" "src/scenario15_neuroevolution.bend"
 run_scenario "16" "Genética Diplóide Dinâmica" "src/scenario16_diploid_dynamic.bend"
 run_scenario "17" "Horário Médio (3T x 5D x 4T)" "src/scenario17_horario_medio.bend"
+run_scenario "18" "Horário Ensino Médio (9T x 6D x 6T)" "src/scenario18_horario_ensino_medio.bend"
 run_scenario "PGA" "Modelo de Ilhas (Island Model)" "src/island_ga.bend"
 run_scenario "BENCH" "Benchmark Paralelo (8 Ilhas)" "bench_parallel.bend"
 

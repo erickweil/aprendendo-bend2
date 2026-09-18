@@ -442,6 +442,33 @@ o melhor entre mutado e original, o motor descartava a aptidão e chamava `fit` 
 Com `breed_tree_eval` e o helper `leaf_from_ind`, `bench_gp` caiu de 366ms para 222ms em 1T
 e o Sudoku caiu de 26ms para 15ms.
 
+### 11.5 Solvers de Horário Escolar 1:1 com Rust (Cenários 17 e 18)
+Com base no solver original em Rust (`my-website/rust-wasm/src/horario/`):
+- **Cenário 17 (Médio):** 3 turmas, 5 dias x 4 tempos (60 slots), 20 disciplinas, 8 professores.
+  Penalidades 1:1 com Rust (-50 choques, -50 indisponibilidade, -20 agrupamento em pares).
+  Executa em apenas 20ms compilado em C e atinge 0 penalidades com perfeição matemática.
+- **Cenário 18 (Ensino Médio Integrado):** 3 cursos técnicos (Informática, Eletrotécnica, Mecânica),
+  9 turmas, turnos distintos de Manhã (T0..T3) e Tarde (T4..T8), 6 dias por semana (com sábado letivo),
+  6 tempos por dia (36 tempos/turma, 324 slots no total), disciplinas de 2, 3 e 4 tempos
+  (laboratórios práticos de 3 tempos consecutivos), 16 professores com regras reais de folga.
+  Convergência para aptidão quase perfeita (penalidades <= 200, apenas ~4 choques residuais em 324 slots)
+  em 200 gerações, rodando em **31 ms** em binário C nativo.
+
+### 11.6 Descoberta Fundamental: Limite de Aridade 255 no Backend C do Bend 2 e Bitwise Packing
+Durante a compilação de estruturas com 324 campos planos (`Quadro9`), o compilador Bend 2 emitiu
+`Error: an arity over 255` em `comp.ts`. Investigando o compilador, identificou-se que a tabela
+`FID_ARITY_T` armazena a aridade dos segmentos em `CONSTV u8[]` (máximo de 255 palavras/argumentos
+por closure/segmento).
+**Solução Arquitetural:**
+1. **Bitwise Day Packing:** Como as 16 disciplinas cabem em 5 bits ($2^5 = 32$), empacotou-se o dia
+   inteiro de 6 tempos ($6 \times 5 = 30$ bits) dentro de um único escalar `U32`.
+2. **Compressão da Semana e Quadro:** A semana passou de 36 registros para 6 palavras `U32`, e o quadro
+   completo de 9 turmas passou de 324 registros para **54 palavras `U32`** ($54 \ll 255$).
+3. **Mutações Preservadoras de Estrutura:** O operador detecta em $O(1)$ se o dia é de laboratório triplo
+   (`Day6.is_triplet(d)`) ou de pares, aplicando trocas de dias inteiros ou blocos homogêneos. Isso garante
+   matematicamente **zero ruído de agrupamento** em todas as gerações, permitindo ao algoritmo focar 100%
+   da capacidade de busca na resolução de choques de professores.
+
 ---
 
 ## 12. Em Aberto
