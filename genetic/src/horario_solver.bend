@@ -493,8 +493,8 @@ def build_pop_tree(d: Nat, +base_q: Quadro3, +spec: FastSpec, +seed: U32) -> T.P
       +cand = make_cand(shuffled, spec)
       +f = fitness_cand(cand)
       make_leaf(cand, f)
-    case 1n+p:
-      +p = p; +seed = seed
+    case 1n+ +p:
+      +seed = seed
       l r = build_pop_tree(p, base_q, spec, R.split.fst(seed)) build_pop_tree(p, base_q, spec, R.split.snd(seed))
       make_node(l, r)
 

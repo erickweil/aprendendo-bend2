@@ -177,11 +177,7 @@ type Vec2Char is Data:
 
 def Vec2Char.cmp(a: Vec2Char, b: Vec2Char) -> Cmp:
   match a b:
-    case Vec2Char{Vec2{x1, y1}, _, _} Vec2Char{Vec2{x2, y2}, _, _}:
-      +x1 = x1
-      +x2 = x2
-      +y1 = y1
-      +y2 = y2
+    case Vec2Char{Vec2{+x1, +y1}, _, _} Vec2Char{Vec2{+x2, +y2}, _, _}:
       # compara y, mas se é igual compara x
       pick(Cmp, U32.is_eq(y1, y2),
         pick(Cmp, U32.is_eq(x1, x2),
@@ -201,10 +197,7 @@ def build_tree(estado: Estado) -> A.Arvore<Vec2Char>:
   match estado:
     case EstadoFim{}:
       A.Vazia{}
-    case Estado{pos, dir, chegada, acc}:
-      +dir = dir
-      +chegada = chegada
-
+    case Estado{pos, +dir, +chegada, acc}:
       char = build_tree.char(chegada, dir)
       liga_esquerda = Dir.is_eq(chegada, Leste{}) || Dir.is_eq(dir, Oeste{})
       A.inserir(~Vec2Char, ~Vec2Char.cmp, 
@@ -248,6 +241,21 @@ def draw.fin(profundidade: U32, tree: A.Arvore<Vec2Char>) -> String:
 def profundidade() -> U32:
   3
 
+def parse_u32(m: Maybe<&2, U32>, default: U32) -> U32:
+  match m:
+    case None{}: default
+    case Some{val}: val
+
+def get_arg_u32(args: List<String>, default: U32) -> U32:
+  match args:
+    case Nil{}: default
+    case Con{first, rest}:
+      parse_u32(U32.read(first), default)
+
+def run(args: List<String>) -> IO(Unit):
+  +prof = get_arg_u32(args, profundidade())
+  estado = iter(U32.to_nat(prof), True{}, Estado.inicial())
+  IO.write(draw.fin(prof, build_tree(estado)))
+
 def main() -> IO(Unit):
-  estado = iter(U32.to_nat(profundidade()), True{}, Estado.inicial())
-  IO.write(draw.fin(profundidade(), build_tree(estado)))
+  IO.bind(List<String>, Unit, IO.args(), run)

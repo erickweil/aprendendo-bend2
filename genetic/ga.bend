@@ -45,8 +45,8 @@ def gen_population(~G: Type, ~init: U32 -> G, ~fit: G -> U32,
       +g = init(seed)
       +f = fit(g)
       T.Leaf{Ind{g, f}}
-    case 1n+p:
-      +p = p; +seed = seed
+    case 1n+ +p:
+      +seed = seed
       l r = gen_population(~G, ~init, ~fit, p, R.split.fst(seed)) gen_population(~G, ~init, ~fit, p, R.split.snd(seed))
       T.Node{l, r}
 
@@ -244,8 +244,8 @@ def gen_archipelago(~G: Type, ~init: U32 -> G, ~fit: G -> U32,
     case 0n:
       +pop = gen_population(~G, ~init, ~fit, pop_d, seed)
       SingleIsland{init_gen(G, pop, best_ind(G, pop))}
-    case 1n+p:
-      +p = p; +seed = seed; +pop_d = pop_d
+    case 1n+ +p:
+      +seed = seed; +pop_d = pop_d
       l r = gen_archipelago(~G, ~init, ~fit, p, R.split.fst(seed), pop_d) gen_archipelago(~G, ~init, ~fit, p, R.split.snd(seed), pop_d)
       ArchBranch{l, r}
 

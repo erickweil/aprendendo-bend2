@@ -11,8 +11,7 @@ def repetir(n: Nat, acc: String) -> String:
   match n:
     case 0n:
       acc
-    case 1n+p:
-      +p = p
+    case 1n+ +p:
       repetir(p, acc ++ Nat.show(p + 1n) ++ "\n")
       
 # A parte da contagem de repetição TEM que ser Nat, mas o resto das operações pode ser U32

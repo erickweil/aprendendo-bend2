@@ -177,11 +177,7 @@ type Vec2Char is Data:
 
 def Vec2Char.cmp(a: Vec2Char, b: Vec2Char) -> Cmp:
   match a b:
-    case Vec2Char{Vec2{x1, y1}, _, _} Vec2Char{Vec2{x2, y2}, _, _}:
-      +x1 = x1
-      +x2 = x2
-      +y1 = y1
-      +y2 = y2
+    case Vec2Char{Vec2{+x1, +y1}, _, _} Vec2Char{Vec2{+x2, +y2}, _, _}:
       # compara y, mas se é igual compara x
       pick(Cmp, U32.is_eq(y1, y2),
         pick(Cmp, U32.is_eq(x1, x2),
@@ -201,10 +197,7 @@ def build_tree(estado: Estado) -> A.Arvore<Vec2Char>:
   match estado:
     case EstadoFim{}:
       A.Vazia{}
-    case Estado{pos, dir, chegada, acc}:
-      +dir = dir
-      +chegada = chegada
-
+    case Estado{pos, +dir, +chegada, acc}:
       char = build_tree.char(chegada, dir)
       liga_esquerda = Dir.is_eq(chegada, Leste{}) || Dir.is_eq(dir, Oeste{})
       A.inserir(~Vec2Char, ~Vec2Char.cmp, 

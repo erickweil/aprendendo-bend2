@@ -5,7 +5,7 @@ import json
 import statistics
 
 JSON_PATH = "/home/ubuntu/claude/aprendendo-bend2/genetic/data/horario_input.json"
-BEND_BIN = "/home/ubuntu/claude/.toolchain/bend/bin/bend"
+BEND_BIN = os.environ.get("BEND_BIN", "bend")
 BEND_SRC = "/home/ubuntu/claude/aprendendo-bend2/genetic/src/horario_solver.bend"
 NATIVE_BIN = "/home/ubuntu/claude/aprendendo-bend2/genetic/horario_bin"
 

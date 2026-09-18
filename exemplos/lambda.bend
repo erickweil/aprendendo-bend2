@@ -43,6 +43,24 @@ def power2(expoente: Nat) -> U32:
 # def pow(base: U32, expoente: Nat) -> U32 & U32:
 #   repetir(~(U32 & U32), ~pow.f, expoente, (base, 1))
 
-def main() -> IO(Unit):
-  resultado = power2(10n)
+def expoente_padrao() -> Nat:
+  10n
+
+def parse_nat(m: Maybe<&2, Nat>, default: Nat) -> Nat:
+  match m:
+    case None{}: default
+    case Some{val}: val
+
+def get_arg_nat(args: List<String>, default: Nat) -> Nat:
+  match args:
+    case Nil{}: default
+    case Con{first, rest}:
+      parse_nat(Nat.read(first), default)
+
+def run(args: List<String>) -> IO(Unit):
+  exp = get_arg_nat(args, expoente_padrao())
+  resultado = power2(exp)
   IO.print(U32.show(resultado))
+
+def main() -> IO(Unit):
+  IO.bind(List<String>, Unit, IO.args(), run)

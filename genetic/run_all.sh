@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-export PATH="/home/ubuntu/claude/.toolchain/bend/bin:$PATH"
+export PATH="$HOME/.bend/bin:$PATH"
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"

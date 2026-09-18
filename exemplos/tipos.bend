@@ -11,10 +11,21 @@ def valor_u32() -> U32:
 def valor_nat() -> Nat:
   7n
 
-def main() -> IO(Unit):
+def parse_u32(m: Maybe<&2, U32>, default: U32) -> U32:
+  match m:
+    case None{}: default
+    case Some{val}: val
+
+def get_arg_u32(args: List<String>, default: U32) -> U32:
+  match args:
+    case Nil{}: default
+    case Con{first, rest}:
+      parse_u32(U32.read(first), default)
+
+def run(args: List<String>) -> IO(Unit):
   # Por padrão, é como se os valores fossem sem Clone e Copy do Rust, mas aqui a variável decide isso
   # Se você quer poder reusar uma variável mais de uma vez, precisa marcar com +, ou irá dar erro 'consumed more than once'
-  +quanto = valor_u32()
+  +quanto = get_arg_u32(args, valor_u32())
 
   # então em seguida podemos usar mais de uma vez a variável
   # Redeclarar é como no Rust, estamos criando uma NOVA variável e vira shadow da anterior
@@ -28,3 +39,6 @@ def main() -> IO(Unit):
   quanto = (U32.to_nat(quanto) + valor_nat() : Nat)
 
   IO.print(Nat.show(quanto))
+
+def main() -> IO(Unit):
+  IO.bind(List<String>, Unit, IO.args(), run)

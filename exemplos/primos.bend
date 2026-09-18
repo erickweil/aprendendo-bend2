@@ -33,9 +33,24 @@ def eh_primo(+num: U32) -> Bool:
     )
   ) 
 
-# Checando se um número é primo ou não
+# Checando se um número é primo ou não (padrão se não informado via CLI)
 def numero() -> U32:
   11
 
+def parse_u32(m: Maybe<&2, U32>, default: U32) -> U32:
+  match m:
+    case None{}: default
+    case Some{val}: val
+
+def get_arg_u32(args: List<String>, default: U32) -> U32:
+  match args:
+    case Nil{}: default
+    case Con{first, rest}:
+      parse_u32(U32.read(first), default)
+
+def run(args: List<String>) -> IO(Unit):
+  n = get_arg_u32(args, numero())
+  IO.print(pick(String, eh_primo(n), "Primo", "Não é primo"))
+
 def main() -> IO(Unit):
-  IO.print(pick(String, eh_primo(numero()), "Primo", "Não é primo"))
+  IO.bind(List<String>, Unit, IO.args(), run)

@@ -12,9 +12,10 @@ Este documento serve como a bíblia técnica e manual de sobrevivência para **a
    - Faça `git push origin feature/motor-genetico` **a cada commit** (autorização explícita do usuário).
    - Verifique sempre `git diff` antes de commitar para garantir que nenhum arquivo temporário ou artefato de build foi incluído.
 3. **Telemetria:** Sempre defina `export BEND_NO_TELEMETRY=1` ao invocar o compilador/runtime do Bend.
-4. **Toolchain Oficial:** Utilize o executável local do Bend 2:
+4. **Toolchain:** Utilize o comando oficial do Bend (instalado em `~/.bend/bin/bend`):
    ```bash
-   /home/ubuntu/claude/.toolchain/bend/bin/bend
+   export BEND_NO_TELEMETRY=1
+   bend --version
    ```
 
 ---
@@ -28,10 +29,10 @@ Nas versões modernas do Bend 2 (construídas sobre a HVM — High-order Virtual
 * **Sempre utilize `timeout`:** Nunca execute `bend` diretamente sem um limite de tempo.
   ```bash
   export BEND_NO_TELEMETRY=1
-  timeout 30s /home/ubuntu/claude/.toolchain/bend/bin/bend <arquivo.bend>
+  timeout 30s bend <arquivo.bend>
   ```
 * **Controle de Threads na Compilação C:**
-  O Bend compila para C puro via `-o`:
+  O Bend compila para C puro via `-o` (requer `clang 14+`; `gcc` **não é suportado**):
   ```bash
   bend arquivo.bend -o bin_executavel
   # Execução controlada:
@@ -138,15 +139,30 @@ Compreender estas 6 armadilhas é fundamental para programar em Bend 2 sem trava
 
   +cand = make_cand(q, spec)  # ✔️ O compilador infere perfeitamente
   ```
-* **O mesmo vale para literais ligados com `+`** — e aqui nem a anotação salva:
+* **Literais ligados com `+` exigem anotação com chaves `{}`:**
   ```bend
   +x = 1            # ❌ "expected: an annotated term (cannot infer)"
-  +x = (1 : U32)    # ❌ idem — a anotação não resolve
+  +x = (1 : U32)    # ❌ anotação com parênteses NÃO resolve para binder +
+  +x = {1 : U32}    # ✔️ CORRETO: sintaxe de anotação com chaves!
+  +n = {1n : Nat}   # ✔️ CORRETO: funciona para Nat também
   ```
-  Literal em posição de **argumento** ou dentro de `Bool.pick` funciona normalmente
-  (`Bool.pick(U32, c, 2, 1)` é válido). Se precisar mesmo de um `+` sobre uma
-  constante, dê a ela um `def` nulário tipado (`def one() -> U32: 1`) e ligue o
-  resultado da chamada.
+  Anotação com chaves `{valor : Tipo}` é a sintaxe exata reconhecida pelo verificador bidirecional para binders quantificados (`+`). Alternativamente, em posições de argumento ou dentro de funções nulárias tipadas (`def one() -> U32: 1`), o tipo é inferido normalmente.
+
+* **Marcadores `+` diretos nos padrões de `match`:**
+  Em desestruturações de `match`, você pode colocar o quantificador `+` diretamente nos binders do padrão, tornando-os reutilizáveis imediatamente e dispensando o antigo padrão de re-ligação local (`+var = var`):
+  ```bend
+  # ✔️ Padrão moderno com + no próprio match:
+  match n:
+    case 0n: 0n
+    case 1n+ +p: p + p
+
+  match lista:
+    case Nil{}: Nil{}
+    case Con{h, +t}: Con{h, t}   # t é duplicável diretamente
+
+  match shape:
+    case Circle{+r}: (3 * r * r : U32)
+  ```
 
 ---
 

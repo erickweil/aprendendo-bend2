@@ -4,10 +4,10 @@ import time
 import os
 import glob
 
-BEND_BIN = "/home/ubuntu/claude/.toolchain/bend/bin/bend"
-BUN_DIR = "/home/ubuntu/claude/.toolchain/bun/bin"
+BEND_BIN = os.environ.get("BEND_BIN", "bend")
 ENV = os.environ.copy()
-ENV["PATH"] = f"{os.path.dirname(BEND_BIN)}:{BUN_DIR}:{ENV.get('PATH', '')}"
+ENV["BEND_NO_TELEMETRY"] = "1"
+ENV["PATH"] = f"{os.path.expanduser('~/.bend/bin')}:{ENV.get('PATH', '')}"
 
 def run_command(cmd, cwd=None):
     return subprocess.run(cmd, cwd=cwd, env=ENV, capture_output=True, text=True)
@@ -137,8 +137,8 @@ if __name__ == "__main__":
     scaled = benchmark_scaled()
     
     with open("/home/ubuntu/claude/aprendendo-bend2/benchmarks/REPORT.md", "w") as f:
-        f.write("# Relatório de Desempenho: Backend C Nativo no Bend 2.0.2\n\n")
-        f.write("Ambiente: Ubuntu 24.04, 4 vCPUs Intel Xeon Gold 5418Y, Clang 19.1.1, Bend 2.0.2.\n\n")
+        f.write("# Relatório de Desempenho: Backend C Nativo no Bend 2\n\n")
+        f.write("Ambiente: Ubuntu 24.04, 4 vCPUs, Clang 19, Bend 2.\n\n")
         
         f.write("## 1. Todos os 19 Exemplos Originais (Cargas Padrão)\n\n")
         f.write("| Exemplo | 1 Thread | 2 Threads | 4 Threads | Status |\n")

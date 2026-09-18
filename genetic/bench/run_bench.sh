@@ -2,7 +2,7 @@
 # Harness de benchmark do motor genético.
 # Uso: ./bench/run_bench.sh [tag]   (tag rotula a linha de saída)
 set -e
-export PATH="/home/ubuntu/claude/.toolchain/bend/bin:$PATH"
+export PATH="$HOME/.bend/bin:$PATH"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$DIR"
 TAG="${1:-atual}"

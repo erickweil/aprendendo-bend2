@@ -1,6 +1,6 @@
 # Aprendendo Bend 2
 
-Repositório dedicado ao estudo aprofundado, benchmarking, provas formais e engenharia de algoritmos de alta performance na linguagem **Bend 2 (2.0.5)**, desenvolvida pela [HigherOrderCO](https://higherorderco.com/).
+Repositório dedicado ao estudo aprofundado, benchmarking, provas formais e engenharia de algoritmos de alta performance na linguagem **Bend 2**, desenvolvida pela [HigherOrderCO](https://higherorderco.com/).
 
 O Bend 2 combina a expressividade funcional do Haskell, a clareza sintática do Python, a verificação formal de teoremas do Lean/Coq e o paralelismo massivo em hardware moderno (CPUs multi-core e GPUs) baseado na arquitetura de Redes de Interação da **HVM (High-order Virtual Machine)**.
 
@@ -36,7 +36,7 @@ curl -fsSL https://bend-lang.com/install.sh | sh
 Para garantir operação limpa e sem envio de métricas de rede no terminal:
 ```bash
 export BEND_NO_TELEMETRY=1
-export PATH="$HOME/.toolchain/bend/bin:$PATH"
+export PATH="$HOME/.bend/bin:$PATH"
 ```
 
 Comandos essenciais da CLI:
@@ -48,9 +48,9 @@ bend --version
 bend guide
 
 # Executa um arquivo diretamente via interpretador JIT/FFI
-bend arquivo.bend
+bend arquivo.bend [args...]
 
-# Compila para binário nativo standalone em C (requer clang/gcc)
+# Compila para binário nativo standalone em C (requer clang 14+; gcc não é suportado)
 bend arquivo.bend -o bin_executavel
 
 # Emite o código-fonte C gerado sem compilar
@@ -90,10 +90,23 @@ Node{l, r}
 ```
 Não há mutexes, semáforos nem condições de corrida (*race conditions*): por operar sobre combinadores de interação matematicamente confluentes, o resultado é **determinístico** independente da ordem de agendamento das threads.
 
-### 2.3 Anotações de Variáveis: Linearidade (`+`) e Erased (`~`)
+### 2.3 Anotações de Variáveis: Linearidade (`+`), Erased (`~`) e Sintaxe de Literais
 - **`+var` (Linear / Duplicável):** Indica que a variável pode ser consumida mais de uma vez ou duplicada explicitamente.
 - **`~var` (Erased / Compile-time):** Argumento estático ou de tipo avaliado em tempo de compilação e apagado no binário final.
 - **`-var` (Inferido):** Parâmetro de tipo inferido.
+- **Sintaxe de Literais com `+`:** Para ligar constantes literais diretamente a uma variável duplicável `+`, utilize a sintaxe de anotação com chaves `{}`:
+  ```bend
+  +x = {1 : U32}     # ✔️ Anotação explícita com chaves funciona
+  +n = {1n : Nat}    # ✔️ Funciona para Nat
+  # Note que (+x = 1) ou (+x = (1 : U32)) falham com "cannot infer"
+  ```
+- **`+` em Padrões de `match`:** Pode ser colocado diretamente nos campos desestruturados:
+  ```bend
+  match lista:
+    case Con{h, +t}: ...   # t é duplicável diretamente sem '+t = t'
+  match n:
+    case 1n+ +p: ...       # p é duplicável diretamente
+  ```
 
 ### 2.4 Provas Formais e Teoremas Matemáticos
 O Bend permite formalizar lemas e leis que o compilador verifica formalmente com `bend PROOF.bend`:
@@ -233,15 +246,10 @@ Resultados obtidos com o dataset real de 3 turmas, 20 disciplinas e 10 professor
 
 **Leitura honesta desses números:**
 
-- O **binário nativo não escala**: 92.9 → 97.4 → 95.2 ms de 1 para 4 CPUs, ou seja, dentro do ruído
-  e ligeiramente pior. Com 32 indivíduos e ~0,2 ms por geração, o trabalho por fork está **abaixo do
-  overhead de despacho paralelo** da HVM. Paralelismo só compensa aqui aumentando a população ou o
-  custo da avaliação — ver `genetic/PARALLELISM.md`.
-- O speedup de 1.86x/2.36x aparece **apenas no interpretador**, e mede o processo inteiro, incluindo
-  typecheck e compilação do `.bend` — não é speedup do laço genético isolado.
-- Metodologia: 3 amostras com 1 warmup por configuração, numa VM de **4 núcleos** (`nproc` = 4). A
-  linha `taskset -c 0-7` presente em `bench_cpus.py` não é medível nesta máquina. Com alvo de ~93 ms
-  e desvio de ±7 ms, o ruído domina as diferenças do binário nativo.
+- **Solver Genético vs Carga por Fork:** No caso do `horario_bin`, o tempo total já é minúsculo (~77 a 93 ms para 400 gerações). Com 32 indivíduos e ~0,2 ms por geração, o trabalho por fork está **abaixo do overhead de sincronização de threads** do SO.
+- **Quando o C Nativo escala de verdade:** Em algoritmos paralelos baseados em árvore com trabalho suficiente por nó (como `pow2(2^24)` e `pow2(2^26)` em `benchmarks/`), o binário nativo em C escala com alta eficiência, atingindo **1.89x em 2 threads** e **3.21x em 4 threads**.
+- O speedup observado no interpretador (1.86x / 2.36x) mede o processo inteiro, incluindo parsing e typecheck pelo compilador.
+- Metodologia: VM de **4 núcleos** (`nproc` = 4) com Clang 19 e Bend.
 
 ---
 
