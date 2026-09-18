@@ -56,39 +56,35 @@ A nova arquitetura explora os pontos fortes do Bend 2:
 
 ---
 
-## 3. Cenários e Problemas Implementados
+## 3. Cenários e Problemas Implementados (15 Cenários)
 
 | Cenário | Descrição | Representação | Métrica Ótima | Resultado Obtido |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Bit Maxing (One-Max)** | Maximizar bits 1 em palavra de 32 bits | `U32` (32 genes binários) | 32 / 32 bits | **32 / 32 bits** (Ótimo) |
+| **1. One-Max** | Maximizar bits 1 em palavra de 32 bits | `U32` (32 genes binários) | 32 / 32 bits | **32 / 32 bits** (Ótimo) |
 | **2. Ordenar Números** | Ordenar permutação de 8 números | `Perm8` (8 campos) | 28 / 28 pares | **[0, 1, 2, 3, 4, 5, 6, 7]** (Ótimo) |
 | **3. Caixeiro Viajante (TSP)** | Rota fechada entre 8 cidades 2D | `Perm8` (ciclo fechado) | Distância = 240 | **Distância = 240** (Ótimo) |
-| **4. Sudoku Solver** | Resolver grade 4x4 com pistas | `Board4` (16 células) | 0 conflitos | **0 conflitos** (Ótimo) |
-| **5. Solver de Horário** | Grade de 2 turmas x 8 tempos, 3 profs, choques, indisponibilidade e blocos | `Timetable` (`Schedule8` x 2) | 0 penalidades | **0 penalidades** (Ótimo) |
+| **4. Sudoku 9x9 (Quadro Vazio)** | Gerar e resolver grade 9x9 do zero (81 zeros) | `Sudoku9` (9 x `Row9`) | 162 / 162 (0 conflitos) | **162 / 162** (0 conflitos) |
+| **5. Solver de Horário** | Grade 2 turmas x 8 tempos, 3 profs, choques e blocos | `Timetable` (`Schedule8` x 2) | 0 penalidades | **0 penalidades** (Ótimo) |
 | **6. 8-Rainhas (N-Queens)** | Dispor 8 rainhas sem ataques mútuos | `Perm8` (8 colunas) | 0 ataques diagonais | **0 ataques diagonais** (Ótimo) |
-| **7. Problema da Mochila (Knapsack)** | 10 itens com pesos e valores, capacidade = 80kg | `U32` (bitmask 10 bits) | Valor >= 175, Peso <= 80 | **Valor = 175, Peso = 79** (Ótimo) |
+| **7. Mochila 0/1 (Knapsack)** | 10 itens com pesos e valores, capacidade = 80kg | `U32` (bitmask 10 bits) | Valor >= 175, Peso <= 80 | **Valor = 175, Peso = 79** (Ótimo) |
 | **8. Evolução de Strings (Weasel)** | Evolução da frase `"BEND IS PARALLEL"` | `String16` (16 caracteres) | 16 / 16 caracteres | **"BEND IS PARALLEL"** (Ótimo) |
-| **PGA. Ilhas Paralelas** | Arquipélago de 4 ilhas com migração do campeão | `Archipelago` x 64 indivíduos | Distância = 240 | **Distância = 240** (Ótimo) |
+| **9. Cellular GA (cGA)** | Grade 2D 8x8 em Quad-Tree superando Deceptive Trap | `QuadTree` (64 células) | 32 / 32 bits | **32 / 32 bits** (Ótimo Global) |
+| **10. Programação Genética (GP)** | Regressão simbólica de ASTs com controle de bloat | `Expr` (AST algébrico) | Erro = 0 | **`(1 + (x * x))` (Erro = 0)** |
+| **11. Otimização Multi-Objetivo** | Max(Valor) e Min(Peso) via Dominância de Pareto | `MOInd` (Val, Wt, Gene) | Fronteira de Pareto | **3 Especialistas Trade-Off** |
+| **12. Co-Evolução Competitiva** | Host vs Parasita descobrindo Redes de Ordenação | `Net` (6 CAS) vs `Arr4` | Lema 0-1 (16/16) | **`[5 3 2 4 1 0]` (16/16 provado)** |
+| **13. Motor Auto-Adaptativo** | Taxa de mutação e operadores no próprio genoma | `SAInd` (Taxa, Op, Gene) | 1064 / 1064 pts | **1064 / 1064 (Royal Road 4/4)** |
+| **14. Evolução Diferencial (DE)** | Otimização numérica contínua em R^4 com `F32` | `Vec4` (4D contínuo) | Custo < 2.0 (Rastrigin) | **1.172 (Convergência Global)** |
+| **PGA. Ilhas Paralelas** | Arquipélago de 4 ilhas com migração de campeão | `Archipelago` x 64 ind. | Distância = 240 | **Distância = 240** (Ótimo) |
 
 ---
 
-## 4. Resultados e Tempos de Execução
+## 4. Biblioteca Reutilizável (`genetic/utils/`)
 
-Testado na VM (4 vCPUs AMD EPYC, Linux x86_64, Bend 2.0.5, Clang 19.1.1):
-
-| Cenário | População | Gerações | Tempo Interpretado (`bend`) | Tempo Compilado C (`-o`) | Solução Ótima? |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **1. Bit Maxing (One-Max)** | 32 indivíduos | 25 | 0.357s | **0.016s** | **Sim (True)** |
-| **2. Ordenar Números** | 32 indivíduos | 40 | 0.452s | **0.020s** | **Sim (True)** |
-| **3. Caixeiro Viajante (TSP)** | 32 indivíduos | 50 | 0.521s | **0.037s** | **Sim (True)** |
-| **4. Sudoku Solver** | 32 indivíduos | 35 | 0.735s | **0.023s** | **Sim (True)** |
-| **5. Solver de Horário Escolar** | 32 indivíduos | 80 | 1.045s | **0.034s** | **Sim (True)** |
-| **6. 8-Rainhas (N-Queens)** | 64 indivíduos | 60 | 0.890s | **0.028s** | **Sim (True)** |
-| **7. Problema da Mochila** | 32 indivíduos | 35 | 0.312s | **0.015s** | **Sim (True)** |
-| **8. Evolução de Strings** | 64 indivíduos | 75 | 1.250s | **0.042s** | **Sim (True)** |
-| **PGA. Modelo de Ilhas** | 4 ilhas x 16 (64 total) | 5 épocas x 10 | 0.950s | **0.031s** | **Sim (True)** |
-
-Todos os 9 programas compilados em C executam em **menos de 45 milissegundos**!
+Extraída para modularizar algoritmos evolutivos futuros:
+- [`utils/random.bend`](file:///home/ubuntu/claude/aprendendo-bend2/genetic/utils/random.bend): Xorshift32 determinístico puro com seed-splitting em $O(1)$, `mod_range` e `chance`.
+- [`utils/bits.bend`](file:///home/ubuntu/claude/aprendendo-bend2/genetic/utils/bits.bend): `popcount`, `bit_of`, `crossover_uniform`, `mutate_bit` e unicidade de 9 elementos `group_unique9`.
+- [`utils/pareto.bend`](file:///home/ubuntu/claude/aprendendo-bend2/genetic/utils/pareto.bend): Dominância de Pareto (`dominates_min_max`, `dominates_max_max`) e cálculo de densidade de eficiência.
+- [`utils/poptree.bend`](file:///home/ubuntu/claude/aprendendo-bend2/genetic/utils/poptree.bend): Árvore binária polimórfica (`PopTree<A>`), injeção de elite e redução concorrente.
 
 ---
 
@@ -97,7 +93,7 @@ Todos os 9 programas compilados em C executam em **menos de 45 milissegundos**!
 Para rodar toda a suite automatizada:
 
 ```bash
-cd ~/claude/genetic-bend2
+cd ~/claude/aprendendo-bend2/genetic
 ./run_all.sh
 ```
 
@@ -105,9 +101,9 @@ Para executar ou compilar um cenário individual:
 
 ```bash
 # Executar interpretado
-bend src/scenario5_horario.bend
+bend src/scenario14_differential_evolution.bend
 
-# Compilar para C nativo de alto desempenho
-bend src/scenario5_horario.bend -o horario_bin
-./horario_bin
+# Compilar para binário nativo C de alto desempenho
+bend src/scenario14_differential_evolution.bend -o de_bin
+./de_bin
 ```
