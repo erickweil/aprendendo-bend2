@@ -1,21 +1,11 @@
 import Base
 
-# Contagem de bits '1' (Popcount) por indução em palavras Word(32)
-def popcount.word(n: Nat, w: Word(n)) -> U32:
-  match n w:
-    case 0n WNil{}:
-      0
-    case 1n+p WCon{b, tail}:
-      match b:
-        case True{}:
-          U32.inc(popcount.word(p, tail))
-        case False{}:
-          popcount.word(p, tail)
-
-def popcount(u: U32) -> U32:
-  match u:
-    case U32{w}:
-      popcount.word(32n, w)
+# Contagem de bits '1' (Popcount 32-bit SWAR em O(1) sem recursão)
+def popcount(+x: U32) -> U32:
+  +a = U32.sub(x, U32.and(U32.shrn(x, 1n), 1431655765))
+  +b = U32.add(U32.and(a, 858993459), U32.and(U32.shrn(a, 2n), 858993459))
+  +c = U32.and(U32.add(b, U32.shrn(b, 4n)), 252645135)
+  U32.shrn(U32.mul(c, 16843009), 24n)
 
 # Máscara de bit: 1 << d
 def bit_of(+d: U32) -> U32:
