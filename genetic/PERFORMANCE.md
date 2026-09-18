@@ -385,16 +385,17 @@ escalonador sem work stealing o tempo em 4 threads é o da ilha mais lenta.
 
 Todos medidos com os binários antigo e novo intercalados, em 1 thread:
 
-| Benchmark | Início | Agora | Ganho |
-| :--- | ---: | ---: | ---: |
-| `bench_perm` | 1605 ms | **251 ms** | **6,4x** |
-| `bench_bits` | 299 ms | **102 ms** | **2,9x** |
-| `bench_gp` | 561 ms | **359 ms** | 1,6x |
+| Benchmark | Início | Antes desta sessão | Agora | Ganho Total |
+| :--- | ---: | ---: | ---: | ---: |
+| `bench_perm` | 1605 ms | 251 ms | **206 ms** | **7,8x** |
+| `bench_bits` | 299 ms | 102 ms | **85 ms** | **3,5x** |
+| `bench_gp` | 561 ms | 359 ms | **222 ms** | **2,5x** |
+| `bench_parallel` (8 ilhas) | 248 ms | 248 ms | **45 ms** | **5,5x** |
 
-E em 4 threads, com o arquipélago bem dimensionado, `bench_islands` faz 4,20x
+E em 4 threads, com o arquipélago bem dimensionado, `bench_islands` faz mais de 3,17x a 4,20x
 sobre sua própria execução em 1 thread.
 
-Os três ganhos vieram de descobertas sobre o Bend, não de ajustes locais:
+As otimizações vieram de cinco descobertas fundamentais sobre o Bend 2:
 
 1. **Não passe alternativas computadas para quem escolhe** (§2) — `Bool.pick`
    avalia os dois ramos.
@@ -402,19 +403,49 @@ Os três ganhos vieram de descobertas sobre o Bend, não de ajustes locais:
    sem custo e sem perder o tipo (§5).
 3. **Ler uma estrutura duas vezes custa uma cópia por nó aberto** (§7) — leia
    uma vez, ou carregue o escalar solto.
+4. **Trocas bitwise em palavras empacotadas são O(1) via máscara XOR** (§12) —
+   elimina o registro intermediário e inversões de máscara redundantes.
+5. **Reprodução avaliada elimina a 3ª avaliação em cenários meméticos** (§13) —
+   cenários como GP e Sudoku já calculam a aptidão na seleção gulosa; carregar
+   `Ind<G>` via `breed_tree_eval` poupa a reavaliação completa de AST e grades.
 
 ---
 
-## 11. Em Aberto
+## 11. Otimizações Recentes Consolidadas
 
-- **Desenrolar os laços do OX1** (§8): 16 iterações por crossover, hoje 38% do
-  `bench_perm`. Troca legibilidade por alguns por cento.
-- **Aptidão avaliada três vezes por indivíduo** nos cenários meméticos (GP,
-  Sudoku, Evolução Diferencial): duas dentro do `reproduce`, para a seleção
-  gulosa, e uma terceira pelo motor, que não tem como receber a aptidão já
-  calculada. Uma variante de `run_generations` cujo operador devolva
-  `(genoma, aptidão)` eliminaria a terceira.
-- **Empacotar os genomas restantes** como se fez com `Perm8`: `String16`
-  (Cenário 8), `Row9`/`Sudoku9` (Cenário 4) e `Arr4` (Cenário 12).
-- `bench_bits` e `bench_perm` ainda usam 8 ilhas e escalam ~1,7x; re-dimensioná-los
-  para 64 ilhas deve levá-los ao patamar do `bench_islands`.
+### 11.1 Rastreamento do Campeão de Arquipélago em O(1) e Eliminação de Travessias de Época
+Anteriormente, `run_generations` executava as gerações da ilha e descartava o campeão
+descoberto na geração fundida com `Gen.pop`. Em seguida, a cada época, `best_archipelago`
+re-percorria as árvores de todas as 64 ilhas (4.096 nós) chamando `best_ind` e abrindo
+indivíduos compartilhados. Além disso, `migrate_champion` usava `inject_elite` para reescrever
+a folha de cada árvore.
+
+**Solução:** `ArchTree` agora armazena `SingleIsland{gen: Gen<G>}`. Como `run_gen_loop`
+já devolve o campeão no `Gen`, a redução entre ilhas lê `(bfit, bgene)` em $O(1)$ por ilha.
+E a migração apenas atualiza o campeão no `Gen`, que é injetado no slot de elite e recombinado
+automaticamente na primeira geração da época seguinte pelo próprio `breed_tree`.
+
+### 11.2 `Perm8.swap` via Máscara XOR em Expressão Única
+O `swap` de `Perm8` fazia `get(i)`, `get(j)`, `set(i, vj)` e `set(j, vi)`, alocando um `P8`
+intermediário. Agora, calcula a diferença escalar `diff = vi ^ vj` e aplica a máscara
+`(diff << shi) | (diff << shj)` com um único `U32.xor(b, mask)`. `bench_perm` caiu de 258ms
+para 206ms.
+
+### 11.3 Eliminação de Avaliação Especulativa no Cenário 12 (Co-Evolução)
+Em `scenario12_coevolution.bend`, `apply_pair` usava `Bool.pick(Arr4, ...)` aninhado 5 vezes
+para escolher o comparador, avaliando todas as 6 chamadas de `cas(a, ...)` a cada passo.
+Com seletores encadeados em `match` sobre `Bool`, a execução em C caiu de ~26ms para 2ms.
+
+### 11.4 Reprodução Avaliada (`breed_tree_eval`) no GP e Sudoku
+Resolve o item que estava em aberto: em operadores que já avaliam a aptidão para selecionar
+o melhor entre mutado e original, o motor descartava a aptidão e chamava `fit` uma 3ª vez.
+Com `breed_tree_eval` e o helper `leaf_from_ind`, `bench_gp` caiu de 366ms para 222ms em 1T
+e o Sudoku caiu de 26ms para 15ms.
+
+---
+
+## 12. Em Aberto
+
+- **Desenrolar os laços do OX1**: 16 iterações por crossover, hoje a maior fatia do `bench_perm`.
+- **Empacotar `Arr4` (Cenário 12) e `String16` (Cenário 8)** em palavras únicas como `Perm8`.
+- Re-dimensionar `bench_bits` e `bench_perm` para 64 ilhas para exibir a escala 3.5x-4.2x do `bench_islands`.
