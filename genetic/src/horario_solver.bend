@@ -236,22 +236,43 @@ def make_cand(q: Quadro3, spec: FastSpec) -> Cand:
 # 3. FUNÇÃO DE AVALIAÇÃO DE APTIDÃO (1:1 COM RUST)
 # ------------------------------------------------------------------------------
 
-def eval_prof_slot(+pA: U32, +pB: U32, +pC: U32, +slot_idx: U32, +prof_masks: Table16) -> U32:
-  +c_ab = Bool.pick(U32, Bool.and(U32.is_gt(pA, 0), U32.is_eq(pA, pB)), 50, 0)
-  +c_ac = Bool.pick(U32, Bool.and(U32.is_gt(pA, 0), U32.is_eq(pA, pC)), 50, 0)
-  +c_bc = Bool.pick(U32, Bool.and(U32.is_gt(pB, 0), U32.is_eq(pB, pC)), 50, 0)
-  +coll = (c_ab + c_ac + c_bc : U32)
+# Penalidade de UM professor num slot. `k` e quantas turmas querem esse
+# professor ali e `avail` e 1 se ele esta disponivel. Equivale, termo a termo, a
+# `fitness += disponibilidade * 50` do pass 2 de horario_genetic.rs, onde
+# disponibilidade = avail - k ja veio decrementada pelo pass 1.
+def pen_term(+k: U32, +avail: U32) -> U32:
+  Bool.pick(U32, U32.is_gt(k, avail), U32.mul(U32.sub(k, avail), 50), 0)
 
-  +mA = Table16.get(prof_masks, pA)
-  +mB = Table16.get(prof_masks, pB)
-  +mC = Table16.get(prof_masks, pC)
+# O Rust conta a demanda acumulada por (professor, slot) e pune proporcional ao
+# excesso; a versao anterior daqui comparava os pares (A,B), (A,C) e (B,C) a 50
+# pontos cada e somava a indisponibilidade a parte. Isso nao so mudava a escala
+# como mudava a ORDENACAO entre solucoes: tres turmas disputando o mesmo
+# professor davam 150 aqui contra 300 no Rust.
+#
+# Forma fechada, conferida contra a dupla-passada do Rust nas 1024 combinacoes
+# de (professores das 3 turmas) x (disponibilidade): a contribuicao de cada
+# turma e max(0, k - avail) * 50.
+#
+# As igualdades so contam quando o professor existe (pA > 0): sem isso, dois
+# slots sem professor (0 == 0) inflariam k um do outro.
+def eval_prof_slot(+pA: U32, +pB: U32, +pC: U32, +slot_idx: U32, +prof_masks: Table16) -> U32:
+  +ab = Bool.pick(U32, Bool.and(U32.is_gt(pA, 0), U32.is_eq(pA, pB)), 1, 0)
+  +ac = Bool.pick(U32, Bool.and(U32.is_gt(pA, 0), U32.is_eq(pA, pC)), 1, 0)
+  +bc = Bool.pick(U32, Bool.and(U32.is_gt(pB, 0), U32.is_eq(pB, pC)), 1, 0)
+  +kA = (1 + ab + ac : U32)
+  +kB = (1 + ab + bc : U32)
+  +kC = (1 + ac + bc : U32)
 
   +n_slot = U32.to_nat(slot_idx)
-  +uA = Bool.pick(U32, Bool.and(U32.is_gt(pA, 0), U32.is_eq(U32.and(U32.shrn(mA, n_slot), 1), 1)), 50, 0)
-  +uB = Bool.pick(U32, Bool.and(U32.is_gt(pB, 0), U32.is_eq(U32.and(U32.shrn(mB, n_slot), 1), 1)), 50, 0)
-  +uC = Bool.pick(U32, Bool.and(U32.is_gt(pC, 0), U32.is_eq(U32.and(U32.shrn(mC, n_slot), 1), 1)), 50, 0)
-  +unavail = (uA + uB + uC : U32)
-  (coll + unavail : U32)
+  # prof_masks guarda INDISPONIBILIDADE: bit 1 = nao pode dar aula nesse slot.
+  +uA = U32.and(U32.shrn(Table16.get(prof_masks, pA), n_slot), 1)
+  +uB = U32.and(U32.shrn(Table16.get(prof_masks, pB), n_slot), 1)
+  +uC = U32.and(U32.shrn(Table16.get(prof_masks, pC), n_slot), 1)
+
+  +tA = Bool.pick(U32, U32.is_gt(pA, 0), pen_term(kA, U32.xor(uA, 1)), 0)
+  +tB = Bool.pick(U32, U32.is_gt(pB, 0), pen_term(kB, U32.xor(uB, 1)), 0)
+  +tC = Bool.pick(U32, U32.is_gt(pC, 0), pen_term(kC, U32.xor(uC, 1)), 0)
+  (tA + tB + tC : U32)
 
 def eval_day_prof(+d0: Day4, +d1: Day4, +d2: Day4, +dia: U32, +info: Table32, +prof_masks: Table16) -> U32:
   D4{a0, a1, a2, a3} = d0

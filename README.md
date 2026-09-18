@@ -176,8 +176,8 @@ simplificado e o que ainda falta:
 
 | Regra (Rust) | Estado no Bend | Observação |
 | :--- | :--- | :--- |
-| Choque de professor entre turmas | ⚠️ Simplificado | O Rust conta conflitos acumulados por slot e pune proporcionalmente; o Bend compara os pares (A,B), (A,C), (B,C) a 50 pts. A **ordenação entre soluções difere**, não só a escala. |
-| Indisponibilidade do professor | ✅ Portado | Máscara de 20 bits, 50 pts por violação. |
+| Choque de professor entre turmas | ✅ Portado | `eval_prof_slot` usa a forma fechada `max(0, k − disponível) × 50` por turma, equivalente termo a termo à dupla passada do Rust (conferido nas 1024 combinações de professores × disponibilidade). |
+| Indisponibilidade do professor | ✅ Portado | Máscara de 20 bits; entra na mesma fórmula acumulada, como `avail = 0` no Rust. |
 | Múltiplos professores por disciplina | ❌ Falta | `find_prof_for_disc` usa apenas o **primeiro** professor encontrado; o Rust itera `disciplina.professores` inteiro. |
 | Agrupamento em blocos de `agrupar` aulas | ✅ Portado | `run_penalty` usa `agrupar` e `dividir` do JSON; ideal = `g` se divisível, senão o múltiplo de `g` mais próximo de `len` (meio para longe de zero, como `f64::round()`); custo `\|len − ideal\| × 20`. |
 | `disciplinas_unidas` | ⚠️ Parcial | Apenas o **primeiro grupo** e as **duas primeiras** disciplinas dele, e a comparação é fixa entre as turmas de índice 0 e 1. |

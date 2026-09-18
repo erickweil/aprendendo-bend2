@@ -78,7 +78,7 @@ A nova arquitetura explora os pontos fortes do Bend 2:
 | **16. Genética Diplóide (Memória)** | Resgate de memória ancestral sob inversão ambiental brusca | `Diploid` (2 fitas 2n + dominância) | >= 31 bits pós-retorno | **32 / 32 bits (Memória Restaurada)** |
 | **17. Horário Médio (3 Turmas)** | 3 Turmas x 5 dias x 4 tempos, 20 disc, 8 profs, choques e geminadas | `Quadro3` (60 slots) | 0 penalidades | **0 penalidades** (na métrica simplificada do Bend, não na do Rust) |
 | **18. Horário Ensino Médio (9 Turmas)** | 9 Turmas x 6 dias x 6 tempos, manhã/tarde, 30 profs | `Quadro9` (324 slots) | Min penalidades | **Convergência Estável** |
-| **Solver Dinâmico (JSON I/O)** | Ingestão de JSON real (FormularioHorario) em runtime | `Quadro3` + `FastSpec` | 0 penalidades | **300 penalidades** (busca local trivial atinge 100 na mesma métrica) |
+| **Solver Dinâmico (JSON I/O)** | Ingestão de JSON real (FormularioHorario) em runtime | `Quadro3` + `FastSpec` | 0 penalidades | **500 penalidades** — idêntico à fitness do Rust para a mesma grade, mas busca local trivial atinge 100 |
 | **PGA. Ilhas Paralelas** | Arquipélago de 4 ilhas com migração de campeão | `Archipelago` x 64 ind. | Distância = 240 | **Distância = 240** (Ótimo) |
 
 ### Operadores usados por cenário
