@@ -41,12 +41,33 @@ def cas(+a: Arr4, +i: U32, +j: U32) -> Arr4:
 
 # 6 pares possíveis entre 4 fios:
 # 0: (0,1), 1: (2,3), 2: (0,2), 3: (1,3), 4: (1,2), 5: (0,3)
+def apply_pair.step4(c4: Bool, +a: Arr4) -> Arr4:
+  match c4:
+    case True{}:  cas(a, 1, 2)
+    case False{}: cas(a, 0, 3)
+
+def apply_pair.step3(c3: Bool, +a: Arr4, +p: U32) -> Arr4:
+  match c3:
+    case True{}:  cas(a, 1, 3)
+    case False{}: apply_pair.step4(U32.is_eq(p, 4), a)
+
+def apply_pair.step2(c2: Bool, +a: Arr4, +p: U32) -> Arr4:
+  match c2:
+    case True{}:  cas(a, 0, 2)
+    case False{}: apply_pair.step3(U32.is_eq(p, 3), a, p)
+
+def apply_pair.step1(c1: Bool, +a: Arr4, +p: U32) -> Arr4:
+  match c1:
+    case True{}:  cas(a, 2, 3)
+    case False{}: apply_pair.step2(U32.is_eq(p, 2), a, p)
+
+def apply_pair.go(c0: Bool, +a: Arr4, +p: U32) -> Arr4:
+  match c0:
+    case True{}:  cas(a, 0, 1)
+    case False{}: apply_pair.step1(U32.is_eq(p, 1), a, p)
+
 def apply_pair(+a: Arr4, +p: U32) -> Arr4:
-  Bool.pick(Arr4, U32.is_eq(p, 0), cas(a, 0, 1),
-    Bool.pick(Arr4, U32.is_eq(p, 1), cas(a, 2, 3),
-      Bool.pick(Arr4, U32.is_eq(p, 2), cas(a, 0, 2),
-        Bool.pick(Arr4, U32.is_eq(p, 3), cas(a, 1, 3),
-          Bool.pick(Arr4, U32.is_eq(p, 4), cas(a, 1, 2), cas(a, 0, 3))))))
+  apply_pair.go(U32.is_eq(p, 0), a, p)
 
 def is_sorted(a: Arr4) -> Bool:
   Arr4{x0, x1, x2, x3} = a
