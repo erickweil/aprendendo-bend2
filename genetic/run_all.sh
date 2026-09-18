@@ -46,6 +46,7 @@ run_scenario "8" "Evolução de Strings (Dawkins Weasel)" "src/scenario8_weasel.
 run_scenario "9" "Cellular Genetic Algorithm (cGA / Quad-Tree)" "src/scenario9_cga.bend"
 run_scenario "10" "Programação Genética / Regressão Simbólica (GP)" "src/scenario10_gp.bend"
 run_scenario "11" "Otimização Multi-Objetivo (MOEA / Fronteira de Pareto)" "src/scenario11_multiobjective.bend"
+run_scenario "12" "Co-Evolução Competitiva (Host vs Parasita / Redes de Ordenação)" "src/scenario12_coevolution.bend"
 run_scenario "PGA" "Modelo de Ilhas Paralelas (Island Model)" "src/island_ga.bend"
 
 echo "================================================================"
