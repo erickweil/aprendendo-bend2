@@ -301,17 +301,27 @@ def mutate_sudoku9(+s: Sudoku9, +rnd: U32) -> Sudoku9:
   sudoku_neighborhood(U32.is_eq(mode, 0), U32.is_eq(mode, 1), s, o1, o2,
                       U32.mod(s3, 9), U32.mod(s4, 9))
 
-def memetic_improve(+s: Sudoku9, +rnd: U32) -> Sudoku9:
+def pick_better_sudoku(c: Bool, cand: Sudoku9, +f_cand: U32, base: Sudoku9, +f_base: U32) -> GA.Ind<Sudoku9>:
+  match c:
+    case True{}:
+      GA.Ind{cand, f_cand}
+    case False{}:
+      GA.Ind{base, f_base}
+
+def memetic_improve_eval(+s: Sudoku9, +rnd: U32) -> GA.Ind<Sudoku9>:
   +cand = mutate_sudoku9(s, rnd)
   +f_old = fitness(s)
   +f_new = fitness(cand)
-  Bool.pick(Sudoku9, U32.is_ge(f_new, f_old), cand, s)
+  pick_better_sudoku(U32.is_ge(f_new, f_old), cand, f_new, s, f_old)
 
-def reproduce(parent: Sudoku9, champ: Sudoku9, seed: U32) -> Sudoku9:
+def reproduce_eval(parent: Sudoku9, champ: Sudoku9, seed: U32) -> GA.Ind<Sudoku9>:
   +s1 = R.step(seed)
   +s2 = R.step(s1)
   +base = Bool.pick(Sudoku9, U32.is_lt(U32.mod(s1, 10), 6), champ, parent)
-  memetic_improve(base, s2)
+  memetic_improve_eval(base, s2)
+
+def reproduce(parent: Sudoku9, champ: Sudoku9, seed: U32) -> Sudoku9:
+  GA.Ind.gene(Sudoku9, reproduce_eval(parent, champ, seed))
 
 def Row9.show(r: Row9) -> String:
   R9{x0, x1, x2, x3, x4, x5, x6, x7, x8} = r
@@ -336,7 +346,8 @@ def main() -> IO(Unit):
   +best0 = GA.best_ind(Sudoku9, pop0)
   +f0 = GA.Ind.fit(Sudoku9, best0)
 
-  +pop_final = GA.run_generations(~Sudoku9, ~reproduce, ~fitness, 30n, pop0, R.step(s0))
+  # 30 gerações com o motor genérico avaliado (elimina a 3ª avaliação de colunas/blocos)
+  +pop_final = GA.run_generations_eval(~Sudoku9, ~reproduce_eval, 30n, pop0, R.step(s0))
   +best_fin = GA.best_ind(Sudoku9, pop_final)
   +g_fin = GA.Ind.gene(Sudoku9, best_fin)
   +f_fin = GA.Ind.fit(Sudoku9, best_fin)

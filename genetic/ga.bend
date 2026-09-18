@@ -165,6 +165,33 @@ def breed_tree(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
       gr = breed_tree(~G, ~repro, ~fit, right, False{}, R.split.snd(seed), champ_f, champ_g)
       merge_gen(G, gl, gr)
 
+def leaf_from_ind(-G: Data, ind: Ind<G>) -> Gen<G>:
+  match ind:
+    case Ind{+cg, +cf}:
+      Gen{T.Leaf{Ind{cg, cf}}, cf, cg}
+
+# Variante para operadores que já calculam a aptidão do filho internamente
+# (cenários meméticos como GP, Sudoku e DE), eliminando a 3ª avaliação redundante.
+def breed_tree_eval(~G: Type, ~repro: G -> G -> U32 -> Ind<G>,
+                    tree: T.PopTree<Ind<G>>, on_elite: Bool,
+                    +seed: U32, +champ_f: U32, +champ_g: G) -> Gen<G>:
+  match tree on_elite:
+    case T.Leaf{ind} True{}:
+      Gen{T.Leaf{Ind{champ_g, champ_f}}, champ_f, champ_g}
+    case T.Leaf{ind} False{}:
+      +parent_g = Ind.gene(G, ind)
+      leaf_from_ind(G, repro(parent_g, champ_g, seed))
+    case T.Node{left, right} True{}:
+      +seed = seed; +champ_f = champ_f; +champ_g = champ_g
+      gl = breed_tree_eval(~G, ~repro, left, True{}, R.split.fst(seed), champ_f, champ_g)
+      gr = breed_tree_eval(~G, ~repro, right, False{}, R.split.snd(seed), champ_f, champ_g)
+      merge_gen(G, gl, gr)
+    case T.Node{left, right} False{}:
+      +seed = seed; +champ_f = champ_f; +champ_g = champ_g
+      gl = breed_tree_eval(~G, ~repro, left, False{}, R.split.fst(seed), champ_f, champ_g)
+      gr = breed_tree_eval(~G, ~repro, right, False{}, R.split.snd(seed), champ_f, champ_g)
+      merge_gen(G, gl, gr)
+
 # Laço geracional: o campeão atravessa as gerações dentro do `Gen`, então
 # `best_ind` é chamado uma vez por ilha e não uma vez por geração.
 def run_gen_loop(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
@@ -180,10 +207,27 @@ def run_gen_loop(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
                        breed_tree(~G, ~repro, ~fit, tree, True{}, seed, cf, cg),
                        next_seed)
 
+def run_gen_loop_eval(~G: Type, ~repro: G -> G -> U32 -> Ind<G>,
+                      g: Nat, gen: Gen<G>, +seed: U32) -> Gen<G>:
+  match g:
+    case 0n:
+      gen
+    case 1n+p:
+      match gen:
+        case Gen{tree, cf, cg}:
+          +next_seed = R.step(seed)
+          run_gen_loop_eval(~G, ~repro, p,
+                            breed_tree_eval(~G, ~repro, tree, True{}, seed, cf, cg),
+                            next_seed)
+
 # Executa g gerações evolutivas sequencialmente na ilha local
 def run_generations(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
                     g: Nat, +tree: T.PopTree<Ind<G>>, +seed: U32) -> T.PopTree<Ind<G>>:
   Gen.pop(G, run_gen_loop(~G, ~repro, ~fit, g, init_gen(G, tree, best_ind(G, tree)), seed))
+
+def run_generations_eval(~G: Type, ~repro: G -> G -> U32 -> Ind<G>,
+                         g: Nat, +tree: T.PopTree<Ind<G>>, +seed: U32) -> T.PopTree<Ind<G>>:
+  Gen.pop(G, run_gen_loop_eval(~G, ~repro, g, init_gen(G, tree, best_ind(G, tree)), seed))
 
 # ----------------------------------------------------------------
 # MODELO DE ARQUIPÉLAGO MULTI-ILHAS (PGA COARSE-GRAINED)
@@ -252,3 +296,25 @@ def run_archipelago(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
       +champ = best_archipelago(G, evolved)
       +migrated = migrate_champion(G, evolved, champ)
       run_archipelago(~G, ~repro, ~fit, p, migrated, next_seed, e)
+
+def evolve_archipelago_eval(~G: Type, ~repro: G -> G -> U32 -> Ind<G>,
+                            arch: ArchTree<G>, +seed: U32, e: Nat) -> ArchTree<G>:
+  match arch:
+    case SingleIsland{gen}:
+      SingleIsland{run_gen_loop_eval(~G, ~repro, e, gen, seed)}
+    case ArchBranch{left, right}:
+      +seed = seed; +e = e
+      l r = evolve_archipelago_eval(~G, ~repro, left, R.split.fst(seed), e) evolve_archipelago_eval(~G, ~repro, right, R.split.snd(seed), e)
+      ArchBranch{l, r}
+
+def run_archipelago_eval(~G: Type, ~repro: G -> G -> U32 -> Ind<G>,
+                         epochs: Nat, arch: ArchTree<G>, +seed: U32, e: Nat) -> ArchTree<G>:
+  match epochs:
+    case 0n:
+      arch
+    case 1n+p:
+      +next_seed = R.step(seed); +e = e
+      +evolved = evolve_archipelago_eval(~G, ~repro, arch, seed, e)
+      +champ = best_archipelago(G, evolved)
+      +migrated = migrate_champion(G, evolved, champ)
+      run_archipelago_eval(~G, ~repro, p, migrated, next_seed, e)

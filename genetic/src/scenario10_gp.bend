@@ -211,13 +211,23 @@ def crossover_expr(a: Expr, +b: Expr, +rnd: U32) -> Expr:
     case Mul{+l, +r}:
       graft_mul(U32.is_zero(U32.and(rnd, 1)), l, r, b)
 
-def reproduce(parent: Expr, champ: Expr, seed: U32) -> Expr:
+def pick_better_expr(c: Bool, child: Expr, +fc: U32, crossed: Expr, +fb: U32) -> GA.Ind<Expr>:
+  match c:
+    case True{}:
+      GA.Ind{child, fc}
+    case False{}:
+      GA.Ind{crossed, fb}
+
+def reproduce_eval(parent: Expr, champ: Expr, seed: U32) -> GA.Ind<Expr>:
   +s1 = R.step(seed); +s2 = R.step(s1); +s3 = R.step(s2)
   +crossed = crossover_expr(parent, champ, s1)
   +child = mutate_expr(crossed, U32.is_lt(U32.mod(s2, 10), 6), s3)
   +f_child = fitness(child)
   +f_base = fitness(crossed)
-  Bool.pick(Expr, U32.is_ge(f_child, f_base), child, crossed)
+  pick_better_expr(U32.is_ge(f_child, f_base), child, f_child, crossed, f_base)
+
+def reproduce(parent: Expr, champ: Expr, seed: U32) -> Expr:
+  GA.Ind.gene(Expr, reproduce_eval(parent, champ, seed))
 
 def show_expr(e: Expr) -> String:
   match e:
@@ -242,8 +252,8 @@ def main() -> IO(Unit):
   +f0 = GA.Ind.fit(Expr, best0)
   +err0 = eval_error(e0)
 
-  # 50 gerações de Programação Genética com o motor genérico
-  +pop_final = GA.run_generations(~Expr, ~reproduce, ~fitness, 50n, pop0, R.step(s0))
+  # 50 gerações de Programação Genética com o motor genérico avaliado (elimina 3ª avaliação)
+  +pop_final = GA.run_generations_eval(~Expr, ~reproduce_eval, 50n, pop0, R.step(s0))
   +best_fin = GA.best_ind(Expr, pop_final)
   +e_fin = GA.Ind.gene(Expr, best_fin)
   +f_fin = GA.Ind.fit(Expr, best_fin)
