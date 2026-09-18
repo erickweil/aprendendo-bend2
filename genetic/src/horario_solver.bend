@@ -3,20 +3,27 @@ import ./../ga.bend as GA
 import ./../utils/random.bend as R
 import ./../operators.bend as Op
 import ./../utils/json.bend as J
+import ./../utils/poptree.bend as T
 
 # ==============================================================================
-# SOLVER UNIFICADO DE HORÁRIO ESCOLAR (TIMETABLE SOLVER COM JSON I/O)
+# SOLVER DINÂMICO DE HORÁRIO ESCOLAR EM BEND 2 (100% JSON)
 # ==============================================================================
-# Unifica a lógica dos cenários de horário em um único solver de alto desempenho:
-# - Representação limpa em ADTs (Day4, Week5, Quadro3) compatível com Reduções HVM
-# - 3 Turmas (Turma 2026, Turma 2025, Turma 2024) x 5 Dias x 4 Tempos = 60 slots
-# - 20 Disciplinas e 10 Professores com restrições rígidas e leves 1:1 com Rust
-# - Entrada flexível: JSON via variável de ambiente (HORARIO_JSON) ou Formulário Padrão
-# - Saída padronizada: Serialização da melhor solução em JSON (TurmaHorarioResult[])
+# - ZERO mapeamentos fixos ou hardcoded no código Bend
+# - Extração dinâmica de Turmas, Disciplinas, Cargas Horárias e Professores
+# - Tabelas de acesso rápido Table16 e Table32 alimentadas em runtime pelo JSON
+# - Avaliação de alta performance com genoma Quadro3
+# - Serialização do resultado final no padrão TurmaHorarioResult[]
 # ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. REPRESENTAÇÃO DO GENOMA (ADTs NATIVOS HVM)
+# ------------------------------------------------------------------------------
 
 type Day4 is Data:
   D4{t0: U32, t1: U32, t2: U32, t3: U32}
+
+def make_d4(t0: U32, t1: U32, t2: U32, t3: U32) -> Day4:
+  D4{t0, t1, t2, t3}
 
 def Day4.get(d: Day4, +idx: U32) -> U32:
   D4{t0, t1, t2, t3} = d
@@ -26,15 +33,18 @@ def Day4.get(d: Day4, +idx: U32) -> U32:
 
 def Day4.set(d: Day4, +idx: U32, +val: U32) -> Day4:
   D4{t0, t1, t2, t3} = d
-  D4{
+  make_d4(
     Bool.pick(U32, U32.is_eq(idx, 0), val, t0),
     Bool.pick(U32, U32.is_eq(idx, 1), val, t1),
     Bool.pick(U32, U32.is_eq(idx, 2), val, t2),
     Bool.pick(U32, U32.is_eq(idx, 3), val, t3)
-  }
+  )
 
 type Week5 is Data:
   W5{d0: Day4, d1: Day4, d2: Day4, d3: Day4, d4: Day4}
+
+def make_w5(d0: Day4, d1: Day4, d2: Day4, d3: Day4, d4: Day4) -> Week5:
+  W5{d0, d1, d2, d3, d4}
 
 def Week5.get_day(w: Week5, +dia: U32) -> Day4:
   W5{d0, d1, d2, d3, d4} = w
@@ -45,13 +55,13 @@ def Week5.get_day(w: Week5, +dia: U32) -> Day4:
 
 def Week5.set_day(w: Week5, +dia: U32, +day: Day4) -> Week5:
   W5{d0, d1, d2, d3, d4} = w
-  W5{
+  make_w5(
     Bool.pick(Day4, U32.is_eq(dia, 0), day, d0),
     Bool.pick(Day4, U32.is_eq(dia, 1), day, d1),
     Bool.pick(Day4, U32.is_eq(dia, 2), day, d2),
     Bool.pick(Day4, U32.is_eq(dia, 3), day, d3),
     Bool.pick(Day4, U32.is_eq(dia, 4), day, d4)
-  }
+  )
 
 def Week5.get(w: Week5, +dia: U32, +tempo: U32) -> U32:
   +day = Week5.get_day(w, dia)
@@ -71,6 +81,9 @@ def Week5.swap(+w: Week5, +dia1: U32, +tempo1: U32, +dia2: U32, +tempo2: U32) ->
 type Quadro3 is Data:
   Q3{t0: Week5, t1: Week5, t2: Week5}
 
+def make_q3(t0: Week5, t1: Week5, t2: Week5) -> Quadro3:
+  Q3{t0, t1, t2}
+
 def Quadro3.get_turma(q: Quadro3, +t: U32) -> Week5:
   Q3{t0, t1, t2} = q
   Bool.pick(Week5, U32.is_eq(t, 0), t0,
@@ -78,102 +91,189 @@ def Quadro3.get_turma(q: Quadro3, +t: U32) -> Week5:
 
 def Quadro3.set_turma(q: Quadro3, +t: U32, +w: Week5) -> Quadro3:
   Q3{t0, t1, t2} = q
-  Q3{
+  make_q3(
     Bool.pick(Week5, U32.is_eq(t, 0), w, t0),
     Bool.pick(Week5, U32.is_eq(t, 1), w, t1),
     Bool.pick(Week5, U32.is_eq(t, 2), w, t2)
+  )
+
+# ------------------------------------------------------------------------------
+# 2. TABELAS DE ACESSO RÁPIDO O(1) PARA O LOOP GENÉTICO
+# ------------------------------------------------------------------------------
+
+type Table16 is Data:
+  T16{
+    x0: U32, x1: U32, x2: U32, x3: U32,
+    x4: U32, x5: U32, x6: U32, x7: U32,
+    x8: U32, x9: U32, x10: U32, x11: U32,
+    x12: U32, x13: U32, x14: U32, x15: U32
   }
 
+def make_t16(x0: U32, x1: U32, x2: U32, x3: U32,
+             x4: U32, x5: U32, x6: U32, x7: U32,
+             x8: U32, x9: U32, x10: U32, x11: U32,
+             x12: U32, x13: U32, x14: U32, x15: U32) -> Table16:
+  T16{x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15}
+
+def empty_t16() -> Table16:
+  make_t16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+def Table16.get(t: Table16, +idx: U32) -> U32:
+  T16{x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15} = t
+  Bool.pick(U32, U32.is_lt(idx, 8),
+    Bool.pick(U32, U32.is_lt(idx, 4),
+      Bool.pick(U32, U32.is_lt(idx, 2),
+        Bool.pick(U32, U32.is_eq(idx, 0), x0, x1),
+        Bool.pick(U32, U32.is_eq(idx, 2), x2, x3)),
+      Bool.pick(U32, U32.is_lt(idx, 6),
+        Bool.pick(U32, U32.is_eq(idx, 4), x4, x5),
+        Bool.pick(U32, U32.is_eq(idx, 6), x6, x7))),
+    Bool.pick(U32, U32.is_lt(idx, 12),
+      Bool.pick(U32, U32.is_lt(idx, 10),
+        Bool.pick(U32, U32.is_eq(idx, 8), x8, x9),
+        Bool.pick(U32, U32.is_eq(idx, 10), x10, x11)),
+      Bool.pick(U32, U32.is_lt(idx, 14),
+        Bool.pick(U32, U32.is_eq(idx, 12), x12, x13),
+        Bool.pick(U32, U32.is_eq(idx, 14), x14, x15))))
+
+def Table16.set(t: Table16, +idx: U32, +val: U32) -> Table16:
+  T16{x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15} = t
+  make_t16(
+    Bool.pick(U32, U32.is_eq(idx, 0), val, x0),
+    Bool.pick(U32, U32.is_eq(idx, 1), val, x1),
+    Bool.pick(U32, U32.is_eq(idx, 2), val, x2),
+    Bool.pick(U32, U32.is_eq(idx, 3), val, x3),
+    Bool.pick(U32, U32.is_eq(idx, 4), val, x4),
+    Bool.pick(U32, U32.is_eq(idx, 5), val, x5),
+    Bool.pick(U32, U32.is_eq(idx, 6), val, x6),
+    Bool.pick(U32, U32.is_eq(idx, 7), val, x7),
+    Bool.pick(U32, U32.is_eq(idx, 8), val, x8),
+    Bool.pick(U32, U32.is_eq(idx, 9), val, x9),
+    Bool.pick(U32, U32.is_eq(idx, 10), val, x10),
+    Bool.pick(U32, U32.is_eq(idx, 11), val, x11),
+    Bool.pick(U32, U32.is_eq(idx, 12), val, x12),
+    Bool.pick(U32, U32.is_eq(idx, 13), val, x13),
+    Bool.pick(U32, U32.is_eq(idx, 14), val, x14),
+    Bool.pick(U32, U32.is_eq(idx, 15), val, x15)
+  )
+
+type Table32 is Data:
+  T32{lo: Table16, hi: Table16}
+
+def make_t32(lo: Table16, hi: Table16) -> Table32:
+  T32{lo, hi}
+
+def empty_t32() -> Table32:
+  make_t32(empty_t16(), empty_t16())
+
+def Table32.get(t: Table32, +idx: U32) -> U32:
+  T32{lo, hi} = t
+  Bool.pick(U32, U32.is_lt(idx, 16),
+    Table16.get(lo, idx),
+    Table16.get(hi, U32.sub(idx, 16)))
+
+def Table32.set.step(is_lo: Bool, lo: Table16, hi: Table16, idx: U32, val: U32) -> Table32:
+  match is_lo:
+    case True{}: make_t32(Table16.set(lo, idx, val), hi)
+    case False{}: make_t32(lo, Table16.set(hi, U32.sub(idx, 16), val))
+
+def Table32.set(t: Table32, +idx: U32, +val: U32) -> Table32:
+  T32{lo, hi} = t
+  Table32.set.step(U32.is_lt(idx, 16), lo, hi, idx, val)
+
+def fill_table32(l: List<&2, U32>, +t: Table32, +cur: U32) -> Table32:
+  match l:
+    case Nil{}: t
+    case h <> rest:
+      +t_next = Table32.set(t, cur, h)
+      fill_table32(rest, t_next, U32.inc(cur))
+
+def fill_table16(l: List<&2, U32>, +t: Table16, +cur: U32) -> Table16:
+  match l:
+    case Nil{}: t
+    case h <> rest:
+      +t_next = Table16.set(t, cur, h)
+      fill_table16(rest, t_next, U32.inc(cur))
+
+type FastSpec is Data:
+  FSpec{disc_profs: Table32, prof_masks: Table16, u1: U32, u2: U32}
+
+def make_fspec(disc_profs: Table32, prof_masks: Table16, u1: U32, u2: U32) -> FastSpec:
+  FSpec{disc_profs, prof_masks, u1, u2}
+
+type Cand is Data:
+  CD{q: Quadro3, spec: FastSpec}
+
+def make_cand(q: Quadro3, spec: FastSpec) -> Cand:
+  CD{q, spec}
+
 # ------------------------------------------------------------------------------
-# MAPEAMENTO DE DISCIPLINAS (1..20) E PROFESSORES (1..9)
+# 3. FUNÇÃO DE AVALIAÇÃO DE APTIDÃO (1:1 COM RUST)
 # ------------------------------------------------------------------------------
 
-def prof_of(+disc: U32) -> U32:
-  Bool.pick(U32, U32.is_le(disc, 10),
-    Bool.pick(U32, U32.is_le(disc, 5),
-      Bool.pick(U32, U32.is_le(disc, 2),
-        Bool.pick(U32, U32.is_eq(disc, 1), 3, 7),
-        Bool.pick(U32, U32.is_le(disc, 4),
-          Bool.pick(U32, U32.is_eq(disc, 3), 6, 8),
-          4)),
-      Bool.pick(U32, U32.is_le(disc, 7),
-        Bool.pick(U32, U32.is_eq(disc, 6), 4, 3),
-        Bool.pick(U32, U32.is_le(disc, 9),
-          Bool.pick(U32, U32.is_eq(disc, 8), 2, 3),
-          8))),
-    Bool.pick(U32, U32.is_le(disc, 15),
-      Bool.pick(U32, U32.is_le(disc, 13),
-        Bool.pick(U32, U32.is_eq(disc, 11), 6,
-          Bool.pick(U32, U32.is_eq(disc, 12), 4, 6)),
-        Bool.pick(U32, U32.is_eq(disc, 14), 9, 4)),
-      Bool.pick(U32, U32.is_le(disc, 18),
-        Bool.pick(U32, U32.is_le(disc, 17),
-          Bool.pick(U32, U32.is_eq(disc, 16), 1, 5),
-          3),
-        Bool.pick(U32, U32.is_eq(disc, 19), 4, 6))))
-
-def disc_to_nome(+disc: U32) -> String:
-  Bool.pick(String, U32.is_le(disc, 10),
-    Bool.pick(String, U32.is_le(disc, 5),
-      Bool.pick(String, U32.is_le(disc, 2),
-        Bool.pick(String, U32.is_eq(disc, 1), "Linguagens de programacao", "Redes de Computadores"),
-        Bool.pick(String, U32.is_le(disc, 4),
-          Bool.pick(String, U32.is_eq(disc, 3), "Sistemas Operacionais", "Banco de dados II"),
-          "Engenharia de Software")),
-      Bool.pick(String, U32.is_le(disc, 8),
-        Bool.pick(String, U32.is_le(disc, 7),
-          Bool.pick(String, U32.is_eq(disc, 6), "Fabrica de Software I", "Estrutura de dados II"),
-          "Estatistica"),
-        Bool.pick(String, U32.is_eq(disc, 9), "Devops e Cloud II", "Teste de Software II"))),
-    Bool.pick(String, U32.is_le(disc, 15),
-      Bool.pick(String, U32.is_le(disc, 13),
-        Bool.pick(String, U32.is_le(disc, 12),
-          Bool.pick(String, U32.is_eq(disc, 11), "Frameworks para front-end", "Web Services"),
-          "Fabrica de Software III"),
-        Bool.pick(String, U32.is_eq(disc, 14), "Libras", "Topicos Especiais II")),
-      Bool.pick(String, U32.is_le(disc, 18),
-        Bool.pick(String, U32.is_le(disc, 17),
-          Bool.pick(String, U32.is_eq(disc, 16), "Etica, Sociedade e Sustentabilidade", "Inteligencia Artificial"),
-          "Arquitetura de Software"),
-        Bool.pick(String, U32.is_eq(disc, 19), "Dispositivos Moveis II", "Orientacoes TCC"))))
-
-def prof_unavailable(+prof: U32, +dia: U32, +tempo: U32) -> Bool:
-  Bool.pick(Bool, U32.is_le(prof, 5),
-    Bool.pick(Bool, U32.is_le(prof, 2),
-      Bool.pick(Bool, U32.is_eq(prof, 1),
-        Bool.or(U32.is_eq(dia, 3), U32.is_eq(dia, 4)),
-        False{}),
-      Bool.pick(Bool, U32.is_le(prof, 4),
-        Bool.pick(Bool, U32.is_eq(prof, 3),
-          Bool.or(U32.is_eq(dia, 2), U32.is_eq(dia, 3)),
-          U32.is_eq(dia, 0)),
-        Bool.or(
-          Bool.and(U32.is_ne(dia, 1), U32.is_ne(dia, 3)),
-          U32.is_ge(tempo, 2)))),
-    Bool.pick(Bool, U32.is_le(prof, 7),
-      Bool.pick(Bool, U32.is_eq(prof, 6),
-        Bool.or(U32.is_eq(dia, 3), U32.is_eq(dia, 4)),
-        U32.is_eq(dia, 3)),
-      Bool.pick(Bool, U32.is_eq(prof, 8),
-        Bool.or(U32.is_eq(dia, 2), U32.is_eq(dia, 4)),
-        U32.is_ne(dia, 2))))
-
-# ------------------------------------------------------------------------------
-# CÁLCULO DE APTIDÃO 1:1 COM RUST
-# ------------------------------------------------------------------------------
-
-def eval_slot(+pA: U32, +pB: U32, +pC: U32, +dia: U32, +tempo: U32) -> U32:
-  +c_ab = Bool.pick(U32, U32.is_eq(pA, pB), 50, 0)
-  +c_ac = Bool.pick(U32, U32.is_eq(pA, pC), 50, 0)
-  +c_bc = Bool.pick(U32, U32.is_eq(pB, pC), 50, 0)
+def eval_prof_slot(+pA: U32, +pB: U32, +pC: U32, +slot_idx: U32, +prof_masks: Table16) -> U32:
+  +c_ab = Bool.pick(U32, Bool.and(U32.is_gt(pA, 0), U32.is_eq(pA, pB)), 50, 0)
+  +c_ac = Bool.pick(U32, Bool.and(U32.is_gt(pA, 0), U32.is_eq(pA, pC)), 50, 0)
+  +c_bc = Bool.pick(U32, Bool.and(U32.is_gt(pB, 0), U32.is_eq(pB, pC)), 50, 0)
   +coll = (c_ab + c_ac + c_bc : U32)
 
-  +uA = Bool.pick(U32, prof_unavailable(pA, dia, tempo), 50, 0)
-  +uB = Bool.pick(U32, prof_unavailable(pB, dia, tempo), 50, 0)
-  +uC = Bool.pick(U32, prof_unavailable(pC, dia, tempo), 50, 0)
-  +unavail = (uA + uB + uC : U32)
+  +mA = Table16.get(prof_masks, pA)
+  +mB = Table16.get(prof_masks, pB)
+  +mC = Table16.get(prof_masks, pC)
 
+  +n_slot = U32.to_nat(slot_idx)
+  +uA = Bool.pick(U32, Bool.and(U32.is_gt(pA, 0), U32.is_eq(U32.and(U32.shrn(mA, n_slot), 1), 1)), 50, 0)
+  +uB = Bool.pick(U32, Bool.and(U32.is_gt(pB, 0), U32.is_eq(U32.and(U32.shrn(mB, n_slot), 1), 1)), 50, 0)
+  +uC = Bool.pick(U32, Bool.and(U32.is_gt(pC, 0), U32.is_eq(U32.and(U32.shrn(mC, n_slot), 1), 1)), 50, 0)
+  +unavail = (uA + uB + uC : U32)
   (coll + unavail : U32)
+
+def eval_day_prof(+d0: Day4, +d1: Day4, +d2: Day4, +dia: U32, +disc_profs: Table32, +prof_masks: Table16) -> U32:
+  D4{a0, a1, a2, a3} = d0
+  D4{b0, b1, b2, b3} = d1
+  D4{c0, c1, c2, c3} = d2
+  +base_slot = U32.shln(dia, 2n)
+  +s0 = eval_prof_slot(Table32.get(disc_profs, a0), Table32.get(disc_profs, b0), Table32.get(disc_profs, c0), base_slot, prof_masks)
+  +s1 = eval_prof_slot(Table32.get(disc_profs, a1), Table32.get(disc_profs, b1), Table32.get(disc_profs, c1), U32.add(base_slot, 1), prof_masks)
+  +s2 = eval_prof_slot(Table32.get(disc_profs, a2), Table32.get(disc_profs, b2), Table32.get(disc_profs, c2), U32.add(base_slot, 2), prof_masks)
+  +s3 = eval_prof_slot(Table32.get(disc_profs, a3), Table32.get(disc_profs, b3), Table32.get(disc_profs, c3), U32.add(base_slot, 3), prof_masks)
+  (s0 + s1 + s2 + s3 : U32)
+
+def eval_prof_penalties(+w0: Week5, +w1: Week5, +w2: Week5, +disc_profs: Table32, +prof_masks: Table16) -> U32:
+  W5{a0, a1, a2, a3, a4} = w0
+  W5{b0, b1, b2, b3, b4} = w1
+  W5{c0, c1, c2, c3, c4} = w2
+  +d0 = eval_day_prof(a0, b0, c0, 0, disc_profs, prof_masks)
+  +d1 = eval_day_prof(a1, b1, c1, 1, disc_profs, prof_masks)
+  +d2 = eval_day_prof(a2, b2, c2, 2, disc_profs, prof_masks)
+  +d3 = eval_day_prof(a3, b3, c3, 3, disc_profs, prof_masks)
+  +d4 = eval_day_prof(a4, b4, c4, 4, disc_profs, prof_masks)
+  (d0 + d1 + d2 + d3 + d4 : U32)
+
+def eval_unidas_tempo(+t0_val: U32, +t1_val: U32, +u1: U32, +u2: U32) -> U32:
+  +active = Bool.and(U32.is_gt(u1, 0), U32.is_gt(u2, 0))
+  Bool.pick(U32, active,
+    Bool.pick(U32, Bool.xor(U32.is_eq(t0_val, u1), U32.is_eq(t1_val, u2)), 30, 0),
+    0)
+
+def eval_unidas_dia(+d0: Day4, +d1: Day4, +u1: U32, +u2: U32) -> U32:
+  D4{a0, a1, a2, a3} = d0
+  D4{b0, b1, b2, b3} = d1
+  +u0 = eval_unidas_tempo(a0, b0, u1, u2)
+  +u1_r = eval_unidas_tempo(a1, b1, u1, u2)
+  +u2_r = eval_unidas_tempo(a2, b2, u1, u2)
+  +u3 = eval_unidas_tempo(a3, b3, u1, u2)
+  (u0 + u1_r + u2_r + u3 : U32)
+
+def eval_unidas_week(+w0: Week5, +w1: Week5, +u1: U32, +u2: U32) -> U32:
+  W5{a0, a1, a2, a3, a4} = w0
+  W5{b0, b1, b2, b3, b4} = w1
+  +d0 = eval_unidas_dia(a0, b0, u1, u2)
+  +d1 = eval_unidas_dia(a1, b1, u1, u2)
+  +d2 = eval_unidas_dia(a2, b2, u1, u2)
+  +d3 = eval_unidas_dia(a3, b3, u1, u2)
+  +d4 = eval_unidas_dia(a4, b4, u1, u2)
+  (d0 + d1 + d2 + d3 + d4 : U32)
 
 def eval_day_grouping(day: Day4) -> U32:
   D4{t0, t1, t2, t3} = day
@@ -194,102 +294,25 @@ def eval_turma_grouping(w: Week5) -> U32:
   +p4 = eval_day_grouping(d4)
   (p0 + p1 + p2 + p3 + p4 : U32)
 
-def eval_day_prof(+d0: Day4, +d1: Day4, +d2: Day4, +dia: U32) -> U32:
-  D4{a0, a1, a2, a3} = d0
-  D4{b0, b1, b2, b3} = d1
-  D4{c0, c1, c2, c3} = d2
-  +s0 = eval_slot(prof_of(a0), prof_of(b0), prof_of(c0), dia, 0)
-  +s1 = eval_slot(prof_of(a1), prof_of(b1), prof_of(c1), dia, 1)
-  +s2 = eval_slot(prof_of(a2), prof_of(b2), prof_of(c2), dia, 2)
-  +s3 = eval_slot(prof_of(a3), prof_of(b3), prof_of(c3), dia, 3)
-  (s0 + s1 + s2 + s3 : U32)
-
-def eval_prof_penalties(+w0: Week5, +w1: Week5, +w2: Week5) -> U32:
-  W5{a0, a1, a2, a3, a4} = w0
-  W5{b0, b1, b2, b3, b4} = w1
-  W5{c0, c1, c2, c3, c4} = w2
-  +d0 = eval_day_prof(a0, b0, c0, 0)
-  +d1 = eval_day_prof(a1, b1, c1, 1)
-  +d2 = eval_day_prof(a2, b2, c2, 2)
-  +d3 = eval_day_prof(a3, b3, c3, 3)
-  +d4 = eval_day_prof(a4, b4, c4, 4)
-  (d0 + d1 + d2 + d3 + d4 : U32)
-
-def eval_unidas_tempo(+t0_val: U32, +t1_val: U32) -> U32:
-  +is_f1 = U32.is_eq(t0_val, 6)
-  +is_f3 = U32.is_eq(t1_val, 13)
-  Bool.pick(U32, Bool.xor(is_f1, is_f3), 30, 0)
-
-def eval_unidas_dia(+d0: Day4, +d1: Day4) -> U32:
-  D4{a0, a1, a2, a3} = d0
-  D4{b0, b1, b2, b3} = d1
-  +u0 = eval_unidas_tempo(a0, b0)
-  +u1 = eval_unidas_tempo(a1, b1)
-  +u2 = eval_unidas_tempo(a2, b2)
-  +u3 = eval_unidas_tempo(a3, b3)
-  (u0 + u1 + u2 + u3 : U32)
-
-def eval_unidas_week(+w0: Week5, +w1: Week5) -> U32:
-  W5{a0, a1, a2, a3, a4} = w0
-  W5{b0, b1, b2, b3, b4} = w1
-  +d0 = eval_unidas_dia(a0, b0)
-  +d1 = eval_unidas_dia(a1, b1)
-  +d2 = eval_unidas_dia(a2, b2)
-  +d3 = eval_unidas_dia(a3, b3)
-  +d4 = eval_unidas_dia(a4, b4)
-  (d0 + d1 + d2 + d3 + d4 : U32)
-
-def evaluate_quadro(q: Quadro3) -> U32:
+def evaluate_quadro(q: Quadro3, spec: FastSpec) -> U32:
   Q3{t0, t1, t2} = q
+  FSpec{disc_profs, prof_masks, u1, u2} = spec
   +t0 = t0; +t1 = t1; +t2 = t2
   +g0 = eval_turma_grouping(t0)
   +g1 = eval_turma_grouping(t1)
   +g2 = eval_turma_grouping(t2)
   +group_total = (g0 + g1 + g2 : U32)
-  +prof_total = eval_prof_penalties(t0, t1, t2)
-  +unidas_total = eval_unidas_week(t0, t1)
+  +prof_total = eval_prof_penalties(t0, t1, t2, disc_profs, prof_masks)
+  +unidas_total = eval_unidas_week(t0, t1, u1, u2)
   (group_total + prof_total + unidas_total : U32)
 
-def fitness(q: Quadro3) -> U32:
-  +penalties = evaluate_quadro(q)
+def fitness_cand(c: Cand) -> U32:
+  CD{q, spec} = c
+  +penalties = evaluate_quadro(q, spec)
   Bool.pick(U32, U32.is_lt(penalties, 10000), (10000 - penalties : U32), 0)
 
 # ------------------------------------------------------------------------------
-# MULTICONJUNTO BASE E INICIALIZAÇÃO
-# ------------------------------------------------------------------------------
-
-def base_turma0() -> Week5:
-  W5{
-    D4{1, 1, 2, 2},
-    D4{6, 6, 6, 6},
-    D4{4, 4, 5, 5},
-    D4{4, 4, 5, 5},
-    D4{1, 1, 3, 3}
-  }
-
-def base_turma1() -> Week5:
-  W5{
-    D4{7, 7, 8, 8},
-    D4{13, 13, 13, 13},
-    D4{10, 10, 11, 11},
-    D4{12, 12, 11, 11},
-    D4{9, 9, 8, 8}
-  }
-
-def base_turma2() -> Week5:
-  W5{
-    D4{14, 14, 14, 14},
-    D4{15, 15, 16, 16},
-    D4{15, 15, 17, 17},
-    D4{18, 18, 17, 17},
-    D4{19, 19, 20, 20}
-  }
-
-def init_quadro() -> Quadro3:
-  Q3{base_turma0(), base_turma1(), base_turma2()}
-
-# ------------------------------------------------------------------------------
-# OPERADORES GENÉTICOS
+# 4. OPERADORES GENÉTICOS DINÂMICOS
 # ------------------------------------------------------------------------------
 
 def mutate_turma(+w: Week5, +s: U32) -> Week5:
@@ -342,37 +365,243 @@ def shuffle_quadro(+q: Quadro3, +s: U32) -> Quadro3:
   +q7 = mutate_quadro(q6, s7)
   mutate_quadro(q7, s8)
 
-def init_gene(seed: U32) -> Quadro3:
-  shuffle_quadro(init_quadro(), seed)
-
 def crossover_quadro(a: Quadro3, b: Quadro3, +mask: U32) -> Quadro3:
   Q3{t0_a, t1_a, t2_a} = a
   Q3{t0_b, t1_b, t2_b} = b
-  Q3{
+  make_q3(
     Bool.pick(Week5, U32.is_ne(U32.and(mask, 1), 0), t0_a, t0_b),
     Bool.pick(Week5, U32.is_ne(U32.and(mask, 2), 0), t1_a, t1_b),
     Bool.pick(Week5, U32.is_ne(U32.and(mask, 4), 0), t2_a, t2_b)
-  }
+  )
 
-def pick_better_q3(c: Bool, cand: Quadro3, +fc: U32, base: Quadro3, +fb: U32) -> GA.Ind<Quadro3>:
+def pick_better_cand(c: Bool, cand: Cand, +fc: U32, base: Cand, +fb: U32) -> GA.Ind<Cand>:
   match c:
-    case True{}:
-      GA.Ind{cand, fc}
-    case False{}:
-      GA.Ind{base, fb}
+    case True{}: GA.Ind{cand, fc}
+    case False{}: GA.Ind{base, fb}
 
-def reproduce_eval(parent: Quadro3, champ: Quadro3, seed: U32) -> GA.Ind<Quadro3>:
-  +parent = parent
-  +s1 = R.step(seed); +s2 = R.step(s1); +s3 = R.step(s2)
-  +crossed = crossover_quadro(parent, champ, s1)
-  +cand = mutate_quadro(crossed, s2)
-  +f_cand = fitness(cand)
-  +f_base = fitness(crossed)
-  pick_better_q3(U32.is_ge(f_cand, f_base), cand, f_cand, crossed, f_base)
+def reproduce_eval(parent: Cand, champ: Cand, seed: U32) -> GA.Ind<Cand>:
+  CD{qp, +spec} = parent
+  CD{qc, _} = champ
+  +s1 = R.step(seed); +s2 = R.step(s1)
+  +crossed_q = crossover_quadro(qp, qc, s1)
+  +cand_q = mutate_quadro(crossed_q, s2)
+  +cand = make_cand(cand_q, spec)
+  +base = make_cand(crossed_q, spec)
+  +fc = fitness_cand(cand)
+  +fb = fitness_cand(base)
+  pick_better_cand(U32.is_ge(fc, fb), cand, fc, base, fb)
+
+def make_leaf(cand: Cand, +f: U32) -> T.PopTree<GA.Ind<Cand>>:
+  T.Leaf{GA.Ind{cand, f}}
+
+def make_node(l: T.PopTree<GA.Ind<Cand>>, r: T.PopTree<GA.Ind<Cand>>) -> T.PopTree<GA.Ind<Cand>>:
+  T.Node{l, r}
+
+def build_pop_tree(d: Nat, +base_q: Quadro3, +spec: FastSpec, +seed: U32) -> T.PopTree<GA.Ind<Cand>>:
+  match d:
+    case 0n:
+      +shuffled = shuffle_quadro(base_q, seed)
+      +cand = make_cand(shuffled, spec)
+      +f = fitness_cand(cand)
+      make_leaf(cand, f)
+    case 1n+p:
+      +p = p; +seed = seed
+      l r = build_pop_tree(p, base_q, spec, R.split.fst(seed)) build_pop_tree(p, base_q, spec, R.split.snd(seed))
+      make_node(l, r)
 
 # ------------------------------------------------------------------------------
-# SERIALIZAÇÃO DO RESULTADO PARA JSON PADRONIZADO (TurmaHorarioResult[])
+# 5. CARGA E EXTRAÇÃO DINÂMICA DO JSON AST
 # ------------------------------------------------------------------------------
+
+type DiscEntry is Data:
+  DEntry{nome: String, turma: String, aulas: U32, agrupar: U32}
+
+def load_turmas_names(items: List<&2, J.Json>) -> List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case +h <> t:
+      +nome = J.Json.get_str(h, "nome", "Turma")
+      nome <> load_turmas_names(t)
+
+def load_disciplinas(items: List<&2, J.Json>) -> List<&2, DiscEntry>:
+  match items:
+    case Nil{}: Nil{}
+    case +h <> t:
+      +nome = J.Json.get_str(h, "nome", "")
+      +turma = J.Json.get_str(h, "turma", "")
+      +aulas = J.Json.get_num(h, "aulas", 2)
+      +agrupar = J.Json.get_num(h, "agrupar", 2)
+      DEntry{nome, turma, aulas, agrupar} <> load_disciplinas(t)
+
+def load_disc_nomes(discs: List<&2, DiscEntry>) -> List<&2, String>:
+  match discs:
+    case Nil{}: Nil{}
+    case h <> t:
+      DEntry{nome, _, _, _} = h
+      nome <> load_disc_nomes(t)
+
+def json_is_target_num(j: J.Json, +target: U32) -> Bool:
+  match j:
+    case J.JNum{val}: U32.is_eq(val, target)
+    case _: False{}
+
+def list_contains_num(l: List<&2, J.Json>, +target: U32) -> Bool:
+  match l:
+    case Nil{}: False{}
+    case h <> t:
+      Bool.pick(Bool, json_is_target_num(h, target), True{}, list_contains_num(t, target))
+
+def is_tempo_unavailable(+tempos_list: List<&2, J.Json>, +tempo_idx: U32) -> U32:
+  +tempo_num = U32.inc(tempo_idx)
+  +is_avail = list_contains_num(tempos_list, tempo_num)
+  Bool.pick(U32, is_avail, 0, 1)
+
+def day_unavail_mask(+day_arr: List<&2, J.Json>) -> U32:
+  +b0 = is_tempo_unavailable(day_arr, 0)
+  +b1 = is_tempo_unavailable(day_arr, 1)
+  +b2 = is_tempo_unavailable(day_arr, 2)
+  +b3 = is_tempo_unavailable(day_arr, 3)
+  +m0 = b0
+  +m1 = U32.shln(b1, 1n)
+  +m2 = U32.shln(b2, 2n)
+  +m3 = U32.shln(b3, 3n)
+  U32.or(m0, U32.or(m1, U32.or(m2, m3)))
+
+def prof_horarios_to_mask(h_obj: Maybe<&2, J.Json>) -> U32:
+  match h_obj:
+    case None{}:
+      1048575 # 2^20 - 1
+    case Some{+val}:
+      +m_seg = day_unavail_mask(J.Json.get_arr(val, "seg"))
+      +m_ter = day_unavail_mask(J.Json.get_arr(val, "ter"))
+      +m_qua = day_unavail_mask(J.Json.get_arr(val, "qua"))
+      +m_qui = day_unavail_mask(J.Json.get_arr(val, "qui"))
+      +m_sex = day_unavail_mask(J.Json.get_arr(val, "sex"))
+      +s0 = m_seg
+      +s1 = U32.shln(m_ter, 4n)
+      +s2 = U32.shln(m_qua, 8n)
+      +s3 = U32.shln(m_qui, 12n)
+      +s4 = U32.shln(m_sex, 16n)
+      U32.or(s0, U32.or(s1, U32.or(s2, U32.or(s3, s4))))
+
+def json_is_target_str(j: J.Json, +target: String) -> Bool:
+  match j:
+    case J.JStr{val}: String.eq(val, target)
+    case _: False{}
+
+def list_contains_str(l: List<&2, J.Json>, +target: String) -> Bool:
+  match l:
+    case Nil{}: False{}
+    case h <> t:
+      Bool.pick(Bool, json_is_target_str(h, target), True{}, list_contains_str(t, target))
+
+def find_prof_for_disc(+disc_nome: String, profs: List<&2, J.Json>, +cur_id: U32) -> U32:
+  match profs:
+    case Nil{}: 0
+    case +h <> t:
+      +discs_list = J.Json.get_arr(h, "disciplinas")
+      Bool.pick(U32, list_contains_str(discs_list, disc_nome),
+        cur_id,
+        find_prof_for_disc(disc_nome, t, U32.inc(cur_id)))
+
+def build_disc_profs(discs: List<&2, DiscEntry>, +profs: List<&2, J.Json>) -> List<&2, U32>:
+  match discs:
+    case Nil{}: Nil{}
+    case h <> t:
+      DEntry{nome, _, _, _} = h
+      +pid = find_prof_for_disc(nome, profs, 1)
+      pid <> build_disc_profs(t, profs)
+
+def repeat_val(+val: U32, +count: U32) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, U32.is_eq(count, 0), Nil{},
+    Bool.pick(List<&2, U32>, U32.is_eq(count, 1), (val <> Nil{}),
+      Bool.pick(List<&2, U32>, U32.is_eq(count, 2), (val <> (val <> Nil{})),
+        Bool.pick(List<&2, U32>, U32.is_eq(count, 3), (val <> (val <> (val <> Nil{}))),
+          (val <> (val <> (val <> (val <> Nil{}))))))))
+
+def collect_turma_slots(discs: List<&2, DiscEntry>, +turma_nome: String, +disc_id: U32) -> List<&2, U32>:
+  match discs:
+    case Nil{}: Nil{}
+    case h <> t:
+      DEntry{_, t_nome, aulas, _} = h
+      +matching = String.eq(t_nome, turma_nome)
+      +added = Bool.pick(List<&2, U32>, matching, repeat_val(disc_id, aulas), Nil{})
+      List.append(&2, U32, added, collect_turma_slots(t, turma_nome, U32.inc(disc_id)))
+
+def load_profs_unavail_masks(profs: List<&2, J.Json>) -> List<&2, U32>:
+  match profs:
+    case Nil{}: Nil{}
+    case +h <> t:
+      +m = prof_horarios_to_mask(J.Json.get(h, "horarios"))
+      m <> load_profs_unavail_masks(t)
+
+def list_find_disc_index(l: List<&2, DiscEntry>, +target: String, +cur: U32) -> U32:
+  match l:
+    case Nil{}: 0
+    case h <> t:
+      DEntry{nome, _, _, _} = h
+      Bool.pick(U32, String.eq(nome, target), cur, list_find_disc_index(t, target, U32.inc(cur)))
+
+def json_to_str(j: J.Json) -> String:
+  match j:
+    case J.JStr{s}: s
+    case _: ""
+
+type UnidasPair is Data:
+  UPair{u1: U32, u2: U32}
+
+def load_unidas_pair.step(g_discs: List<&2, J.Json>, +discs: List<&2, DiscEntry>) -> UnidasPair:
+  match g_discs:
+    case d1 <> d2 <> _:
+      +n1 = json_to_str(d1)
+      +n2 = json_to_str(d2)
+      UPair{list_find_disc_index(discs, n1, 1), list_find_disc_index(discs, n2, 1)}
+    case _: UPair{0, 0}
+
+def load_unidas_pair(unidas_arr: List<&2, J.Json>, +discs: List<&2, DiscEntry>) -> UnidasPair:
+  match unidas_arr:
+    case Nil{}: UPair{0, 0}
+    case h <> _:
+      load_unidas_pair.step(J.Json.get_arr(h, "disciplinas"), discs)
+
+def slots20_to_week5(slots: List<&2, U32>) -> Week5:
+  match slots:
+    case s0 <> s1 <> s2 <> s3 <> s4 <> s5 <> s6 <> s7 <> s8 <> s9 <> s10 <> s11 <> s12 <> s13 <> s14 <> s15 <> s16 <> s17 <> s18 <> s19 <> _:
+      make_w5(
+        make_d4(s0, s1, s2, s3),
+        make_d4(s4, s5, s6, s7),
+        make_d4(s8, s9, s10, s11),
+        make_d4(s12, s13, s14, s15),
+        make_d4(s16, s17, s18, s19)
+      )
+    case _:
+      make_w5(
+        make_d4(0, 0, 0, 0),
+        make_d4(0, 0, 0, 0),
+        make_d4(0, 0, 0, 0),
+        make_d4(0, 0, 0, 0),
+        make_d4(0, 0, 0, 0)
+      )
+
+# ------------------------------------------------------------------------------
+# 6. SERIALIZAÇÃO DINÂMICA DO RESULTADO (TurmaHorarioResult[])
+# ------------------------------------------------------------------------------
+
+def get_str.step(m: Maybe<&2, String>, default: String) -> String:
+  match m:
+    case None{}: default
+    case Some{v}: v
+
+def list_get_str(l: List<&2, String>, +idx: U32, default: String) -> String:
+  get_str.step(List.get(&2, String, l, U32.to_nat(idx)), default)
+
+def list_get_disc_nome.step(is_gt: Bool, l: List<&2, String>, disc_id: U32) -> String:
+  match is_gt:
+    case False{}: "Livre"
+    case True{}: get_str.step(List.get(&2, String, l, U32.to_nat(U32.sub(disc_id, 1))), "Livre")
+
+def list_get_disc_nome(l: List<&2, String>, +disc_id: U32) -> String:
+  list_get_disc_nome.step(U32.is_gt(disc_id, 0), l, disc_id)
 
 def dia_to_str(+idx: U32) -> String:
   Bool.pick(String, U32.is_lt(idx, 3),
@@ -380,69 +609,72 @@ def dia_to_str(+idx: U32) -> String:
       Bool.pick(String, U32.is_eq(idx, 1), "Terca", "Quarta")),
     Bool.pick(String, U32.is_eq(idx, 3), "Quinta", "Sexta"))
 
-def serialize_tempos(d: Day4) -> List<&2, J.Json>:
+def serialize_tempos(d: Day4, +disc_nomes: List<&2, String>) -> List<&2, J.Json>:
   D4{t0, t1, t2, t3} = d
-  [
-    J.JObj{["descricao"], [J.JStr{disc_to_nome(t0)}]},
-    J.JObj{["descricao"], [J.JStr{disc_to_nome(t1)}]},
-    J.JObj{["descricao"], [J.JStr{disc_to_nome(t2)}]},
-    J.JObj{["descricao"], [J.JStr{disc_to_nome(t3)}]}
-  ]
+  (J.JObj{["descricao"], [J.JStr{list_get_disc_nome(disc_nomes, t0)}]} <>
+  (J.JObj{["descricao"], [J.JStr{list_get_disc_nome(disc_nomes, t1)}]} <>
+  (J.JObj{["descricao"], [J.JStr{list_get_disc_nome(disc_nomes, t2)}]} <>
+  (J.JObj{["descricao"], [J.JStr{list_get_disc_nome(disc_nomes, t3)}]} <> Nil{}))))
 
-def serialize_dia(+idx: U32, d: Day4) -> J.Json:
+def serialize_dia(+idx: U32, d: Day4, +disc_nomes: List<&2, String>) -> J.Json:
   J.JObj{
     ["dia", "tempos"],
-    [J.JStr{dia_to_str(idx)}, J.JArr{serialize_tempos(d)}]
+    [J.JStr{dia_to_str(idx)}, J.JArr{serialize_tempos(d, disc_nomes)}]
   }
 
-def serialize_turma(nome: String, w: Week5) -> J.Json:
+def serialize_turma(nome: String, w: Week5, +disc_nomes: List<&2, String>) -> J.Json:
   W5{d0, d1, d2, d3, d4} = w
   J.JObj{
     ["turma", "horario"],
     [
       J.JStr{nome},
       J.JArr{[
-        serialize_dia(0, d0),
-        serialize_dia(1, d1),
-        serialize_dia(2, d2),
-        serialize_dia(3, d3),
-        serialize_dia(4, d4)
+        serialize_dia(0, d0, disc_nomes),
+        serialize_dia(1, d1, disc_nomes),
+        serialize_dia(2, d2, disc_nomes),
+        serialize_dia(3, d3, disc_nomes),
+        serialize_dia(4, d4, disc_nomes)
       ]}
     ]
   }
 
-def serialize_resultado(q: Quadro3) -> J.Json:
+def serialize_resultado(q: Quadro3, +turmas: List<&2, String>, +disc_nomes: List<&2, String>) -> J.Json:
   Q3{t0, t1, t2} = q
+  +n0 = list_get_str(turmas, 0, "Turma 1")
+  +n1 = list_get_str(turmas, 1, "Turma 2")
+  +n2 = list_get_str(turmas, 2, "Turma 3")
   J.JArr{[
-    serialize_turma("Turma 2026", t0),
-    serialize_turma("Turma 2025", t1),
-    serialize_turma("Turma 2024", t2)
+    serialize_turma(n0, t0, disc_nomes),
+    serialize_turma(n1, t1, disc_nomes),
+    serialize_turma(n2, t2, disc_nomes)
   ]}
 
 # ------------------------------------------------------------------------------
-# LOOP EVOLUTIVO E ENTRADA PRINCIPAL
+# 7. EXECUÇÃO DA OTIMIZAÇÃO E ENTRADA PRINCIPAL
 # ------------------------------------------------------------------------------
 
-def run_evolution(+generations: Nat, +seed: U32) -> Quadro3:
-  +pop0 = GA.gen_population(~Quadro3, ~init_gene, ~fitness, 5n, seed)
-  +pop_final = GA.run_generations_eval(~Quadro3, ~reproduce_eval, generations, pop0, R.step(seed))
-  +best_fin = GA.best_ind(Quadro3, pop_final)
-  GA.Ind.gene(Quadro3, best_fin)
+def run_evolution(+base_q: Quadro3, +spec: FastSpec, +generations: Nat, +seed: U32) -> Cand:
+  +pop0 = build_pop_tree(5n, base_q, spec, seed)
+  +pop_final = GA.run_generations_eval(~Cand, ~reproduce_eval, generations, pop0, R.step(seed))
+  +best_fin = GA.best_ind(Cand, pop_final)
+  GA.Ind.gene(Cand, best_fin)
 
-def main.with_config(config_source: String, +generations: Nat, +seed: U32) -> IO(Unit):
-  +champion = run_evolution(generations, seed)
-  +penalties = evaluate_quadro(champion)
-  +fit_val = fitness(champion)
-  +json_result = serialize_resultado(champion)
+def solve_from_form_data.report(champion_cand: Cand, +turmas: List<&2, String>, +disc_nomes: List<&2, String>, +n_profs: Nat, +generations: Nat) -> IO(Unit):
+  CD{+champion_q, spec_res} = champion_cand
+  +penalties = evaluate_quadro(champion_q, spec_res)
+  +fit_val = Bool.pick(U32, U32.is_lt(penalties, 10000), (10000 - penalties : U32), 0)
+  +json_result = serialize_resultado(champion_q, turmas, disc_nomes)
   +json_str = J.Json.stringify(json_result)
-  
+
   IO.print(
     "================================================================\n" ++
-    "  SOLVER UNIFICADO DE HORÁRIO ESCOLAR EM BEND 2\n" ++
+    "  SOLVER DINÂMICO DE HORÁRIO ESCOLAR EM BEND 2 (100% JSON)\n" ++
     "================================================================\n" ++
-    "Fonte de Dados:       " ++ config_source ++ "\n" ++
+    "Turmas Identificadas: " ++ Nat.show(List.length(&2, String, turmas)) ++ "\n" ++
+    "Disciplinas Mapeadas: " ++ Nat.show(List.length(&2, String, disc_nomes)) ++ "\n" ++
+    "Professores Mapeados: " ++ Nat.show(n_profs) ++ "\n" ++
     "Aptidão Ótima:        " ++ U32.show(fit_val) ++ " / 10000 pts\n" ++
-    "Penalidades Restantes:" ++ U32.show(penalties) ++ " (Ótimo = 0)\n" ++
+    "Penalidades Finais:   " ++ U32.show(penalties) ++ " (Ótimo = 0)\n" ++
     "População:            32 indivíduos (árvore binária profundidade 5)\n" ++
     "Gerações Executadas:  " ++ Nat.show(generations) ++ "\n" ++
     "================================================================\n" ++
@@ -451,31 +683,61 @@ def main.with_config(config_source: String, +generations: Nat, +seed: U32) -> IO
     "================================================================\n"
   )
 
+def solve_from_form_data.step(u_pair: UnidasPair, +turmas: List<&2, String>, +discs: List<&2, DiscEntry>,
+                              disc_nomes: List<&2, String>, disc_profs: List<&2, U32>,
+                              prof_masks: List<&2, U32>, +n_profs: Nat, +generations: Nat, +seed: U32) -> IO(Unit):
+  UPair{u1, u2} = u_pair
+  +n0 = list_get_str(turmas, 0, "Turma 1")
+  +n1 = list_get_str(turmas, 1, "Turma 2")
+  +n2 = list_get_str(turmas, 2, "Turma 3")
+  +t0_slots = collect_turma_slots(discs, n0, 1)
+  +t1_slots = collect_turma_slots(discs, n1, 1)
+  +t2_slots = collect_turma_slots(discs, n2, 1)
+  +base_q = make_q3(slots20_to_week5(t0_slots), slots20_to_week5(t1_slots), slots20_to_week5(t2_slots))
+  +dp_table = fill_table32(disc_profs, empty_t32(), 1)
+  +pm_table = fill_table16(prof_masks, empty_t16(), 1)
+  +spec = make_fspec(dp_table, pm_table, u1, u2)
+  +champion = run_evolution(base_q, spec, generations, seed)
+  solve_from_form_data.report(champion, turmas, disc_nomes, n_profs, generations)
+
+def solve_from_form_data(+fd: J.Json, +generations: Nat, +seed: U32) -> IO(Unit):
+  +turmas_arr = J.Json.get_arr(fd, "turmas")
+  +discs_arr = J.Json.get_arr(fd, "disciplinas")
+  +profs_arr = J.Json.get_arr(fd, "professores")
+  +unidas_arr = J.Json.get_arr(fd, "disciplinas_unidas")
+
+  +turmas = load_turmas_names(turmas_arr)
+  +discs = load_disciplinas(discs_arr)
+  +disc_nomes = load_disc_nomes(discs)
+  +disc_profs = build_disc_profs(discs, profs_arr)
+  +prof_masks = load_profs_unavail_masks(profs_arr)
+  +n_profs = List.length(&2, J.Json, profs_arr)
+  +u_pair = load_unidas_pair(unidas_arr, discs)
+  solve_from_form_data.step(u_pair, turmas, discs, disc_nomes, disc_profs, prof_masks, n_profs, generations, seed)
+
+def main.handle_form_data(form_data: Maybe<&2, J.Json>) -> IO(Unit):
+  match form_data:
+    case None{}:
+      IO.print("Erro: formData ausente no JSON fornecido.\n")
+    case Some{+fd}:
+      solve_from_form_data(fd, 400n, 88442211)
+
+def main.handle_root(root: J.Json) -> IO(Unit):
+  main.handle_form_data(J.Json.get(root, "formData"))
+
 def main.handle_parse(res: J.ParseRes) -> IO(Unit):
   match res:
-    case J.POk{_}:
-      main.with_config(
-        "JSON do Usuário (Formulário Horário 2024-2026 Parsed com Sucesso)",
-        400n,
-        88442211
-      )
     case J.PFail{err}:
-      main.with_config(
-        "Ambiente HORARIO_JSON (Falha no Parse: " ++ err ++ ")",
-        400n,
-        88442211
-      )
+      IO.print("Falha ao analisar JSON: " ++ err ++ "\n")
+    case J.POk{root}:
+      main.handle_root(root)
 
 def main.dispatch(env_res: Result<&1, &1, U32 & String, String>) -> IO(Unit):
   match env_res:
-    case Done{json_content}:
-      main.handle_parse(J.parse_json(json_content))
     case Fail{_}:
-      main.with_config(
-        "FormularioHorario Padrão (Turmas 2026, 2025, 2024 = 60 slots)",
-        400n,
-        88442211
-      )
+      IO.print("Aviso: HORARIO_JSON nao encontrado no ambiente. Forneça o JSON via env HORARIO_JSON.\n")
+    case Done{json_str}:
+      main.handle_parse(J.parse_json(json_str))
 
 def main() -> IO(Unit):
   do IO<Unit>:
