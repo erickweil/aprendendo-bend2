@@ -4,6 +4,7 @@ import ./../utils/random.bend as R
 import ./../operators.bend as Op
 import ./../utils/json.bend as J
 import ./../utils/poptree.bend as T
+import ./../utils/bits.bend as B
 
 # ==============================================================================
 # SOLVER DE HORÁRIO ESCOLAR EM BEND 2 — DADOS VINDOS DE JSON
@@ -18,8 +19,7 @@ import ./../utils/poptree.bend as T
 # com o original em Rust (my-website/rust-wasm/src/horario/). Ver a tabela
 # "Estado do port em relação ao original em Rust" no README.md da raiz.
 # Resumo: genoma fixo em 3 turmas x 5 dias x 4 tempos; `repeat_val` satura em 4
-# aulas; Table16 comporta 15 professores e Table32 31 disciplinas;
-# só o 1o professor de cada disciplina é considerado;
+# aulas; no máximo 15 professores e 31 disciplinas;
 # `disciplinas_unidas` cobre só o 1o par, fixo entre as turmas 0 e 1;
 # `turmas[].horarios` (disponibilidade da turma) não é lido.
 # ==============================================================================
@@ -208,23 +208,38 @@ def fill_table16(l: List<&2, U32>, +t: Table16, +cur: U32) -> Table16:
       +t_next = Table16.set(t, cur, h)
       fill_table16(rest, t_next, U32.inc(cur))
 
-# `disc_info` guarda TRES coisas por disciplina numa palavra so:
-#   bits 0-7  : id do professor (1..15, 0 = nenhum)
-#   bits 8-15 : agrupar * 2 + dividir
+# `disc_info` guarda duas coisas por disciplina numa palavra so:
+#   bits 0-15  : CONJUNTO de professores (bit p-1 = o professor p da essa
+#                disciplina). O Rust itera `disciplina.professores`, que e uma
+#                lista; guardar so o primeiro perdia os demais.
+#   bits 16-23 : agrupar * 2 + dividir
 # Uma Table32 adicional para o agrupamento fazia o backend C falhar com
 # "an arity over 255" (o interpretador aceitava, mas `bend -o` nao compilava
 # mais). Empacotar mantem FastSpec com a mesma aridade de antes.
+# `slot_unavail` e a indisponibilidade TRANSPOSTA: por slot (0..19), o conjunto
+# de professores indisponiveis ali. A forma original (professor -> 20 bits de
+# slot) obrigaria a colher um bit de cada professor a cada avaliacao de slot.
+#
+# Cabe numa Table16 porque guarda DOIS slots por palavra (16 bits cada, e a
+# mascara usa no maximo 15): 20 slots -> 10 palavras. Usar uma Table32 aqui
+# fazia `bend -o` falhar com "an arity over 255"; assim FastSpec fica com a
+# mesma aridade de antes desta mudanca.
 type FastSpec is Data:
-  FSpec{disc_info: Table32, prof_masks: Table16, u1: U32, u2: U32}
+  FSpec{disc_info: Table32, slot_unavail: Table16, u1: U32, u2: U32}
 
-def make_fspec(disc_info: Table32, prof_masks: Table16, u1: U32, u2: U32) -> FastSpec:
-  FSpec{disc_info, prof_masks, u1, u2}
+def make_fspec(disc_info: Table32, slot_unavail: Table16, u1: U32, u2: U32) -> FastSpec:
+  FSpec{disc_info, slot_unavail, u1, u2}
 
-def disc_prof(+t: Table32, +d: U32) -> U32:
-  U32.and(Table32.get(t, d), 255)
+def slot_unavail_get(+t: Table16, +slot: U32) -> U32:
+  +par = U32.and(slot, 1)
+  +word = Table16.get(t, U32.shrn(slot, 1n))
+  U32.and(U32.shrn(word, U32.to_nat(U32.mul(par, 16))), 65535)
+
+def disc_pmask(+t: Table32, +d: U32) -> U32:
+  U32.and(Table32.get(t, d), 65535)
 
 def disc_group(+t: Table32, +d: U32) -> U32:
-  U32.shrn(Table32.get(t, d), 8n)
+  U32.shrn(Table32.get(t, d), 16n)
 
 type Cand is Data:
   CD{q: Quadro3, spec: FastSpec}
@@ -236,64 +251,58 @@ def make_cand(q: Quadro3, spec: FastSpec) -> Cand:
 # 3. FUNÇÃO DE AVALIAÇÃO DE APTIDÃO (1:1 COM RUST)
 # ------------------------------------------------------------------------------
 
-# Penalidade de UM professor num slot. `k` e quantas turmas querem esse
-# professor ali e `avail` e 1 se ele esta disponivel. Equivale, termo a termo, a
-# `fitness += disponibilidade * 50` do pass 2 de horario_genetic.rs, onde
-# disponibilidade = avail - k ja veio decrementada pelo pass 1.
-def pen_term(+k: U32, +avail: U32) -> U32:
-  Bool.pick(U32, U32.is_gt(k, avail), U32.mul(U32.sub(k, avail), 50), 0)
-
-# O Rust conta a demanda acumulada por (professor, slot) e pune proporcional ao
-# excesso; a versao anterior daqui comparava os pares (A,B), (A,C) e (B,C) a 50
-# pontos cada e somava a indisponibilidade a parte. Isso nao so mudava a escala
-# como mudava a ORDENACAO entre solucoes: tres turmas disputando o mesmo
-# professor davam 150 aqui contra 300 no Rust.
+# Penalidade de um slot com CONJUNTOS de professores.
 #
-# Forma fechada, conferida contra a dupla-passada do Rust nas 1024 combinacoes
-# de (professores das 3 turmas) x (disponibilidade): a contribuicao de cada
-# turma e max(0, k - avail) * 50.
+# O Rust conta, por (professor, slot), quantas turmas o querem (pass 1) e pune
+# proporcional ao excesso, uma vez por turma que o usa (pass 2). Somando por
+# professor em vez de por turma, isso vira
+#   total = Σ_p  k(p) * max(0, k(p) - disponivel(p)) * 50
+# com k(p) = quantas das 3 turmas querem p. Como k so pode ser 1, 2 ou 3, os
+# cinco casos possiveis sao constantes e o conjunto de professores em cada caso
+# sai de operacoes bitwise:
+#   k=1: 0 se disponivel, 50 se nao
+#   k=2: 100 se disponivel, 200 se nao
+#   k=3: 300 se disponivel, 450 se nao
+# Conferido por enumeracao contra a dupla passada do Rust nas 65536 combinacoes
+# de (3 mascaras de professor) x (disponibilidade de 4 professores).
 #
-# As igualdades so contam quando o professor existe (pA > 0): sem isso, dois
-# slots sem professor (0 == 0) inflariam k um do outro.
-def eval_prof_slot(+pA: U32, +pB: U32, +pC: U32, +slot_idx: U32, +prof_masks: Table16) -> U32:
-  +ab = Bool.pick(U32, Bool.and(U32.is_gt(pA, 0), U32.is_eq(pA, pB)), 1, 0)
-  +ac = Bool.pick(U32, Bool.and(U32.is_gt(pA, 0), U32.is_eq(pA, pC)), 1, 0)
-  +bc = Bool.pick(U32, Bool.and(U32.is_gt(pB, 0), U32.is_eq(pB, pC)), 1, 0)
-  +kA = (1 + ab + ac : U32)
-  +kB = (1 + ab + bc : U32)
-  +kC = (1 + ac + bc : U32)
+# `unavail` e o conjunto de professores indisponiveis NESTE slot.
+def eval_prof_slot(+mA: U32, +mB: U32, +mC: U32, +unavail: U32) -> U32:
+  +e3 = U32.and(mA, U32.and(mB, mC))
+  +pares = U32.or(U32.and(mA, mB), U32.or(U32.and(mA, mC), U32.and(mB, mC)))
+  +e2 = U32.and(pares, U32.not(e3))
+  +e1 = U32.and(U32.or(mA, U32.or(mB, mC)), U32.not(U32.or(e2, e3)))
+  +avail = U32.not(unavail)
+  +c1u = B.popcount(U32.and(e1, unavail))
+  +c2a = B.popcount(U32.and(e2, avail))
+  +c2u = B.popcount(U32.and(e2, unavail))
+  +c3a = B.popcount(U32.and(e3, avail))
+  +c3u = B.popcount(U32.and(e3, unavail))
+  (c1u * 50 + c2a * 100 + c2u * 200 + c3a * 300 + c3u * 450 : U32)
 
-  +n_slot = U32.to_nat(slot_idx)
-  # prof_masks guarda INDISPONIBILIDADE: bit 1 = nao pode dar aula nesse slot.
-  +uA = U32.and(U32.shrn(Table16.get(prof_masks, pA), n_slot), 1)
-  +uB = U32.and(U32.shrn(Table16.get(prof_masks, pB), n_slot), 1)
-  +uC = U32.and(U32.shrn(Table16.get(prof_masks, pC), n_slot), 1)
-
-  +tA = Bool.pick(U32, U32.is_gt(pA, 0), pen_term(kA, U32.xor(uA, 1)), 0)
-  +tB = Bool.pick(U32, U32.is_gt(pB, 0), pen_term(kB, U32.xor(uB, 1)), 0)
-  +tC = Bool.pick(U32, U32.is_gt(pC, 0), pen_term(kC, U32.xor(uC, 1)), 0)
-  (tA + tB + tC : U32)
-
-def eval_day_prof(+d0: Day4, +d1: Day4, +d2: Day4, +dia: U32, +info: Table32, +prof_masks: Table16) -> U32:
+def eval_day_prof(+d0: Day4, +d1: Day4, +d2: Day4, +dia: U32, +info: Table32, +su: Table16) -> U32:
   D4{a0, a1, a2, a3} = d0
   D4{b0, b1, b2, b3} = d1
   D4{c0, c1, c2, c3} = d2
   +base_slot = U32.shln(dia, 2n)
-  +s0 = eval_prof_slot(disc_prof(info, a0), disc_prof(info, b0), disc_prof(info, c0), base_slot, prof_masks)
-  +s1 = eval_prof_slot(disc_prof(info, a1), disc_prof(info, b1), disc_prof(info, c1), U32.add(base_slot, 1), prof_masks)
-  +s2 = eval_prof_slot(disc_prof(info, a2), disc_prof(info, b2), disc_prof(info, c2), U32.add(base_slot, 2), prof_masks)
-  +s3 = eval_prof_slot(disc_prof(info, a3), disc_prof(info, b3), disc_prof(info, c3), U32.add(base_slot, 3), prof_masks)
+  +s1i = U32.add(base_slot, 1)
+  +s2i = U32.add(base_slot, 2)
+  +s3i = U32.add(base_slot, 3)
+  +s0 = eval_prof_slot(disc_pmask(info, a0), disc_pmask(info, b0), disc_pmask(info, c0), slot_unavail_get(su, base_slot))
+  +s1 = eval_prof_slot(disc_pmask(info, a1), disc_pmask(info, b1), disc_pmask(info, c1), slot_unavail_get(su, s1i))
+  +s2 = eval_prof_slot(disc_pmask(info, a2), disc_pmask(info, b2), disc_pmask(info, c2), slot_unavail_get(su, s2i))
+  +s3 = eval_prof_slot(disc_pmask(info, a3), disc_pmask(info, b3), disc_pmask(info, c3), slot_unavail_get(su, s3i))
   (s0 + s1 + s2 + s3 : U32)
 
-def eval_prof_penalties(+w0: Week5, +w1: Week5, +w2: Week5, +info: Table32, +prof_masks: Table16) -> U32:
+def eval_prof_penalties(+w0: Week5, +w1: Week5, +w2: Week5, +info: Table32, +su: Table16) -> U32:
   W5{a0, a1, a2, a3, a4} = w0
   W5{b0, b1, b2, b3, b4} = w1
   W5{c0, c1, c2, c3, c4} = w2
-  +d0 = eval_day_prof(a0, b0, c0, 0, info, prof_masks)
-  +d1 = eval_day_prof(a1, b1, c1, 1, info, prof_masks)
-  +d2 = eval_day_prof(a2, b2, c2, 2, info, prof_masks)
-  +d3 = eval_day_prof(a3, b3, c3, 3, info, prof_masks)
-  +d4 = eval_day_prof(a4, b4, c4, 4, info, prof_masks)
+  +d0 = eval_day_prof(a0, b0, c0, 0, info, su)
+  +d1 = eval_day_prof(a1, b1, c1, 1, info, su)
+  +d2 = eval_day_prof(a2, b2, c2, 2, info, su)
+  +d3 = eval_day_prof(a3, b3, c3, 3, info, su)
+  +d4 = eval_day_prof(a4, b4, c4, 4, info, su)
   (d0 + d1 + d2 + d3 + d4 : U32)
 
 def eval_unidas_tempo(+t0_val: U32, +t1_val: U32, +u1: U32, +u2: U32) -> U32:
@@ -376,13 +385,13 @@ def eval_turma_grouping(w: Week5, +gt: Table32) -> U32:
 
 def evaluate_quadro(q: Quadro3, spec: FastSpec) -> U32:
   Q3{t0, t1, t2} = q
-  FSpec{+info, prof_masks, u1, u2} = spec
+  FSpec{+info, su, u1, u2} = spec
   +t0 = t0; +t1 = t1; +t2 = t2
   +g0 = eval_turma_grouping(t0, info)
   +g1 = eval_turma_grouping(t1, info)
   +g2 = eval_turma_grouping(t2, info)
   +group_total = (g0 + g1 + g2 : U32)
-  +prof_total = eval_prof_penalties(t0, t1, t2, info, prof_masks)
+  +prof_total = eval_prof_penalties(t0, t1, t2, info, su)
   +unidas_total = eval_unidas_week(t0, t1, u1, u2)
   (group_total + prof_total + unidas_total : U32)
 
@@ -585,27 +594,31 @@ def list_contains_str(l: List<&2, J.Json>, +target: String) -> Bool:
     case h <> t:
       Bool.pick(Bool, json_is_target_str(h, target), True{}, list_contains_str(t, target))
 
-def find_prof_for_disc(+disc_nome: String, profs: List<&2, J.Json>, +cur_id: U32) -> U32:
+# Conjunto de TODOS os professores que dao a disciplina, como bitmask (bit i =
+# o i-esimo professor do array). A versao anterior devolvia so o primeiro id, o
+# que descartava em silencio os demais — no dataset real, "Fabrica de Software
+# III" tem dois professores e um deles simplesmente nao existia para a fitness.
+def disc_prof_mask(+disc_nome: String, profs: List<&2, J.Json>, +bit: U32) -> U32:
   match profs:
     case Nil{}: 0
     case +h <> t:
       +discs_list = J.Json.get_arr(h, "disciplinas")
-      Bool.pick(U32, list_contains_str(discs_list, disc_nome),
-        cur_id,
-        find_prof_for_disc(disc_nome, t, U32.inc(cur_id)))
+      +b = Bool.pick(U32, list_contains_str(discs_list, disc_nome), U32.shln(1, U32.to_nat(bit)), 0)
+      U32.or(b, disc_prof_mask(disc_nome, t, U32.inc(bit)))
 
 def build_disc_profs(discs: List<&2, DiscEntry>, +profs: List<&2, J.Json>) -> List<&2, U32>:
   match discs:
     case Nil{}: Nil{}
     case h <> t:
       DEntry{nome, _, _, _, _} = h
-      +pid = find_prof_for_disc(nome, profs, 1)
-      pid <> build_disc_profs(t, profs)
+      +pm = disc_prof_mask(nome, profs, 0)
+      pm <> build_disc_profs(t, profs)
 
 # ATENCAO: satura em 4 — count >= 4 devolve 4 copias. Disciplinas com mais de 4
 # aulas sao rejeitadas por validate_input (secao 5B) antes de chegar aqui.
-# prof_id nos bits 0-7 e (agrupar * 2 + dividir) nos bits 8-15. validate_input
-# garante prof_id <= 15 e agrupar <= 127, entao nada transborda.
+# Mascara de professores nos bits 0-15 e (agrupar * 2 + dividir) nos bits 16-23.
+# validate_input garante no maximo 15 professores e agrupar <= 127, entao os
+# dois campos nunca se invadem.
 def build_disc_info(discs: List<&2, DiscEntry>, pids: List<&2, U32>) -> List<&2, U32>:
   match discs:
     case Nil{}: Nil{}
@@ -615,7 +628,7 @@ def build_disc_info(discs: List<&2, DiscEntry>, pids: List<&2, U32>) -> List<&2,
         case Nil{}: Nil{}
         case p <> pt:
           +packed = U32.add(U32.mul(agrupar, 2), dividir)
-          U32.add(p, U32.mul(packed, 256)) <> build_disc_info(t, pt)
+          U32.add(p, U32.mul(packed, 65536)) <> build_disc_info(t, pt)
 
 def repeat_val(+val: U32, +count: U32) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, U32.is_eq(count, 0), Nil{},
@@ -639,6 +652,25 @@ def load_profs_unavail_masks(profs: List<&2, J.Json>) -> List<&2, U32>:
     case +h <> t:
       +m = prof_horarios_to_mask(J.Json.get(h, "horarios"))
       m <> load_profs_unavail_masks(t)
+
+# Colhe o bit `slot` da mascara de cada professor e os empilha num conjunto:
+# resultado[bit i] = o i-esimo professor esta indisponivel neste slot.
+def transpose_slot(pmasks: List<&2, U32>, +slot: U32, +bit: U32) -> U32:
+  match pmasks:
+    case Nil{}: 0
+    case h <> t:
+      +b = U32.and(U32.shrn(h, U32.to_nat(slot)), 1)
+      U32.or(U32.shln(b, U32.to_nat(bit)), transpose_slot(t, slot, U32.inc(bit)))
+
+# Cada palavra junta os slots 2w (bits 0-15) e 2w+1 (bits 16-31).
+def build_slot_unavail(n: Nat, +pmasks: List<&2, U32>, +slot: U32) -> List<&2, U32>:
+  match n:
+    case 0n: Nil{}
+    case 1n+p:
+      +lo = transpose_slot(pmasks, slot, 0)
+      +hi = transpose_slot(pmasks, U32.inc(slot), 0)
+      +w = U32.or(lo, U32.shln(hi, 16n))
+      w <> build_slot_unavail(p, pmasks, U32.add(slot, 2))
 
 def list_find_disc_index(l: List<&2, DiscEntry>, +target: String, +cur: U32) -> U32:
   match l:
@@ -760,11 +792,11 @@ def check_agrupar(discs: List<&2, DiscEntry>) -> List<&2, String>:
       +agrupar = agrupar
       +e = err_unless(U32.is_le(agrupar, 127),
         "disciplina \"" ++ nome ++ "\" tem agrupar=" ++ U32.show(agrupar) ++
-        "; o maximo empacotavel em disc_info e 127")
+        "; o maximo empacotavel nos bits 16-23 de disc_info e 127")
       List.append(&2, String, e, check_agrupar(t))
 
-# pid == 0 significa que find_prof_for_disc nao achou professor algum: a
-# disciplina deixa de gerar qualquer penalidade de choque ou indisponibilidade.
+# mascara 0 significa que a disciplina nao aparece em nenhum professor: ela
+# deixa de gerar qualquer penalidade de choque ou indisponibilidade.
 def check_disc_profs(discs: List<&2, DiscEntry>, pids: List<&2, U32>) -> List<&2, String>:
   match discs:
     case Nil{}: Nil{}
@@ -947,8 +979,10 @@ def solve_from_form_data.step(u_pair: UnidasPair, +turmas: List<&2, String>, +di
                          List.length(&2, U32, t2_slots))
   +base_q = make_q3(slots20_to_week5(t0_slots), slots20_to_week5(t1_slots), slots20_to_week5(t2_slots))
   +info_table = fill_table32(build_disc_info(discs, disc_profs), empty_t32(), 1)
-  +pm_table = fill_table16(prof_masks, empty_t16(), 1)
-  +spec = make_fspec(info_table, pm_table, u1, u2)
+  # slot_unavail e indexada de 0 (slots 0..19), nao de 1 como as tabelas de
+  # disciplina/professor.
+  +su_table = fill_table16(build_slot_unavail(10n, prof_masks, 0), empty_t16(), 0)
+  +spec = make_fspec(info_table, su_table, u1, u2)
   solve_from_form_data.guard(errs, base_q, spec, turmas, disc_nomes, n_profs, generations, seed)
 
 def solve_from_form_data(+fd: J.Json, +generations: Nat, +seed: U32) -> IO(Unit):

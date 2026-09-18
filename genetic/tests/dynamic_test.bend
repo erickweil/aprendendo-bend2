@@ -50,6 +50,10 @@ def mk_t32(l: List<&2, U32>) -> H.Table32:
 def mk_t16(l: List<&2, U32>) -> H.Table16:
   H.fill_table16(l, H.empty_t16(), 1)
 
+# slot_unavail e indexada a partir de 0, nao de 1
+def mk_t16_0(l: List<&2, U32>) -> H.Table16:
+  H.fill_table16(l, H.empty_t16(), 0)
+
 def mk_disc(nome: String, turma: String, aulas: U32) -> H.DiscEntry:
   H.DEntry{nome, turma, aulas, 2, 0}
 
@@ -118,9 +122,10 @@ def run_checks.fd(+fd: J.Json) -> String:
   +t30 = U32.is_eq(H.run_penalty(7, 0), 0)     # agrupar = 0 desliga a regra
 
   # --- varredura de blocos num dia de 4 tempos ---
-    # disc_info: prof nos bits 0-7 (aqui 1) e agrupar*2+dividir nos bits 8-15.
+    # disc_info: mascara de professores nos bits 0-15 e agrupar*2+dividir nos 16-23.
   # discs 1, 2 e 4 com agrupar=2; disc 3 com agrupar=4; dividir 0 em todas.
-  +gt = mk_t32([1025, 1025, 2049, 1025])
+  # (prof 1 = mascara 1; agrupar*2 nos bits 16+: 4*65536=262144, 8*65536=524288)
+  +gt = mk_t32([262145, 262145, 524289, 262145])
   +t31 = U32.is_eq(H.eval_day_grouping(H.make_d4(1, 1, 2, 2), gt), 0)
   +t32 = U32.is_eq(H.eval_day_grouping(H.make_d4(1, 2, 3, 4), gt), 80)  # 4 blocos de 1
   +t33 = U32.is_eq(H.eval_day_grouping(H.make_d4(3, 3, 3, 3), gt), 0)    # bloco de 4, g=4
@@ -128,35 +133,46 @@ def run_checks.fd(+fd: J.Json) -> String:
   +t35 = U32.is_eq(H.eval_day_grouping(H.make_d4(1, 1, 1, 2), gt), 40)   # bloco de 3 com g=2
 
   # --- empacotamento prof + agrupamento na mesma palavra ---
-  # build_disc_info(disc com agrupar=4, dividir=0, prof 7) = 7 + 8*256 = 2055
-  +info1 = mk_t32([2055])
-  +t36 = U32.is_eq(H.disc_prof(info1, 1), 7)
+  # disciplina com professores {1,2,3} (mascara 7), agrupar=4, dividir=0:
+  # 7 + 8*65536 = 524295
+  +info1 = mk_t32([524295])
+  +t36 = U32.is_eq(H.disc_pmask(info1, 1), 7)
   +t37 = U32.is_eq(H.disc_group(info1, 1), 8)
-  +t38 = U32.is_eq(H.disc_prof(info1, 2), 0)    # fora da tabela: sem professor
+  +t38 = U32.is_eq(H.disc_pmask(info1, 2), 0)   # fora da tabela: sem professor
   +t39 = U32.is_eq(H.disc_group(info1, 2), 0)   # fora da tabela: regra desligada
   +t40 = Nat.is_eq(List.length(&2, String,
     H.check_agrupar([H.DEntry{"X", "T-A", 4, 200, 0}])), 1n)
   +t41 = Nat.is_eq(List.length(&2, String,
     H.check_agrupar([H.DEntry{"X", "T-A", 4, 4, 0}])), 0n)
 
-  # --- choque de professor: contagem acumulada, como o pass 1+2 do Rust ---
-  +livre = mk_t16([0, 0, 0])            # ninguem indisponivel
-  +p1_ocupado = mk_t16([1])             # professor 1 indisponivel no slot 0
-  +t42 = U32.is_eq(H.eval_prof_slot(1, 2, 3, 0, livre), 0)     # 3 professores distintos
-  +t43 = U32.is_eq(H.eval_prof_slot(1, 1, 3, 0, livre), 100)   # 2 turmas disputam o prof 1
-  +t44 = U32.is_eq(H.eval_prof_slot(1, 1, 1, 0, livre), 300)   # 3 turmas disputam (antes: 150)
-  +t45 = U32.is_eq(H.eval_prof_slot(1, 0, 0, 0, livre), 0)     # sem disputa, sem penalidade
-  +t46 = U32.is_eq(H.eval_prof_slot(0, 0, 0, 0, livre), 0)     # slot sem professor algum
-  +t47 = U32.is_eq(H.eval_prof_slot(1, 0, 0, 0, p1_ocupado), 50)   # indisponivel
-  +t48 = U32.is_eq(H.eval_prof_slot(1, 1, 0, 0, p1_ocupado), 200)  # indisponivel E disputado
-  +t49 = U32.is_eq(H.eval_prof_slot(1, 0, 0, 1, p1_ocupado), 0)    # so o slot 0 e bloqueado
-  +t50 = U32.is_eq(H.pen_term(3, 1), 100)
-  +t51 = U32.is_eq(H.pen_term(1, 1), 0)
-  +t52 = U32.is_eq(H.pen_term(1, 0), 50)
+  # --- choque de professor: conjuntos de professores + contagem acumulada ---
+  # Professor i ocupa o bit i-1: prof 1 -> 1, prof 2 -> 2, prof 3 -> 4.
+  +t42 = U32.is_eq(H.eval_prof_slot(1, 2, 4, 0), 0)     # 3 professores distintos
+  +t43 = U32.is_eq(H.eval_prof_slot(1, 1, 4, 0), 100)   # 2 turmas disputam o prof 1
+  +t44 = U32.is_eq(H.eval_prof_slot(1, 1, 1, 0), 300)   # 3 turmas disputam (antes: 150)
+  +t45 = U32.is_eq(H.eval_prof_slot(1, 0, 0, 0), 0)     # sem disputa, sem penalidade
+  +t46 = U32.is_eq(H.eval_prof_slot(0, 0, 0, 0), 0)     # slot sem professor algum
+  +t47 = U32.is_eq(H.eval_prof_slot(1, 0, 0, 1), 50)    # prof 1 indisponivel
+  +t48 = U32.is_eq(H.eval_prof_slot(1, 1, 0, 1), 200)   # indisponivel E disputado
+  +t49 = U32.is_eq(H.eval_prof_slot(1, 1, 1, 1), 450)   # indisponivel e disputado por 3
+  # Disciplina com DOIS professores ({1,2} = mascara 3) contra uma com so o 2:
+  # o professor 2 fica disputado por duas turmas, o 1 nao. Era invisivel antes,
+  # quando so o primeiro professor de cada disciplina contava.
+  +t50 = U32.is_eq(H.eval_prof_slot(3, 2, 0, 0), 100)
+  +t51 = U32.is_eq(H.eval_prof_slot(3, 3, 0, 0), 200)   # os dois professores disputados
+  +t52 = U32.is_eq(H.eval_prof_slot(3, 4, 0, 0), 0)     # nenhum professor em comum
+
+  # --- indisponibilidade transposta: 2 slots por palavra ---
+  # palavra 0 = slot 0 nos bits 0-15, slot 1 nos bits 16-31
+  +su = mk_t16_0([131073])   # slot 0 -> {prof 1}, slot 1 -> {prof 2}
+  +t53 = U32.is_eq(H.slot_unavail_get(su, 0), 1)
+  +t54 = U32.is_eq(H.slot_unavail_get(su, 1), 2)
+  +t55 = U32.is_eq(H.slot_unavail_get(su, 2), 0)
 
   +n = (fail_count(t42) + fail_count(t43) + fail_count(t44) + fail_count(t45) +
         fail_count(t46) + fail_count(t47) + fail_count(t48) + fail_count(t49) +
         fail_count(t50) + fail_count(t51) + fail_count(t52) +
+        fail_count(t53) + fail_count(t54) + fail_count(t55) +
         fail_count(t36) + fail_count(t37) + fail_count(t38) + fail_count(t39) +
         fail_count(t40) + fail_count(t41) +
         fail_count(t23) + fail_count(t24) + fail_count(t25) + fail_count(t26) +
@@ -205,8 +221,8 @@ def run_checks.fd(+fd: J.Json) -> String:
   line(t33, "eval_day_grouping: [3,3,3,3] com g=4 nao penaliza") ++
   line(t34, "eval_day_grouping: [3,3,1,1] penaliza o bloco partido de g=4") ++
   line(t35, "eval_day_grouping: [1,1,1,2] penaliza o bloco de 3 com g=2") ++
-  line(t36, "disc_info: disc_prof extrai o professor dos bits 0-7") ++
-  line(t37, "disc_info: disc_group extrai agrupar/dividir dos bits 8-15") ++
+  line(t36, "disc_info: disc_pmask extrai o conjunto de professores dos bits 0-15") ++
+  line(t37, "disc_info: disc_group extrai agrupar/dividir dos bits 16-23") ++
   line(t38, "disc_info: indice fora da tabela nao tem professor") ++
   line(t39, "disc_info: indice fora da tabela tem a regra desligada") ++
   line(t40, "check_agrupar ACUSA agrupar=200 (nao cabe em 7 bits)") ++
@@ -218,10 +234,13 @@ def run_checks.fd(+fd: J.Json) -> String:
   line(t46, "eval_prof_slot: slot sem professor nao penaliza") ++
   line(t47, "eval_prof_slot: professor indisponivel custa 50") ++
   line(t48, "eval_prof_slot: indisponivel E disputado custa 200") ++
-  line(t49, "eval_prof_slot: a mascara vale por slot, nao pelo dia todo") ++
-  line(t50, "pen_term(k=3, avail=1) == 100") ++
-  line(t51, "pen_term(k=1, avail=1) == 0") ++
-  line(t52, "pen_term(k=1, avail=0) == 50") ++
+  line(t49, "eval_prof_slot: indisponivel e disputado por 3 custa 450") ++
+  line(t50, "eval_prof_slot: 2o professor de uma disciplina TAMBEM conta") ++
+  line(t51, "eval_prof_slot: dois professores em comum penalizam os dois") ++
+  line(t52, "eval_prof_slot: disciplinas sem professor em comum nao penalizam") ++
+  line(t53, "slot_unavail_get: slot par sai dos bits 0-15") ++
+  line(t54, "slot_unavail_get: slot impar sai dos bits 16-31") ++
+  line(t55, "slot_unavail_get: slot sem indisponibilidade devolve 0") ++
   "Falhas: " ++ U32.show(n) ++ "\n" ++
   verdict(n)
 

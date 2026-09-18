@@ -178,15 +178,21 @@ simplificado e o que ainda falta:
 | :--- | :--- | :--- |
 | Choque de professor entre turmas | ✅ Portado | `eval_prof_slot` usa a forma fechada `max(0, k − disponível) × 50` por turma, equivalente termo a termo à dupla passada do Rust (conferido nas 1024 combinações de professores × disponibilidade). |
 | Indisponibilidade do professor | ✅ Portado | Máscara de 20 bits; entra na mesma fórmula acumulada, como `avail = 0` no Rust. |
-| Múltiplos professores por disciplina | ❌ Falta | `find_prof_for_disc` usa apenas o **primeiro** professor encontrado; o Rust itera `disciplina.professores` inteiro. |
+| Múltiplos professores por disciplina | ✅ Portado | `disc_prof_mask` monta o **conjunto** de professores como bitmask de 15 bits; a penalidade soma `k(p) × max(0, k(p) − disponível) × 50` sobre todos eles via popcount. |
 | Agrupamento em blocos de `agrupar` aulas | ✅ Portado | `run_penalty` usa `agrupar` e `dividir` do JSON; ideal = `g` se divisível, senão o múltiplo de `g` mais próximo de `len` (meio para longe de zero, como `f64::round()`); custo `\|len − ideal\| × 20`. |
 | `disciplinas_unidas` | ⚠️ Parcial | Apenas o **primeiro grupo** e as **duas primeiras** disciplinas dele, e a comparação é fixa entre as turmas de índice 0 e 1. |
 | Disponibilidade da turma (`turmas[].horarios`) | ❌ Falta | O Rust pune −1000 por slot ativo vazio ou slot inativo preenchido. O Bend assume 5 dias × 4 tempos sempre ativos. |
 | Semana de 7 dias (Dom–Sáb) | ❌ Falta | O genoma `Quadro3` é fixo em Seg–Sex. |
 
 **Limites de forma do genoma:** `Quadro3` é fixo em 3 turmas × 5 dias × 4 tempos; cada turma deve
-somar exatamente 20 aulas; `repeat_val` satura em 4 aulas por disciplina; `Table16` comporta 15
-professores e `Table32` 31 disciplinas.
+somar exatamente 20 aulas; `repeat_val` satura em 4 aulas por disciplina; no máximo 15 professores
+(um bit cada em `disc_info`), 31 disciplinas (`Table32`) e `agrupar` ≤ 127.
+
+> **Nota de engenharia:** `FastSpec` é duplicada a cada indivíduo de cada geração, e o backend C do
+> Bend falha com `an arity over 255` se ela crescer demais — o interpretador aceita, mas `bend -o`
+> para de compilar. Por isso tudo é empacotado em bits: `disc_info` guarda o conjunto de professores
+> (bits 0-15) e `agrupar × 2 + dividir` (bits 16-23) na mesma palavra, e `slot_unavail` guarda dois
+> slots por palavra. Vale verificar `bend -o` ao mexer nessa struct, não só o interpretador.
 
 Entrada fora desses limites costumava ser **truncada em silêncio** (uma turma com menos de 20 aulas
 virava uma semana inteira de zeros, e o solver seguia evoluindo uma grade sem sentido). Hoje a
