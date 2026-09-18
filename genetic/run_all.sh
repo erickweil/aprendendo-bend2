@@ -47,6 +47,7 @@ run_scenario "9" "Cellular Genetic Algorithm (cGA / Quad-Tree)" "src/scenario9_c
 run_scenario "10" "Programação Genética / Regressão Simbólica (GP)" "src/scenario10_gp.bend"
 run_scenario "11" "Otimização Multi-Objetivo (MOEA / Fronteira de Pareto)" "src/scenario11_multiobjective.bend"
 run_scenario "12" "Co-Evolução Competitiva (Host vs Parasita / Redes de Ordenação)" "src/scenario12_coevolution.bend"
+run_scenario "13" "Motor Auto-Adaptativo (Self-Adaptive GA / Royal Road)" "src/scenario13_self_adaptive.bend"
 run_scenario "PGA" "Modelo de Ilhas Paralelas (Island Model)" "src/island_ga.bend"
 
 echo "================================================================"
