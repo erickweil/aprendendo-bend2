@@ -49,6 +49,7 @@ run_scenario "11" "Otimização Multi-Objetivo (MOEA / Fronteira de Pareto)" "sr
 run_scenario "12" "Co-Evolução Competitiva (Host vs Parasita / Redes de Ordenação)" "src/scenario12_coevolution.bend"
 run_scenario "13" "Motor Auto-Adaptativo (Self-Adaptive GA / Royal Road)" "src/scenario13_self_adaptive.bend"
 run_scenario "14" "Evolução Diferencial Contínua (DE / Rastrigin 4D)" "src/scenario14_differential_evolution.bend"
+run_scenario "15" "Neuroevolução e Controle Contínuo (Cart-Pole / F32)" "src/scenario15_neuroevolution.bend"
 run_scenario "PGA" "Modelo de Ilhas Paralelas (Island Model)" "src/island_ga.bend"
 
 echo "================================================================"

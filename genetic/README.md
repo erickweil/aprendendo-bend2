@@ -74,6 +74,7 @@ A nova arquitetura explora os pontos fortes do Bend 2:
 | **12. Co-Evolução Competitiva** | Host vs Parasita descobrindo Redes de Ordenação | `Net` (6 CAS) vs `Arr4` | Lema 0-1 (16/16) | **`[5 3 2 4 1 0]` (16/16 provado)** |
 | **13. Motor Auto-Adaptativo** | Taxa de mutação e operadores no próprio genoma | `SAInd` (Taxa, Op, Gene) | 1064 / 1064 pts | **1064 / 1064 (Royal Road 4/4)** |
 | **14. Evolução Diferencial (DE)** | Otimização numérica contínua em R^4 com `F32` | `Vec4` (4D contínuo) | Custo < 2.0 (Rastrigin) | **1.172 (Convergência Global)** |
+| **15. Neuroevolução (Cart-Pole)** | Controle contínuo da dinâmica do pêndulo invertido em `F32` | `Policy` (5 pesos contínuos) | Sobrevivência 200/200 passos | **200 / 200 passos (Equilíbrio Estável)** |
 | **PGA. Ilhas Paralelas** | Arquipélago de 4 ilhas com migração de campeão | `Archipelago` x 64 ind. | Distância = 240 | **Distância = 240** (Ótimo) |
 
 ---
@@ -83,6 +84,7 @@ A nova arquitetura explora os pontos fortes do Bend 2:
 Extraída para modularizar algoritmos evolutivos futuros:
 - [`utils/random.bend`](file:///home/ubuntu/claude/aprendendo-bend2/genetic/utils/random.bend): Xorshift32 determinístico puro com seed-splitting em $O(1)$, `mod_range` e `chance`.
 - [`utils/bits.bend`](file:///home/ubuntu/claude/aprendendo-bend2/genetic/utils/bits.bend): `popcount`, `bit_of`, `crossover_uniform`, `mutate_bit` e unicidade de 9 elementos `group_unique9`.
+- [`utils/math.bend`](file:///home/ubuntu/claude/aprendendo-bend2/genetic/utils/math.bend): Operações em ponto flutuante `F32` (`clamp`, ativação sigmoidal `fast_tanh`, `relu`, produto escalar `dot4` e conversão de ângulos `deg_to_rad`).
 - [`utils/pareto.bend`](file:///home/ubuntu/claude/aprendendo-bend2/genetic/utils/pareto.bend): Dominância de Pareto (`dominates_min_max`, `dominates_max_max`) e cálculo de densidade de eficiência.
 - [`utils/poptree.bend`](file:///home/ubuntu/claude/aprendendo-bend2/genetic/utils/poptree.bend): Árvore binária polimórfica (`PopTree<A>`), injeção de elite e redução concorrente.
 
