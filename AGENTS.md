@@ -62,28 +62,42 @@ Compreender estas 6 armadilhas é fundamental para programar em Bend 2 sem trava
 ### 🔴 Armadilha 2: `Bool.pick` é Estrito (*Strict Evaluation*)
 > **Conceito:** Na HVM, `Bool.pick(T, cond, then_branch, else_branch)` avalia **ambos os ramos** incondicionalmente.
 
-* **O Erro:** Chamar recursão dentro de um ramo do `Bool.pick`:
+* **Quando isso é aceitável:** se o ramo recursivo for uma recursão **estrutural sobre um argumento que encolhe**, o `Bool.pick` termina — ele apenas deixa de fazer short-circuit e paga o custo da lista inteira. É exatamente o que `list_contains_str` e `list_contains_num` (em `horario_solver.bend`) fazem, e está correto:
   ```bend
-  # ❌ INCORRETO: Recurse em loop infinito porque o ramo da recursão SEMPRE é avaliado!
-  def find(l, target):
+  def list_contains_str(l: List<&2, J.Json>, +target: String) -> Bool:
     match l:
-      case Nil{}: 0
-      case h <> t: Bool.pick(U32, is_eq(h, target), 1, find(t, target))
+      case Nil{}: False{}
+      case h <> t:
+        Bool.pick(Bool, json_is_target_str(h, target), True{}, list_contains_str(t, target))
   ```
-* **A Solução:** Para bifurcações com recursão ou efeitos, isole a checagem em uma função auxiliar de passo (`.step`) com `match` em um booleano:
-  ```bend
-  # ✔️ CORRETO: O pattern match no booleano descarta o ramo não tomado sem avaliá-lo!
-  def find.step(is_match: Bool, t: List, target: U32) -> U32:
-    match is_match:
-      case True{}: 1
-      case False{}: find(t, target)
+* **Quando é fatal:** quando o ramo não tomado tem custo ilimitado ou exponencial — recursão que não encolhe, expansão de árvore, ou um `Bool.pick` aninhado dentro de um laço quente. Aí a HVM avalia trabalho que seria descartado e a memória explode.
 
-  def find(l: List, target: U32) -> U32:
-    match l:
-      case Nil{}: 0
-      case h <> t: find.step(is_eq(h, target), t, target)
+* **Como obter short-circuit de verdade.** É preciso que o `match` recaia sobre um **parâmetro**, e o Bend 2 impõe três restrições simultâneas que eliminam quase todas as alternativas óbvias:
+
+  1. **Não existe recursão mútua.** `f.step` não pode chamar `f` — o compilador responde `expected: a defined name`.
+  2. **`match` não escrutina binder local.** `+c = U32.is_eq(...)` seguido de `match c:` é rejeitado com *"a match cannot scrutinize a local binder: give it its own def"*.
+  3. **Escrutínio segue a ordem dos binders** e o verificador de terminação **lê os argumentos da esquerda para a direita**, exigindo que um deles encolha antes que qualquer outro mude.
+
+  O padrão que satisfaz as três é o **acumulador de condição com escrutínio múltiplo**, com o argumento que encolhe **primeiro** na lista de parâmetros:
+
+  ```bend
+  # ✔️ CORRETO e verificado: recursão direta, match sobre parâmetros,
+  #    `l` (que encolhe) antes de `is_match` (que muda).
+  def find.go(l: List<&2, U32>, is_match: Bool, +target: U32) -> U32:
+    match l is_match:
+      case Nil{} True{}: 1
+      case Nil{} False{}: 0
+      case Con{h, t} True{}: 1                                  # para aqui: sem recursão
+      case Con{h, t} False{}: find.go(t, U32.is_eq(h, target), target)
+
+  def find(l: List<&2, U32>, +target: U32) -> U32:
+    find.go(l, False{}, target)
   ```
-  *(Nota: `Bool.pick` entre números primitivos escalares `U32` é seguro e extremamente rápido, funcionando como um `cmov` em hardware).*
+  A condição do passo **anterior** entra como parâmetro, então o ramo `True{}` retorna sem nunca mencionar a chamada recursiva. Note `Con{h, t}` em vez de `h <> t`: o açúcar `<>` não é aceito em `match` com múltiplos escrutinados.
+
+* **Alternativa mais simples:** quando o resultado é uma lista de mensagens ou um acumulador, dispense o branch — use um auxiliar **não recursivo** que devolve `Nil{}` ou um singleton e concatene com a recursão direta. É o que `check_aulas` e `check_disc_turmas` (seção 5B de `horario_solver.bend`) fazem com `err_unless`.
+
+*(Nota: `Bool.pick` entre números primitivos escalares `U32` é seguro e extremamente rápido, funcionando como um `cmov` em hardware).*
 
 ---
 
@@ -144,6 +158,9 @@ Compreender estas 6 armadilhas é fundamental para programar em Bend 2 sem trava
   def is_positive(x: U32) -> String:
     is_positive.step(U32.is_gt(x, 0), x)
   ```
+* **Duas restrições que acompanham esta:**
+  - O auxiliar `.step` **não pode chamar de volta** a função que o invocou: Bend 2 não tem recursão mútua. Para casos recursivos, use o padrão da Armadilha 2.
+  - `match` também **não aceita binder local**: `+c = f(x)` seguido de `match c:` falha com *"a match cannot scrutinize a local binder: give it its own def"*.
 
 ---
 
@@ -213,7 +230,7 @@ aprendendo-bend2/
 │   │   ├── poptree.bend       # ADT PopTree e combinadores
 │   │   └── random.bend        # PRNG puro Xorshift32 com seed-splitting
 │   ├── src/
-│   │   ├── horario_solver.bend # Solver dinâmico 100% orientado a JSON
+│   │   ├── horario_solver.bend # Solver orientado a JSON (seção 5B = validação de entrada)
 │   │   ├── scenario1_onemax.bend a scenario18_*.bend
 │   └── tests/
 │       ├── json_test.bend     # Testes do parser JSON
@@ -238,11 +255,18 @@ bend genetic/tests/operators_test.bend
 # 3. Executar teste do parser JSON
 bend genetic/tests/json_test.bend
 
-# 4. Executar o solver dinâmico com o dataset real
+# 4. Executar o solver com o dataset real
 export HORARIO_JSON=$(cat genetic/data/horario_input.json)
 bend genetic/src/horario_solver.bend
 
-# 5. Commit e Push imediato
+# 5. Conferir que a validação de entrada AINDA REJEITA entrada fora da forma
+#    fixa (não deve evoluir nada; deve listar o motivo). Ex.: 4 turmas.
+python3 -c "import json;d=json.load(open('genetic/data/horario_input.json'));\
+d['formData']['turmas'].append({'nome':'X','horarios':{'seg':[1]}});\
+print(json.dumps(d,ensure_ascii=False))" > /tmp/bad.json
+HORARIO_JSON=$(cat /tmp/bad.json) bend genetic/src/horario_solver.bend
+
+# 6. Commit e Push imediato
 git commit -am "tipo(escopo): mensagem descritiva"
 git push origin feature/motor-genetico
 ```

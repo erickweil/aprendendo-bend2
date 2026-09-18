@@ -184,9 +184,23 @@ simplificado e o que ainda falta:
 | Disponibilidade da turma (`turmas[].horarios`) | ❌ Falta | O Rust pune −1000 por slot ativo vazio ou slot inativo preenchido. O Bend assume 5 dias × 4 tempos sempre ativos. |
 | Semana de 7 dias (Dom–Sáb) | ❌ Falta | O genoma `Quadro3` é fixo em Seg–Sex. |
 
-**Limites de forma do genoma:** `Quadro3` é fixo em 3 turmas × 5 dias × 4 tempos; `repeat_val`
-satura em 4 aulas por disciplina; `Table16` comporta 15 professores e `Table32` 31 disciplinas.
-Entradas fora desses limites são **truncadas em silêncio** — ver Fase 2 do plano de correção.
+**Limites de forma do genoma:** `Quadro3` é fixo em 3 turmas × 5 dias × 4 tempos; cada turma deve
+somar exatamente 20 aulas; `repeat_val` satura em 4 aulas por disciplina; `Table16` comporta 15
+professores e `Table32` 31 disciplinas.
+
+Entrada fora desses limites costumava ser **truncada em silêncio** (uma turma com menos de 20 aulas
+virava uma semana inteira de zeros, e o solver seguia evoluindo uma grade sem sentido). Hoje a
+seção 5B de `horario_solver.bend` valida tudo isso **antes** de evoluir e aborta listando o motivo:
+
+```
+ERRO: a entrada nao cabe na forma fixa deste solver.
+  - turma "Turma 2025" soma 18 aulas; Week5 exige exatamente 20 (5 dias x 4 tempos)
+  - disciplina "Teste de Software II (40 horas)" referencia a turma "Turma XPTO", que nao existe no array turmas
+Nenhuma evolucao foi executada.
+```
+
+São verificados: contagem de turmas, disciplinas e professores; aulas por disciplina; soma de aulas
+por turma; disciplinas órfãs (turma inexistente); e disciplinas sem nenhum professor.
 
 ---
 

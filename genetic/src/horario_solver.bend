@@ -145,6 +145,8 @@ def Table16.get(t: Table16, +idx: U32) -> U32:
         Bool.pick(U32, U32.is_eq(idx, 12), x12, x13),
         Bool.pick(U32, U32.is_eq(idx, 14), x14, x15))))
 
+# ATENCAO: idx >= 16 devolve a tabela INALTERADA (nenhum Bool.pick casa). Nao ha
+# como sinalizar erro daqui; quem garante a faixa e validate_input (secao 5B).
 def Table16.set(t: Table16, +idx: U32, +val: U32) -> Table16:
   T16{x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15} = t
   make_t16(
@@ -186,6 +188,8 @@ def Table32.set.step(is_lo: Bool, lo: Table16, hi: Table16, idx: U32, val: U32) 
     case True{}: make_t32(Table16.set(lo, idx, val), hi)
     case False{}: make_t32(lo, Table16.set(hi, U32.sub(idx, 16), val))
 
+# ATENCAO: idx >= 32 devolve a tabela INALTERADA. Faixa garantida por
+# validate_input (secao 5B).
 def Table32.set(t: Table32, +idx: U32, +val: U32) -> Table32:
   T32{lo, hi} = t
   Table32.set.step(U32.is_lt(idx, 16), lo, hi, idx, val)
@@ -521,6 +525,8 @@ def build_disc_profs(discs: List<&2, DiscEntry>, +profs: List<&2, J.Json>) -> Li
       +pid = find_prof_for_disc(nome, profs, 1)
       pid <> build_disc_profs(t, profs)
 
+# ATENCAO: satura em 4 — count >= 4 devolve 4 copias. Disciplinas com mais de 4
+# aulas sao rejeitadas por validate_input (secao 5B) antes de chegar aqui.
 def repeat_val(+val: U32, +count: U32) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, U32.is_eq(count, 0), Nil{},
     Bool.pick(List<&2, U32>, U32.is_eq(count, 1), (val <> Nil{}),
@@ -573,6 +579,9 @@ def load_unidas_pair(unidas_arr: List<&2, J.Json>, +discs: List<&2, DiscEntry>) 
     case h <> _:
       load_unidas_pair.step(J.Json.get_arr(h, "disciplinas"), discs)
 
+# ATENCAO: com menos de 20 slots o case _ devolve uma semana INTEIRA DE ZEROS,
+# ou seja, a turma desaparece do quadro. Com mais de 20, o excedente e ignorado.
+# validate_input (secao 5B) exige exatamente 20 antes de chamar esta funcao.
 def slots20_to_week5(slots: List<&2, U32>) -> Week5:
   match slots:
     case s0 <> s1 <> s2 <> s3 <> s4 <> s5 <> s6 <> s7 <> s8 <> s9 <> s10 <> s11 <> s12 <> s13 <> s14 <> s15 <> s16 <> s17 <> s18 <> s19 <> _:
@@ -591,6 +600,103 @@ def slots20_to_week5(slots: List<&2, U32>) -> Week5:
         make_d4(0, 0, 0, 0),
         make_d4(0, 0, 0, 0)
       )
+
+# ------------------------------------------------------------------------------
+# 5B. VALIDAÇÃO DA ENTRADA
+# ------------------------------------------------------------------------------
+# As estruturas deste solver têm forma FIXA (Quadro3, Table16, Table32,
+# repeat_val, slots20_to_week5). Fora dos limites abaixo, elas truncam ou
+# devolvem zeros em silêncio — o solver produziria uma grade errada sem nenhum
+# aviso. Estas checagens rodam ANTES da evolução e abortam com mensagem.
+#
+#   turmas          : exatamente 3        (Quadro3)
+#   slots por turma : exatamente 20       (Week5 = 5 dias x 4 tempos)
+#   disciplinas     : 1..31               (Table32 indexada a partir de 1)
+#   professores     : 1..15               (Table16 indexada a partir de 1)
+#   aulas por disc. : 1..4                (teto de repeat_val)
+# ------------------------------------------------------------------------------
+
+def err_unless(ok: Bool, msg: String) -> List<&2, String>:
+  match ok:
+    case True{}: Nil{}
+    case False{}: msg <> Nil{}
+
+def join_lines(l: List<&2, String>) -> String:
+  match l:
+    case Nil{}: ""
+    case h <> t: "  - " ++ h ++ "\n" ++ join_lines(t)
+
+def list_has_str(l: List<&2, String>, +target: String) -> Bool:
+  match l:
+    case Nil{}: False{}
+    case +h <> t:
+      Bool.pick(Bool, String.eq(h, target), True{}, list_has_str(t, target))
+
+# Bend 2 nao aceita recursao mutua, entao cada checagem recursiva monta a
+# mensagem do elemento atual com err_unless (nao recursivo) e concatena com a
+# chamada recursiva direta, em vez de delegar o branch a uma funcao .step.
+
+# Uma disciplina cujo campo "turma" nao bate com nenhuma turma declarada nunca
+# entra em collect_turma_slots: ela some do quadro sem aparecer em lugar nenhum.
+def check_disc_turmas(discs: List<&2, DiscEntry>, +turmas: List<&2, String>) -> List<&2, String>:
+  match discs:
+    case Nil{}: Nil{}
+    case h <> t:
+      DEntry{nome, turma, _, _} = h
+      +turma = turma
+      +e = err_unless(list_has_str(turmas, turma),
+        "disciplina \"" ++ nome ++ "\" referencia a turma \"" ++ turma ++
+        "\", que nao existe no array turmas")
+      List.append(&2, String, e, check_disc_turmas(t, turmas))
+
+def check_aulas(discs: List<&2, DiscEntry>) -> List<&2, String>:
+  match discs:
+    case Nil{}: Nil{}
+    case h <> t:
+      DEntry{nome, _, aulas, _} = h
+      +aulas = aulas
+      +e = err_unless(Bool.and(U32.is_ge(aulas, 1), U32.is_le(aulas, 4)),
+        "disciplina \"" ++ nome ++ "\" tem aulas=" ++ U32.show(aulas) ++
+        "; este solver suporta 1 a 4 (repeat_val satura em 4)")
+      List.append(&2, String, e, check_aulas(t))
+
+# pid == 0 significa que find_prof_for_disc nao achou professor algum: a
+# disciplina deixa de gerar qualquer penalidade de choque ou indisponibilidade.
+def check_disc_profs(discs: List<&2, DiscEntry>, pids: List<&2, U32>) -> List<&2, String>:
+  match discs:
+    case Nil{}: Nil{}
+    case h <> t:
+      DEntry{nome, _, _, _} = h
+      match pids:
+        case Nil{}: Nil{}
+        case p <> pt:
+          +e = err_unless(U32.is_gt(p, 0),
+            "disciplina \"" ++ nome ++ "\" nao aparece em nenhum item de professores[]")
+          List.append(&2, String, e, check_disc_profs(t, pt))
+
+def check_slots(nome: String, +n: Nat) -> List<&2, String>:
+  err_unless(Nat.is_eq(n, 20n),
+    "turma \"" ++ nome ++ "\" soma " ++ Nat.show(n) ++
+    " aulas; Week5 exige exatamente 20 (5 dias x 4 tempos)")
+
+def validate_input(+turmas: List<&2, String>, +discs: List<&2, DiscEntry>,
+                   disc_profs: List<&2, U32>, +n_turmas: Nat, +n_discs: Nat, +n_profs: Nat,
+                   n0: String, n1: String, n2: String,
+                   +s0: Nat, +s1: Nat, +s2: Nat) -> List<&2, String>:
+  +e_turmas = err_unless(Nat.is_eq(n_turmas, 3n),
+    "o array turmas tem " ++ Nat.show(n_turmas) ++ " itens; Quadro3 exige exatamente 3")
+  +e_discs = err_unless(Bool.and(Nat.is_gt(n_discs, 0n), Nat.is_le(n_discs, 31n)),
+    "o array disciplinas tem " ++ Nat.show(n_discs) ++ " itens; Table32 comporta 1 a 31")
+  +e_profs = err_unless(Bool.and(Nat.is_gt(n_profs, 0n), Nat.is_le(n_profs, 15n)),
+    "o array professores tem " ++ Nat.show(n_profs) ++ " itens; Table16 comporta 1 a 15")
+  +e_s0 = check_slots(n0, s0)
+  +e_s1 = check_slots(n1, s1)
+  +e_s2 = check_slots(n2, s2)
+  +e_aulas = check_aulas(discs)
+  +e_dturma = check_disc_turmas(discs, turmas)
+  +e_dprof = check_disc_profs(discs, disc_profs)
+  List.concat(&2, String,
+    [e_turmas, e_discs, e_profs, e_s0, e_s1, e_s2, e_aulas, e_dturma, e_dprof])
 
 # ------------------------------------------------------------------------------
 # 6. SERIALIZAÇÃO DINÂMICA DO RESULTADO (TurmaHorarioResult[])
@@ -692,8 +798,34 @@ def solve_from_form_data.report(champion_cand: Cand, +turmas: List<&2, String>, 
     "================================================================\n"
   )
 
+def solve_from_form_data.run(base_q: Quadro3, spec: FastSpec, turmas: List<&2, String>,
+                             disc_nomes: List<&2, String>, +n_profs: Nat,
+                             +generations: Nat, +seed: U32) -> IO(Unit):
+  +champion = run_evolution(base_q, spec, generations, seed)
+  solve_from_form_data.report(champion, turmas, disc_nomes, n_profs, generations)
+
+# Se validate_input achou qualquer problema, aborta ANTES de evoluir: uma grade
+# produzida a partir de entrada truncada seria silenciosamente errada.
+def solve_from_form_data.guard(errs: List<&2, String>, base_q: Quadro3, spec: FastSpec,
+                               turmas: List<&2, String>, disc_nomes: List<&2, String>,
+                               +n_profs: Nat, +generations: Nat, +seed: U32) -> IO(Unit):
+  match errs:
+    case Nil{}:
+      solve_from_form_data.run(base_q, spec, turmas, disc_nomes, n_profs, generations, seed)
+    case h <> t:
+      IO.print(
+        "================================================================\n" ++
+        "ERRO: a entrada nao cabe na forma fixa deste solver.\n" ++
+        "================================================================\n" ++
+        join_lines(h <> t) ++
+        "================================================================\n" ++
+        "Nenhuma evolucao foi executada. Os limites estao documentados na\n" ++
+        "secao 5B deste arquivo e no README.md da raiz.\n" ++
+        "================================================================\n"
+      )
+
 def solve_from_form_data.step(u_pair: UnidasPair, +turmas: List<&2, String>, +discs: List<&2, DiscEntry>,
-                              disc_nomes: List<&2, String>, disc_profs: List<&2, U32>,
+                              disc_nomes: List<&2, String>, +disc_profs: List<&2, U32>,
                               prof_masks: List<&2, U32>, +n_profs: Nat, +generations: Nat, +seed: U32) -> IO(Unit):
   UPair{u1, u2} = u_pair
   +n0 = list_get_str(turmas, 0, "Turma 1")
@@ -702,12 +834,18 @@ def solve_from_form_data.step(u_pair: UnidasPair, +turmas: List<&2, String>, +di
   +t0_slots = collect_turma_slots(discs, n0, 1)
   +t1_slots = collect_turma_slots(discs, n1, 1)
   +t2_slots = collect_turma_slots(discs, n2, 1)
+  +errs = validate_input(turmas, discs, disc_profs,
+                         List.length(&2, String, turmas),
+                         List.length(&2, DiscEntry, discs),
+                         n_profs, n0, n1, n2,
+                         List.length(&2, U32, t0_slots),
+                         List.length(&2, U32, t1_slots),
+                         List.length(&2, U32, t2_slots))
   +base_q = make_q3(slots20_to_week5(t0_slots), slots20_to_week5(t1_slots), slots20_to_week5(t2_slots))
   +dp_table = fill_table32(disc_profs, empty_t32(), 1)
   +pm_table = fill_table16(prof_masks, empty_t16(), 1)
   +spec = make_fspec(dp_table, pm_table, u1, u2)
-  +champion = run_evolution(base_q, spec, generations, seed)
-  solve_from_form_data.report(champion, turmas, disc_nomes, n_profs, generations)
+  solve_from_form_data.guard(errs, base_q, spec, turmas, disc_nomes, n_profs, generations, seed)
 
 def solve_from_form_data(+fd: J.Json, +generations: Nat, +seed: U32) -> IO(Unit):
   +turmas_arr = J.Json.get_arr(fd, "turmas")
