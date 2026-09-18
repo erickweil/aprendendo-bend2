@@ -179,7 +179,7 @@ simplificado e o que ainda falta:
 | Choque de professor entre turmas | ⚠️ Simplificado | O Rust conta conflitos acumulados por slot e pune proporcionalmente; o Bend compara os pares (A,B), (A,C), (B,C) a 50 pts. A **ordenação entre soluções difere**, não só a escala. |
 | Indisponibilidade do professor | ✅ Portado | Máscara de 20 bits, 50 pts por violação. |
 | Múltiplos professores por disciplina | ❌ Falta | `find_prof_for_disc` usa apenas o **primeiro** professor encontrado; o Rust itera `disciplina.professores` inteiro. |
-| Agrupamento em blocos de `agrupar` aulas | ⚠️ Simplificado | O Bend tem blocos de 2 tempos fixos no código. Os campos `agrupar` e `dividir` do JSON são **ignorados**. |
+| Agrupamento em blocos de `agrupar` aulas | ✅ Portado | `run_penalty` usa `agrupar` e `dividir` do JSON; ideal = `g` se divisível, senão o múltiplo de `g` mais próximo de `len` (meio para longe de zero, como `f64::round()`); custo `\|len − ideal\| × 20`. |
 | `disciplinas_unidas` | ⚠️ Parcial | Apenas o **primeiro grupo** e as **duas primeiras** disciplinas dele, e a comparação é fixa entre as turmas de índice 0 e 1. |
 | Disponibilidade da turma (`turmas[].horarios`) | ❌ Falta | O Rust pune −1000 por slot ativo vazio ou slot inativo preenchido. O Bend assume 5 dias × 4 tempos sempre ativos. |
 | Semana de 7 dias (Dom–Sáb) | ❌ Falta | O genoma `Quadro3` é fixo em Seg–Sex. |

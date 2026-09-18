@@ -138,6 +138,15 @@ Compreender estas 6 armadilhas é fundamental para programar em Bend 2 sem trava
 
   +cand = make_cand(q, spec)  # ✔️ O compilador infere perfeitamente
   ```
+* **O mesmo vale para literais ligados com `+`** — e aqui nem a anotação salva:
+  ```bend
+  +x = 1            # ❌ "expected: an annotated term (cannot infer)"
+  +x = (1 : U32)    # ❌ idem — a anotação não resolve
+  ```
+  Literal em posição de **argumento** ou dentro de `Bool.pick` funciona normalmente
+  (`Bool.pick(U32, c, 2, 1)` é válido). Se precisar mesmo de um `+` sobre uma
+  constante, dê a ela um `def` nulário tipado (`def one() -> U32: 1`) e ligue o
+  resultado da chamada.
 
 ---
 

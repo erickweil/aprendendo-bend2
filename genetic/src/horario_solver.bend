@@ -18,8 +18,8 @@ import ./../utils/poptree.bend as T
 # com o original em Rust (my-website/rust-wasm/src/horario/). Ver a tabela
 # "Estado do port em relação ao original em Rust" no README.md da raiz.
 # Resumo: genoma fixo em 3 turmas x 5 dias x 4 tempos; `repeat_val` satura em 4
-# aulas; Table16 comporta 15 professores e Table32 31 disciplinas; `agrupar` e
-# `dividir` são ignorados; só o 1o professor de cada disciplina é considerado;
+# aulas; Table16 comporta 15 professores e Table32 31 disciplinas;
+# só o 1o professor de cada disciplina é considerado;
 # `disciplinas_unidas` cobre só o 1o par, fixo entre as turmas 0 e 1;
 # `turmas[].horarios` (disponibilidade da turma) não é lido.
 # ==============================================================================
@@ -208,11 +208,23 @@ def fill_table16(l: List<&2, U32>, +t: Table16, +cur: U32) -> Table16:
       +t_next = Table16.set(t, cur, h)
       fill_table16(rest, t_next, U32.inc(cur))
 
+# `disc_info` guarda TRES coisas por disciplina numa palavra so:
+#   bits 0-7  : id do professor (1..15, 0 = nenhum)
+#   bits 8-15 : agrupar * 2 + dividir
+# Uma Table32 adicional para o agrupamento fazia o backend C falhar com
+# "an arity over 255" (o interpretador aceitava, mas `bend -o` nao compilava
+# mais). Empacotar mantem FastSpec com a mesma aridade de antes.
 type FastSpec is Data:
-  FSpec{disc_profs: Table32, prof_masks: Table16, u1: U32, u2: U32}
+  FSpec{disc_info: Table32, prof_masks: Table16, u1: U32, u2: U32}
 
-def make_fspec(disc_profs: Table32, prof_masks: Table16, u1: U32, u2: U32) -> FastSpec:
-  FSpec{disc_profs, prof_masks, u1, u2}
+def make_fspec(disc_info: Table32, prof_masks: Table16, u1: U32, u2: U32) -> FastSpec:
+  FSpec{disc_info, prof_masks, u1, u2}
+
+def disc_prof(+t: Table32, +d: U32) -> U32:
+  U32.and(Table32.get(t, d), 255)
+
+def disc_group(+t: Table32, +d: U32) -> U32:
+  U32.shrn(Table32.get(t, d), 8n)
 
 type Cand is Data:
   CD{q: Quadro3, spec: FastSpec}
@@ -241,26 +253,26 @@ def eval_prof_slot(+pA: U32, +pB: U32, +pC: U32, +slot_idx: U32, +prof_masks: Ta
   +unavail = (uA + uB + uC : U32)
   (coll + unavail : U32)
 
-def eval_day_prof(+d0: Day4, +d1: Day4, +d2: Day4, +dia: U32, +disc_profs: Table32, +prof_masks: Table16) -> U32:
+def eval_day_prof(+d0: Day4, +d1: Day4, +d2: Day4, +dia: U32, +info: Table32, +prof_masks: Table16) -> U32:
   D4{a0, a1, a2, a3} = d0
   D4{b0, b1, b2, b3} = d1
   D4{c0, c1, c2, c3} = d2
   +base_slot = U32.shln(dia, 2n)
-  +s0 = eval_prof_slot(Table32.get(disc_profs, a0), Table32.get(disc_profs, b0), Table32.get(disc_profs, c0), base_slot, prof_masks)
-  +s1 = eval_prof_slot(Table32.get(disc_profs, a1), Table32.get(disc_profs, b1), Table32.get(disc_profs, c1), U32.add(base_slot, 1), prof_masks)
-  +s2 = eval_prof_slot(Table32.get(disc_profs, a2), Table32.get(disc_profs, b2), Table32.get(disc_profs, c2), U32.add(base_slot, 2), prof_masks)
-  +s3 = eval_prof_slot(Table32.get(disc_profs, a3), Table32.get(disc_profs, b3), Table32.get(disc_profs, c3), U32.add(base_slot, 3), prof_masks)
+  +s0 = eval_prof_slot(disc_prof(info, a0), disc_prof(info, b0), disc_prof(info, c0), base_slot, prof_masks)
+  +s1 = eval_prof_slot(disc_prof(info, a1), disc_prof(info, b1), disc_prof(info, c1), U32.add(base_slot, 1), prof_masks)
+  +s2 = eval_prof_slot(disc_prof(info, a2), disc_prof(info, b2), disc_prof(info, c2), U32.add(base_slot, 2), prof_masks)
+  +s3 = eval_prof_slot(disc_prof(info, a3), disc_prof(info, b3), disc_prof(info, c3), U32.add(base_slot, 3), prof_masks)
   (s0 + s1 + s2 + s3 : U32)
 
-def eval_prof_penalties(+w0: Week5, +w1: Week5, +w2: Week5, +disc_profs: Table32, +prof_masks: Table16) -> U32:
+def eval_prof_penalties(+w0: Week5, +w1: Week5, +w2: Week5, +info: Table32, +prof_masks: Table16) -> U32:
   W5{a0, a1, a2, a3, a4} = w0
   W5{b0, b1, b2, b3, b4} = w1
   W5{c0, c1, c2, c3, c4} = w2
-  +d0 = eval_day_prof(a0, b0, c0, 0, disc_profs, prof_masks)
-  +d1 = eval_day_prof(a1, b1, c1, 1, disc_profs, prof_masks)
-  +d2 = eval_day_prof(a2, b2, c2, 2, disc_profs, prof_masks)
-  +d3 = eval_day_prof(a3, b3, c3, 3, disc_profs, prof_masks)
-  +d4 = eval_day_prof(a4, b4, c4, 4, disc_profs, prof_masks)
+  +d0 = eval_day_prof(a0, b0, c0, 0, info, prof_masks)
+  +d1 = eval_day_prof(a1, b1, c1, 1, info, prof_masks)
+  +d2 = eval_day_prof(a2, b2, c2, 2, info, prof_masks)
+  +d3 = eval_day_prof(a3, b3, c3, 3, info, prof_masks)
+  +d4 = eval_day_prof(a4, b4, c4, 4, info, prof_masks)
   (d0 + d1 + d2 + d3 + d4 : U32)
 
 def eval_unidas_tempo(+t0_val: U32, +t1_val: U32, +u1: U32, +u2: U32) -> U32:
@@ -288,34 +300,68 @@ def eval_unidas_week(+w0: Week5, +w1: Week5, +u1: U32, +u2: U32) -> U32:
   +d4 = eval_unidas_dia(a4, b4, u1, u2)
   (d0 + d1 + d2 + d3 + d4 : U32)
 
-def eval_day_grouping(day: Day4) -> U32:
+# Penalidade de UM bloco contiguo de `len` aulas da mesma disciplina, seguindo
+# horario_genetic.rs: ideal = `g` quando a disciplina e divisivel, senao o
+# multiplo de `g` mais proximo de `len`; penalidade = |len - ideal| * 20.
+#
+# `round(len/g)` do Rust arredonda a metade para LONGE de zero, que em inteiros
+# positivos e floor(len/g + 1/2) = (2*len + g) / (2*g). (O round() do Python faz
+# banker's rounding e NAO serve de referencia aqui.)
+#
+# `g == 0` desliga a regra (disc.agrupar <= 0 no Rust). Como Bool.pick e estrito,
+# os dois ramos sao avaliados: `gs` existe so para a divisao do ramo descartado
+# nao ser por zero.
+# `packed` = agrupar * 2 + dividir. packed == 0 (disciplina ausente da tabela ou
+# agrupar == 0) desliga a regra, como `disc.agrupar <= 0` no Rust.
+def run_penalty(+len: U32, +packed: U32) -> U32:
+  +g = U32.shrn(packed, 1n)
+  +dividir = U32.and(packed, 1)
+  +g = g
+  +gs = Bool.pick(U32, U32.is_zero(g), 1, g)
+  +ideal = Bool.pick(U32, U32.is_eq(dividir, 1), gs,
+    U32.mul(U32.div(U32.add(U32.mul(len, 2), gs), U32.mul(gs, 2)), gs))
+  +diff = Bool.pick(U32, U32.is_ge(len, ideal), U32.sub(len, ideal), U32.sub(ideal, len))
+  Bool.pick(U32, U32.is_zero(g), 0, U32.mul(diff, 20))
+
+# Varre os blocos contiguos de um dia de 4 tempos sem ramificar: len_i e o
+# comprimento do bloco que TERMINA em i, e a posicao i so conta se o bloco
+# realmente acaba ali (i == 3 ou o proximo tempo tem outra disciplina).
+# Conferido por forca bruta contra a varredura sequencial nos 81 dias possiveis.
+def eval_day_grouping(day: Day4, +gt: Table32) -> U32:
   D4{t0, t1, t2, t3} = day
   +t0 = t0; +t1 = t1; +t2 = t2; +t3 = t3
-  +p1_ok = U32.is_eq(t0, t1)
-  +p2_ok = U32.is_eq(t2, t3)
-  +mid_ok = U32.is_eq(t1, t2)
-  Bool.pick(U32, Bool.and(p1_ok, p2_ok), 0,
-    Bool.pick(U32, mid_ok, 40,
-      Bool.pick(U32, Bool.or(p1_ok, p2_ok), 40, 80)))
+  +e01 = U32.is_eq(t0, t1)
+  +e12 = U32.is_eq(t1, t2)
+  +e23 = U32.is_eq(t2, t3)
+  # l0 e sempre 1. Um literal ligado com `+` nao infere tipo em Bend 2 nem com
+  # anotacao (`+x = (1 : U32)` => "cannot infer"), entao ele entra inline.
+  +l1 = Bool.pick(U32, e01, 2, 1)
+  +l2 = Bool.pick(U32, e12, U32.inc(l1), 1)
+  +l3 = Bool.pick(U32, e23, U32.inc(l2), 1)
+  +p0 = Bool.pick(U32, e01, 0, run_penalty(1, disc_group(gt, t0)))
+  +p1 = Bool.pick(U32, e12, 0, run_penalty(l1, disc_group(gt, t1)))
+  +p2 = Bool.pick(U32, e23, 0, run_penalty(l2, disc_group(gt, t2)))
+  +p3 = run_penalty(l3, disc_group(gt, t3))
+  (p0 + p1 + p2 + p3 : U32)
 
-def eval_turma_grouping(w: Week5) -> U32:
+def eval_turma_grouping(w: Week5, +gt: Table32) -> U32:
   W5{d0, d1, d2, d3, d4} = w
-  +p0 = eval_day_grouping(d0)
-  +p1 = eval_day_grouping(d1)
-  +p2 = eval_day_grouping(d2)
-  +p3 = eval_day_grouping(d3)
-  +p4 = eval_day_grouping(d4)
+  +p0 = eval_day_grouping(d0, gt)
+  +p1 = eval_day_grouping(d1, gt)
+  +p2 = eval_day_grouping(d2, gt)
+  +p3 = eval_day_grouping(d3, gt)
+  +p4 = eval_day_grouping(d4, gt)
   (p0 + p1 + p2 + p3 + p4 : U32)
 
 def evaluate_quadro(q: Quadro3, spec: FastSpec) -> U32:
   Q3{t0, t1, t2} = q
-  FSpec{disc_profs, prof_masks, u1, u2} = spec
+  FSpec{+info, prof_masks, u1, u2} = spec
   +t0 = t0; +t1 = t1; +t2 = t2
-  +g0 = eval_turma_grouping(t0)
-  +g1 = eval_turma_grouping(t1)
-  +g2 = eval_turma_grouping(t2)
+  +g0 = eval_turma_grouping(t0, info)
+  +g1 = eval_turma_grouping(t1, info)
+  +g2 = eval_turma_grouping(t2, info)
   +group_total = (g0 + g1 + g2 : U32)
-  +prof_total = eval_prof_penalties(t0, t1, t2, disc_profs, prof_masks)
+  +prof_total = eval_prof_penalties(t0, t1, t2, info, prof_masks)
   +unidas_total = eval_unidas_week(t0, t1, u1, u2)
   (group_total + prof_total + unidas_total : U32)
 
@@ -427,7 +473,7 @@ def build_pop_tree(d: Nat, +base_q: Quadro3, +spec: FastSpec, +seed: U32) -> T.P
 # ------------------------------------------------------------------------------
 
 type DiscEntry is Data:
-  DEntry{nome: String, turma: String, aulas: U32, agrupar: U32}
+  DEntry{nome: String, turma: String, aulas: U32, agrupar: U32, dividir: U32}
 
 def load_turmas_names(items: List<&2, J.Json>) -> List<&2, String>:
   match items:
@@ -435,6 +481,15 @@ def load_turmas_names(items: List<&2, J.Json>) -> List<&2, String>:
     case +h <> t:
       +nome = J.Json.get_str(h, "nome", "Turma")
       nome <> load_turmas_names(t)
+
+# "dividir" vem como booleano JSON; JNum/ausente vira 0 (o default do Rust e false).
+def json_bool_to_u32(m: Maybe<&2, J.Json>) -> U32:
+  match m:
+    case None{}: 0
+    case Some{v}:
+      match v:
+        case J.JBool{b}: Bool.pick(U32, b, 1, 0)
+        case _: 0
 
 def load_disciplinas(items: List<&2, J.Json>) -> List<&2, DiscEntry>:
   match items:
@@ -444,13 +499,14 @@ def load_disciplinas(items: List<&2, J.Json>) -> List<&2, DiscEntry>:
       +turma = J.Json.get_str(h, "turma", "")
       +aulas = J.Json.get_num(h, "aulas", 2)
       +agrupar = J.Json.get_num(h, "agrupar", 2)
-      DEntry{nome, turma, aulas, agrupar} <> load_disciplinas(t)
+      +dividir = json_bool_to_u32(J.Json.get(h, "dividir"))
+      DEntry{nome, turma, aulas, agrupar, dividir} <> load_disciplinas(t)
 
 def load_disc_nomes(discs: List<&2, DiscEntry>) -> List<&2, String>:
   match discs:
     case Nil{}: Nil{}
     case h <> t:
-      DEntry{nome, _, _, _} = h
+      DEntry{nome, _, _, _, _} = h
       nome <> load_disc_nomes(t)
 
 def json_is_target_num(j: J.Json, +target: U32) -> Bool:
@@ -521,12 +577,25 @@ def build_disc_profs(discs: List<&2, DiscEntry>, +profs: List<&2, J.Json>) -> Li
   match discs:
     case Nil{}: Nil{}
     case h <> t:
-      DEntry{nome, _, _, _} = h
+      DEntry{nome, _, _, _, _} = h
       +pid = find_prof_for_disc(nome, profs, 1)
       pid <> build_disc_profs(t, profs)
 
 # ATENCAO: satura em 4 — count >= 4 devolve 4 copias. Disciplinas com mais de 4
 # aulas sao rejeitadas por validate_input (secao 5B) antes de chegar aqui.
+# prof_id nos bits 0-7 e (agrupar * 2 + dividir) nos bits 8-15. validate_input
+# garante prof_id <= 15 e agrupar <= 127, entao nada transborda.
+def build_disc_info(discs: List<&2, DiscEntry>, pids: List<&2, U32>) -> List<&2, U32>:
+  match discs:
+    case Nil{}: Nil{}
+    case h <> t:
+      DEntry{_, _, _, agrupar, dividir} = h
+      match pids:
+        case Nil{}: Nil{}
+        case p <> pt:
+          +packed = U32.add(U32.mul(agrupar, 2), dividir)
+          U32.add(p, U32.mul(packed, 256)) <> build_disc_info(t, pt)
+
 def repeat_val(+val: U32, +count: U32) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, U32.is_eq(count, 0), Nil{},
     Bool.pick(List<&2, U32>, U32.is_eq(count, 1), (val <> Nil{}),
@@ -538,7 +607,7 @@ def collect_turma_slots(discs: List<&2, DiscEntry>, +turma_nome: String, +disc_i
   match discs:
     case Nil{}: Nil{}
     case h <> t:
-      DEntry{_, t_nome, aulas, _} = h
+      DEntry{_, t_nome, aulas, _, _} = h
       +matching = String.eq(t_nome, turma_nome)
       +added = Bool.pick(List<&2, U32>, matching, repeat_val(disc_id, aulas), Nil{})
       List.append(&2, U32, added, collect_turma_slots(t, turma_nome, U32.inc(disc_id)))
@@ -554,7 +623,7 @@ def list_find_disc_index(l: List<&2, DiscEntry>, +target: String, +cur: U32) -> 
   match l:
     case Nil{}: 0
     case h <> t:
-      DEntry{nome, _, _, _} = h
+      DEntry{nome, _, _, _, _} = h
       Bool.pick(U32, String.eq(nome, target), cur, list_find_disc_index(t, target, U32.inc(cur)))
 
 def json_to_str(j: J.Json) -> String:
@@ -642,7 +711,7 @@ def check_disc_turmas(discs: List<&2, DiscEntry>, +turmas: List<&2, String>) -> 
   match discs:
     case Nil{}: Nil{}
     case h <> t:
-      DEntry{nome, turma, _, _} = h
+      DEntry{nome, turma, _, _, _} = h
       +turma = turma
       +e = err_unless(list_has_str(turmas, turma),
         "disciplina \"" ++ nome ++ "\" referencia a turma \"" ++ turma ++
@@ -653,12 +722,25 @@ def check_aulas(discs: List<&2, DiscEntry>) -> List<&2, String>:
   match discs:
     case Nil{}: Nil{}
     case h <> t:
-      DEntry{nome, _, aulas, _} = h
+      DEntry{nome, _, aulas, _, _} = h
       +aulas = aulas
       +e = err_unless(Bool.and(U32.is_ge(aulas, 1), U32.is_le(aulas, 4)),
         "disciplina \"" ++ nome ++ "\" tem aulas=" ++ U32.show(aulas) ++
         "; este solver suporta 1 a 4 (repeat_val satura em 4)")
       List.append(&2, String, e, check_aulas(t))
+
+# agrupar ocupa os bits 8-15 de disc_info como (agrupar * 2 + dividir), entao
+# precisa caber em 7 bits para nao invadir o campo vizinho.
+def check_agrupar(discs: List<&2, DiscEntry>) -> List<&2, String>:
+  match discs:
+    case Nil{}: Nil{}
+    case h <> t:
+      DEntry{nome, _, _, agrupar, _} = h
+      +agrupar = agrupar
+      +e = err_unless(U32.is_le(agrupar, 127),
+        "disciplina \"" ++ nome ++ "\" tem agrupar=" ++ U32.show(agrupar) ++
+        "; o maximo empacotavel em disc_info e 127")
+      List.append(&2, String, e, check_agrupar(t))
 
 # pid == 0 significa que find_prof_for_disc nao achou professor algum: a
 # disciplina deixa de gerar qualquer penalidade de choque ou indisponibilidade.
@@ -666,7 +748,7 @@ def check_disc_profs(discs: List<&2, DiscEntry>, pids: List<&2, U32>) -> List<&2
   match discs:
     case Nil{}: Nil{}
     case h <> t:
-      DEntry{nome, _, _, _} = h
+      DEntry{nome, _, _, _, _} = h
       match pids:
         case Nil{}: Nil{}
         case p <> pt:
@@ -693,10 +775,11 @@ def validate_input(+turmas: List<&2, String>, +discs: List<&2, DiscEntry>,
   +e_s1 = check_slots(n1, s1)
   +e_s2 = check_slots(n2, s2)
   +e_aulas = check_aulas(discs)
+  +e_agrup = check_agrupar(discs)
   +e_dturma = check_disc_turmas(discs, turmas)
   +e_dprof = check_disc_profs(discs, disc_profs)
   List.concat(&2, String,
-    [e_turmas, e_discs, e_profs, e_s0, e_s1, e_s2, e_aulas, e_dturma, e_dprof])
+    [e_turmas, e_discs, e_profs, e_s0, e_s1, e_s2, e_aulas, e_agrup, e_dturma, e_dprof])
 
 # ------------------------------------------------------------------------------
 # 6. SERIALIZAÇÃO DINÂMICA DO RESULTADO (TurmaHorarioResult[])
@@ -842,9 +925,9 @@ def solve_from_form_data.step(u_pair: UnidasPair, +turmas: List<&2, String>, +di
                          List.length(&2, U32, t1_slots),
                          List.length(&2, U32, t2_slots))
   +base_q = make_q3(slots20_to_week5(t0_slots), slots20_to_week5(t1_slots), slots20_to_week5(t2_slots))
-  +dp_table = fill_table32(disc_profs, empty_t32(), 1)
+  +info_table = fill_table32(build_disc_info(discs, disc_profs), empty_t32(), 1)
   +pm_table = fill_table16(prof_masks, empty_t16(), 1)
-  +spec = make_fspec(dp_table, pm_table, u1, u2)
+  +spec = make_fspec(info_table, pm_table, u1, u2)
   solve_from_form_data.guard(errs, base_q, spec, turmas, disc_nomes, n_profs, generations, seed)
 
 def solve_from_form_data(+fd: J.Json, +generations: Nat, +seed: U32) -> IO(Unit):

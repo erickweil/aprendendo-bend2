@@ -43,8 +43,12 @@ def all_positive(l: List<&2, U32>) -> Bool:
     case h <> t:
       Bool.pick(Bool, U32.is_gt(h, 0), all_positive(t), False{})
 
+# Tabela disc_id -> valor, indexada a partir de 1 como no solver.
+def t32(l: List<&2, U32>) -> H.Table32:
+  H.fill_table32(l, H.empty_t32(), 1)
+
 def mk_disc(nome: String, turma: String, aulas: U32) -> H.DiscEntry:
-  H.DEntry{nome, turma, aulas, 2}
+  H.DEntry{nome, turma, aulas, 2, 0}
 
 def run_checks.fd(+fd: J.Json) -> String:
   +turmas_arr = J.Json.get_arr(fd, "turmas")
@@ -98,7 +102,47 @@ def run_checks.fd(+fd: J.Json) -> String:
   +t22 = Nat.is_eq(List.length(&2, String,
     H.check_disc_profs([mk_disc("X", "T-A", 4)], [3])), 0n)
 
-  +n = (fail_count(t1) + fail_count(t2) + fail_count(t3) + fail_count(t4) +
+  # --- agrupamento: run_penalty segue horario_genetic.rs ---
+  # ideal = g quando divisivel, senao o multiplo de g mais proximo de len
+  # (arredondando a metade para longe de zero, como o f64::round() do Rust).
+  +t23 = U32.is_eq(H.run_penalty(4, 8), 0)     # bloco exato
+  +t24 = U32.is_eq(H.run_penalty(2, 4), 0)
+  +t25 = U32.is_eq(H.run_penalty(2, 8), 40)    # 2 aulas onde o ideal sao 4
+  +t26 = U32.is_eq(H.run_penalty(1, 4), 20)    # ideal = round(0.5)*2 = 2
+  +t27 = U32.is_eq(H.run_penalty(3, 4), 20)    # ideal = round(1.5)*2 = 4
+  +t28 = U32.is_eq(H.run_penalty(6, 4), 0)     # multiplo de g: sem penalidade
+  +t29 = U32.is_eq(H.run_penalty(6, 5), 80)    # divisivel: ideal fixo = g = 2
+  +t30 = U32.is_eq(H.run_penalty(7, 0), 0)     # agrupar = 0 desliga a regra
+
+  # --- varredura de blocos num dia de 4 tempos ---
+    # disc_info: prof nos bits 0-7 (aqui 1) e agrupar*2+dividir nos bits 8-15.
+  # discs 1, 2 e 4 com agrupar=2; disc 3 com agrupar=4; dividir 0 em todas.
+  +gt = t32([1025, 1025, 2049, 1025])
+  +t31 = U32.is_eq(H.eval_day_grouping(H.make_d4(1, 1, 2, 2), gt), 0)
+  +t32a = U32.is_eq(H.eval_day_grouping(H.make_d4(1, 2, 3, 4), gt), 80)  # 4 blocos de 1
+  +t33 = U32.is_eq(H.eval_day_grouping(H.make_d4(3, 3, 3, 3), gt), 0)    # bloco de 4, g=4
+  +t34 = U32.is_eq(H.eval_day_grouping(H.make_d4(3, 3, 1, 1), gt), 40)   # disc 3 parte ao meio
+  +t35 = U32.is_eq(H.eval_day_grouping(H.make_d4(1, 1, 1, 2), gt), 40)   # bloco de 3 com g=2
+
+  # --- empacotamento prof + agrupamento na mesma palavra ---
+  # build_disc_info(disc com agrupar=4, dividir=0, prof 7) = 7 + 8*256 = 2055
+  +info1 = t32([2055])
+  +t36 = U32.is_eq(H.disc_prof(info1, 1), 7)
+  +t37 = U32.is_eq(H.disc_group(info1, 1), 8)
+  +t38 = U32.is_eq(H.disc_prof(info1, 2), 0)    # fora da tabela: sem professor
+  +t39 = U32.is_eq(H.disc_group(info1, 2), 0)   # fora da tabela: regra desligada
+  +t40 = Nat.is_eq(List.length(&2, String,
+    H.check_agrupar([H.DEntry{"X", "T-A", 4, 200, 0}])), 1n)
+  +t41 = Nat.is_eq(List.length(&2, String,
+    H.check_agrupar([H.DEntry{"X", "T-A", 4, 4, 0}])), 0n)
+
+  +n = (fail_count(t36) + fail_count(t37) + fail_count(t38) + fail_count(t39) +
+        fail_count(t40) + fail_count(t41) +
+        fail_count(t23) + fail_count(t24) + fail_count(t25) + fail_count(t26) +
+        fail_count(t27) + fail_count(t28) + fail_count(t29) + fail_count(t30) +
+        fail_count(t31) + fail_count(t32a) + fail_count(t33) + fail_count(t34) +
+        fail_count(t35) +
+        fail_count(t1) + fail_count(t2) + fail_count(t3) + fail_count(t4) +
         fail_count(t5) + fail_count(t6) + fail_count(t7) + fail_count(t8) +
         fail_count(t9) + fail_count(t10) + fail_count(t11) + fail_count(t12) +
         fail_count(t13) + fail_count(t14) + fail_count(t15) + fail_count(t16) +
@@ -127,6 +171,25 @@ def run_checks.fd(+fd: J.Json) -> String:
   line(t20, "check_disc_turmas aceita turma existente") ++
   line(t21, "check_disc_profs ACUSA pid == 0") ++
   line(t22, "check_disc_profs aceita pid > 0") ++
+  line(t23, "run_penalty: bloco de 4 com agrupar=4 nao penaliza") ++
+  line(t24, "run_penalty: bloco de 2 com agrupar=2 nao penaliza") ++
+  line(t25, "run_penalty: bloco de 2 com agrupar=4 custa 40") ++
+  line(t26, "run_penalty: bloco de 1 com agrupar=2 custa 20 (round meio p/ cima)") ++
+  line(t27, "run_penalty: bloco de 3 com agrupar=2 custa 20") ++
+  line(t28, "run_penalty: bloco de 6 com agrupar=2 nao penaliza (multiplo)") ++
+  line(t29, "run_penalty: com dividir=1 o ideal fica fixo em g") ++
+  line(t30, "run_penalty: agrupar=0 desliga a regra") ++
+  line(t31, "eval_day_grouping: [1,1,2,2] com g=2 nao penaliza") ++
+  line(t32a,"eval_day_grouping: [1,2,3,4] custa 4 blocos de 1") ++
+  line(t33, "eval_day_grouping: [3,3,3,3] com g=4 nao penaliza") ++
+  line(t34, "eval_day_grouping: [3,3,1,1] penaliza o bloco partido de g=4") ++
+  line(t35, "eval_day_grouping: [1,1,1,2] penaliza o bloco de 3 com g=2") ++
+  line(t36, "disc_info: disc_prof extrai o professor dos bits 0-7") ++
+  line(t37, "disc_info: disc_group extrai agrupar/dividir dos bits 8-15") ++
+  line(t38, "disc_info: indice fora da tabela nao tem professor") ++
+  line(t39, "disc_info: indice fora da tabela tem a regra desligada") ++
+  line(t40, "check_agrupar ACUSA agrupar=200 (nao cabe em 7 bits)") ++
+  line(t41, "check_agrupar aceita agrupar=4") ++
   "Falhas: " ++ U32.show(n) ++ "\n" ++
   verdict(n)
 
