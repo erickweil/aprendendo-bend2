@@ -44,6 +44,7 @@ run_scenario "6" "Problema das 8-Rainhas (N-Queens)" "src/scenario6_nqueens.bend
 run_scenario "7" "Problema da Mochila (0/1 Knapsack)" "src/scenario7_knapsack.bend"
 run_scenario "8" "Evolução de Strings (Dawkins Weasel)" "src/scenario8_weasel.bend"
 run_scenario "9" "Cellular Genetic Algorithm (cGA / Quad-Tree)" "src/scenario9_cga.bend"
+run_scenario "10" "Programação Genética / Regressão Simbólica (GP)" "src/scenario10_gp.bend"
 run_scenario "PGA" "Modelo de Ilhas Paralelas (Island Model)" "src/island_ga.bend"
 
 echo "================================================================"
