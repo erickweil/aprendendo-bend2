@@ -212,4 +212,4 @@ law branch_cross_false_clones_parent:
 # nenhuma posição do filho é sobrescrita pelo pai 2.
 law ox1_fill_saturated_is_identity:
   for +child: Perm.Perm8
-  {Op.ox1_fill(8n, Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, child, 255, 0, 0, 0) == child : Perm.Perm8}
+  {Op.ox1_fill(8n, Perm.make_perm8(0, 1, 2, 3, 4, 5, 6, 7), child, 255, 0, 0, 0) == child : Perm.Perm8}

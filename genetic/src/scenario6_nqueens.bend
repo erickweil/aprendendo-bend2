@@ -21,10 +21,11 @@ def diag_conflict(+c1: U32, +c2: U32, +dist_rows: U32) -> U32:
   Bool.pick(U32, U32.is_eq(abs_diff(c1, c2), dist_rows), 1, 0)
 
 # Total de conflitos diagonais no tabuleiro 8x8
-def queen_conflicts(p: Perm.Perm8) -> U32:
-  Perm.P8{q0, q1, q2, q3, q4, q5, q6, q7} = p
-  +q0 = q0; +q1 = q1; +q2 = q2; +q3 = q3
-  +q4 = q4; +q5 = q5; +q6 = q6; +q7 = q7
+def queen_conflicts(+p: Perm.Perm8) -> U32:
+  +q0 = Perm.Perm8.get(p, 0); +q1 = Perm.Perm8.get(p, 1)
+  +q2 = Perm.Perm8.get(p, 2); +q3 = Perm.Perm8.get(p, 3)
+  +q4 = Perm.Perm8.get(p, 4); +q5 = Perm.Perm8.get(p, 5)
+  +q6 = Perm.Perm8.get(p, 6); +q7 = Perm.Perm8.get(p, 7)
 
   +c0 = (diag_conflict(q0, q1, 1) + diag_conflict(q0, q2, 2) + diag_conflict(q0, q3, 3) +
          diag_conflict(q0, q4, 4) + diag_conflict(q0, q5, 5) + diag_conflict(q0, q6, 6) + diag_conflict(q0, q7, 7) : U32)
@@ -50,7 +51,7 @@ def shuffle_queens(+p: Perm.Perm8, +s: U32) -> Perm.Perm8:
   Perm.Perm8.swap(p1, U32.mod(s3, 8), U32.mod(s4, 8))
 
 def init_queens(seed: U32) -> Perm.Perm8:
-  shuffle_queens(Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, seed)
+  shuffle_queens(Perm.make_perm8(0, 1, 2, 3, 4, 5, 6, 7), seed)
 
 # Mutação híbrida: 70% Swap aleatório + 30% Scramble de janela de 3 elementos
 # (escolha exclusiva por sorteio, via combinador higher-order)

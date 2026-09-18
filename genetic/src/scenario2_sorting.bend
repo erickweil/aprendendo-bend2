@@ -16,9 +16,12 @@ def pair_score(+a: U32, +b: U32) -> U32:
 
 # Fitness = contagem de pares ordenados. Max = 28.
 def fitness(p: Perm.Perm8) -> U32:
-  Perm.P8{x0, x1, x2, x3, x4, x5, x6, x7} = p
-  +x0 = x0; +x1 = x1; +x2 = x2; +x3 = x3
-  +x4 = x4; +x5 = x5; +x6 = x6; +x7 = x7
+  # assinatura afim, para casar com o tipo `G -> U32` esperado pelo motor
+  +p = p
+  +x0 = Perm.Perm8.get(p, 0); +x1 = Perm.Perm8.get(p, 1)
+  +x2 = Perm.Perm8.get(p, 2); +x3 = Perm.Perm8.get(p, 3)
+  +x4 = Perm.Perm8.get(p, 4); +x5 = Perm.Perm8.get(p, 5)
+  +x6 = Perm.Perm8.get(p, 6); +x7 = Perm.Perm8.get(p, 7)
 
   +s0 = (pair_score(x0, x1) + pair_score(x0, x2) + pair_score(x0, x3) +
          pair_score(x0, x4) + pair_score(x0, x5) + pair_score(x0, x6) + pair_score(x0, x7) : U32)
@@ -40,7 +43,7 @@ def shuffle(+p: Perm.Perm8, +s: U32) -> Perm.Perm8:
   Perm.Perm8.swap(p1, U32.mod(s3, 8), U32.mod(s4, 8))
 
 def init_gene(seed: U32) -> Perm.Perm8:
-  shuffle(Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, seed)
+  shuffle(Perm.make_perm8(0, 1, 2, 3, 4, 5, 6, 7), seed)
 
 # Reprodução: PMX (Partially Mapped Crossover) + Swap de vizinho.
 # O PMX preserva a sub-rota herdada do pai e resolve os conflitos por

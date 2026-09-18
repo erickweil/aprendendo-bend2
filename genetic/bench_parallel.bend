@@ -14,10 +14,11 @@ def city_dist(+c1: U32, +c2: U32) -> U32:
   +d = Bool.pick(U32, U32.is_ge(c1, c2), (c1 - c2 : U32), (c2 - c1 : U32))
   (d * 10 : U32)
 
-def tour_distance(p: Perm.Perm8) -> U32:
-  Perm.P8{c0, c1, c2, c3, c4, c5, c6, c7} = p
-  +c0 = c0; +c1 = c1; +c2 = c2; +c3 = c3
-  +c4 = c4; +c5 = c5; +c6 = c6; +c7 = c7
+def tour_distance(+p: Perm.Perm8) -> U32:
+  +c0 = Perm.Perm8.get(p, 0); +c1 = Perm.Perm8.get(p, 1)
+  +c2 = Perm.Perm8.get(p, 2); +c3 = Perm.Perm8.get(p, 3)
+  +c4 = Perm.Perm8.get(p, 4); +c5 = Perm.Perm8.get(p, 5)
+  +c6 = Perm.Perm8.get(p, 6); +c7 = Perm.Perm8.get(p, 7)
   (city_dist(c0, c1) + city_dist(c1, c2) + city_dist(c2, c3) + city_dist(c3, c4) +
    city_dist(c4, c5) + city_dist(c5, c6) + city_dist(c6, c7) + city_dist(c7, c0) : U32)
 

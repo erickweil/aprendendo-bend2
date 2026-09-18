@@ -33,10 +33,11 @@ def dist(+c1: U32, +c2: U32) -> U32:
   +dy = abs_diff(city_y(c1), city_y(c2))
   (dx + dy : U32)
 
-def tour_distance(p: Perm.Perm8) -> U32:
-  Perm.P8{c0, c1, c2, c3, c4, c5, c6, c7} = p
-  +c0 = c0; +c1 = c1; +c2 = c2; +c3 = c3
-  +c4 = c4; +c5 = c5; +c6 = c6; +c7 = c7
+def tour_distance(+p: Perm.Perm8) -> U32:
+  +c0 = Perm.Perm8.get(p, 0); +c1 = Perm.Perm8.get(p, 1)
+  +c2 = Perm.Perm8.get(p, 2); +c3 = Perm.Perm8.get(p, 3)
+  +c4 = Perm.Perm8.get(p, 4); +c5 = Perm.Perm8.get(p, 5)
+  +c6 = Perm.Perm8.get(p, 6); +c7 = Perm.Perm8.get(p, 7)
 
   +d0 = dist(c0, c1); +d1 = dist(c1, c2); +d2 = dist(c2, c3); +d3 = dist(c3, c4)
   +d4 = dist(c4, c5); +d5 = dist(c5, c6); +d6 = dist(c6, c7); +d7 = dist(c7, c0)
@@ -53,7 +54,7 @@ def shuffle_tour(+p: Perm.Perm8, +s: U32) -> Perm.Perm8:
   Perm.Perm8.swap(p1, U32.mod(s3, 8), U32.mod(s4, 8))
 
 def init_gene(seed: U32) -> Perm.Perm8:
-  shuffle_tour(Perm.P8{0, 4, 1, 5, 2, 6, 3, 7}, seed)
+  shuffle_tour(Perm.make_perm8(0, 4, 1, 5, 2, 6, 3, 7), seed)
 
 # Mutação combinada do `problem_tsp.rs` original:
 # 50% Swap aleatório + 50% Swap de vizinho, via combinador higher-order

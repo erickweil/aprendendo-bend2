@@ -16,10 +16,11 @@ def city_dist(+c1: U32, +c2: U32) -> U32:
   +d = Bool.pick(U32, U32.is_ge(c1, c2), (c1 - c2 : U32), (c2 - c1 : U32))
   (d * 10 : U32)
 
-def tour_distance(p: Perm.Perm8) -> U32:
-  Perm.P8{c0, c1, c2, c3, c4, c5, c6, c7} = p
-  +c0 = c0; +c1 = c1; +c2 = c2; +c3 = c3
-  +c4 = c4; +c5 = c5; +c6 = c6; +c7 = c7
+def tour_distance(+p: Perm.Perm8) -> U32:
+  +c0 = Perm.Perm8.get(p, 0); +c1 = Perm.Perm8.get(p, 1)
+  +c2 = Perm.Perm8.get(p, 2); +c3 = Perm.Perm8.get(p, 3)
+  +c4 = Perm.Perm8.get(p, 4); +c5 = Perm.Perm8.get(p, 5)
+  +c6 = Perm.Perm8.get(p, 6); +c7 = Perm.Perm8.get(p, 7)
   (city_dist(c0, c1) + city_dist(c1, c2) + city_dist(c2, c3) + city_dist(c3, c4) +
    city_dist(c4, c5) + city_dist(c5, c6) + city_dist(c6, c7) + city_dist(c7, c0) : U32)
 
@@ -28,7 +29,7 @@ def fitness(p: Perm.Perm8) -> U32:
   Bool.pick(U32, U32.is_gt(d, 1000), 0, (1000 - d : U32))
 
 def init_gene(seed: U32) -> Perm.Perm8:
-  Op.mut_perm_random_swap(Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, seed)
+  Op.mut_perm_random_swap(Perm.make_perm8(0, 1, 2, 3, 4, 5, 6, 7), seed)
 
 def mut_tsp(p: Perm.Perm8, seed: U32) -> Perm.Perm8:
   Op.combine_mutations(~Perm.Perm8, ~Op.mut_perm_random_swap, ~Op.mut_perm_reverse_segment,

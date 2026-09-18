@@ -20,8 +20,11 @@ import ./../utils/random.bend as R
 # ----------------------------------------------------------------
 
 # Popcount da máscara de alelos: 8 <=> permutação válida de 0..7
-def perm_valid(p: Perm.Perm8) -> U32:
-  Perm.P8{x0, x1, x2, x3, x4, x5, x6, x7} = p
+def perm_valid(+p: Perm.Perm8) -> U32:
+  +x0 = Perm.Perm8.get(p, 0); +x1 = Perm.Perm8.get(p, 1)
+  +x2 = Perm.Perm8.get(p, 2); +x3 = Perm.Perm8.get(p, 3)
+  +x4 = Perm.Perm8.get(p, 4); +x5 = Perm.Perm8.get(p, 5)
+  +x6 = Perm.Perm8.get(p, 6); +x7 = Perm.Perm8.get(p, 7)
   B.popcount(U32.or(B.bit_of(x0), U32.or(B.bit_of(x1), U32.or(B.bit_of(x2),
     U32.or(B.bit_of(x3), U32.or(B.bit_of(x4), U32.or(B.bit_of(x5),
       U32.or(B.bit_of(x6), B.bit_of(x7)))))))))
@@ -39,8 +42,8 @@ def shuffle(n: Nat, +p: Perm.Perm8, +s: U32) -> Perm.Perm8:
 # Todo operador de permutação deve fechar sobre permutações válidas
 def check_perm(+s: U32) -> U32:
   +s = s
-  +p1 = shuffle(12n, Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, s)
-  +p2 = shuffle(9n, Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, R.step(U32.xor(s, 987654321)))
+  +p1 = shuffle(12n, Perm.make_perm8(0, 1, 2, 3, 4, 5, 6, 7), s)
+  +p2 = shuffle(9n, Perm.make_perm8(0, 1, 2, 3, 4, 5, 6, 7), R.step(U32.xor(s, 987654321)))
   +v_ox1 = perm_valid(Op.cross_perm_ox1(p1, p2, s))
   +v_pmx = perm_valid(Op.cross_perm_pmx(p1, p2, s))
   +v_ds  = perm_valid(Op.cross_perm_directed_swap(p1, p2, s))
@@ -149,7 +152,7 @@ def sweep_comb(n: Nat, +s: U32, +acc: U32) -> U32:
 def rev_demo(+lo: U32, +hi: U32) -> String:
   +lo = lo
   +hi = hi
-  Perm.Perm8.show(Op.perm_reverse_range(4n, U32.is_lt(lo, hi), Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, lo, hi))
+  Perm.Perm8.show(Op.perm_reverse_range(4n, U32.is_lt(lo, hi), Perm.make_perm8(0, 1, 2, 3, 4, 5, 6, 7), lo, hi))
 
 def verdict(+got: U32, +want: U32) -> String:
   U32.show(got) ++ " / " ++ U32.show(want) ++
@@ -170,6 +173,6 @@ def main() -> IO(Unit):
     "  perm_reverse_range(2, 3): " ++ rev_demo(2, 3) ++ "\n" ++
     "  perm_reverse_range(4, 4): " ++ rev_demo(4, 4) ++ "\n\n" ++
     "Exemplos com p1 = [0..7] e p2 = [7..0] (semente 42):\n" ++
-    "  OX1: " ++ Perm.Perm8.show(Op.cross_perm_ox1(Perm.P8{0,1,2,3,4,5,6,7}, Perm.P8{7,6,5,4,3,2,1,0}, 42)) ++ "\n" ++
-    "  PMX: " ++ Perm.Perm8.show(Op.cross_perm_pmx(Perm.P8{0,1,2,3,4,5,6,7}, Perm.P8{7,6,5,4,3,2,1,0}, 42)) ++ "\n"
+    "  OX1: " ++ Perm.Perm8.show(Op.cross_perm_ox1(Perm.make_perm8(0,1,2,3,4,5,6,7), Perm.make_perm8(7,6,5,4,3,2,1,0), 42)) ++ "\n" ++
+    "  PMX: " ++ Perm.Perm8.show(Op.cross_perm_pmx(Perm.make_perm8(0,1,2,3,4,5,6,7), Perm.make_perm8(7,6,5,4,3,2,1,0), 42)) ++ "\n"
   )

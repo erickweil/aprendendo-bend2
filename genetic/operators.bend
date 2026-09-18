@@ -218,15 +218,8 @@ def mut_bits_swap(g: U32, seed: U32) -> U32:
 # ----------------------------------------------------------------
 
 # Posição de um valor dentro da permutação
-def find_index(p: Perm.Perm8, +val: U32) -> U32:
-  Perm.P8{x0, x1, x2, x3, x4, x5, x6, x7} = p
-  Bool.pick(U32, U32.is_eq(x0, val), 0,
-    Bool.pick(U32, U32.is_eq(x1, val), 1,
-      Bool.pick(U32, U32.is_eq(x2, val), 2,
-        Bool.pick(U32, U32.is_eq(x3, val), 3,
-          Bool.pick(U32, U32.is_eq(x4, val), 4,
-            Bool.pick(U32, U32.is_eq(x5, val), 5,
-              Bool.pick(U32, U32.is_eq(x6, val), 6, 7)))))))
+def find_index(+p: Perm.Perm8, +val: U32) -> U32:
+  Perm.Perm8.index_of(p, val)
 
 # Sorteia um par ordenado de cortes (lo <= hi) em [0, 7]
 def cut_lo(+seed: U32) -> U32:
