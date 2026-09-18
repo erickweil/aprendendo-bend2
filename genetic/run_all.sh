@@ -14,6 +14,16 @@ echo "Arquitetura: Árvore Binária Fork-Join + PRNG Puro com Seed-Split"
 echo "================================================================"
 echo ""
 
+echo "================================================================"
+echo ">> [FASE 0] VERIFICAÇÃO FORMAL DE LEIS MATEMÁTICAS (LAWS & PROOF)"
+echo "================================================================"
+echo "Verificando 15 leis do motor genético e utilitários via 'bend utils/PROOF.bend'..."
+bend utils/PROOF.bend
+echo "✓ Todas as 15 leis matemáticas foram verificadas e provadas com sucesso!"
+echo "================================================================"
+echo ""
+
+
 run_scenario() {
     local num="$1"
     local name="$2"

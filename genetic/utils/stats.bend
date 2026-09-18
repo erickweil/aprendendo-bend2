@@ -29,6 +29,22 @@ def PopStats.mean(s: PopStats) -> U32:
   PopStats{_, _, sum, +count} = s
   Bool.pick(U32, U32.is_eq(count, 0), 0, (sum / count : U32))
 
+def PopStats.count(s: PopStats) -> U32:
+  PopStats{_, _, _, c} = s
+  c
+
+def PopStats.sum(s: PopStats) -> U32:
+  PopStats{_, _, sum, _} = s
+  sum
+
+def PopStats.best(s: PopStats) -> U32:
+  PopStats{b, _, _, _} = s
+  b
+
+def PopStats.worst(s: PopStats) -> U32:
+  PopStats{_, w, _, _} = s
+  w
+
 def PopStats.spread(s: PopStats) -> U32:
   PopStats{best, worst, _, _} = s
   (best - worst : U32)
