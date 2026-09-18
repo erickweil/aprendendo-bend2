@@ -1,0 +1,340 @@
+{
+  "formData": {
+    "turmas": [
+      {
+        "nome": "Turma 2026",
+        "horarios": {
+          "seg": [1, 2, 3, 4],
+          "ter": [1, 2, 3, 4],
+          "qua": [1, 2, 3, 4],
+          "qui": [1, 2, 3, 4],
+          "sex": [1, 2, 3, 4]
+        },
+        "id": "c230c995-0209-4672-994d-f01da54fff5d"
+      },
+      {
+        "nome": "Turma 2025",
+        "horarios": {
+          "seg": [1, 2, 3, 4],
+          "ter": [1, 2, 3, 4],
+          "qua": [1, 2, 3, 4],
+          "qui": [1, 2, 3, 4],
+          "sex": [1, 2, 3, 4]
+        },
+        "id": "da8d4693-dd95-462f-afe6-be8cbf73b23b"
+      },
+      {
+        "nome": "Turma 2024",
+        "horarios": {
+          "seg": [1, 2, 3, 4],
+          "ter": [1, 2, 3, 4],
+          "qua": [1, 2, 3, 4],
+          "qui": [1, 2, 3, 4],
+          "sex": [1, 2, 3, 4]
+        },
+        "id": "08a291af-e146-497a-b298-c065e511974e"
+      }
+    ],
+    "disciplinas": [
+      {
+        "nome": "Estrutura de dados II (40 horas)",
+        "turma": "Turma 2025",
+        "aulas": 2,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Estatística (80 horas)",
+        "turma": "Turma 2025",
+        "aulas": 4,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Devops e Cloud II (40 horas)",
+        "turma": "Turma 2025",
+        "aulas": 2,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Teste de Software II (40 horas)",
+        "turma": "Turma 2025",
+        "aulas": 2,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Frameworks para front-end (80 horas)",
+        "turma": "Turma 2025",
+        "aulas": 4,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": true
+      },
+      {
+        "nome": "Web Services (40 horas)",
+        "turma": "Turma 2025",
+        "aulas": 2,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Libras (80 horas)",
+        "turma": "Turma 2024",
+        "aulas": 4,
+        "agrupar": 4,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Tópicos Especiais II (80 horas)",
+        "turma": "Turma 2024",
+        "aulas": 4,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Ética, Sociedade e Sustentabilidade (40 horas)",
+        "turma": "Turma 2024",
+        "aulas": 2,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Inteligência Artificial (80 horas)",
+        "turma": "Turma 2024",
+        "aulas": 4,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Arquitetura de Software (40 horas)",
+        "turma": "Turma 2024",
+        "aulas": 2,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Dispositivos Movéis II (40 horas)",
+        "turma": "Turma 2024",
+        "aulas": 2,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Orientações para o Trabalho de Conclusão de Curso (40 horas)",
+        "turma": "Turma 2024",
+        "aulas": 2,
+        "agrupar": 2,
+        "checkAgrupar": false,
+        "dividir": false
+      },
+      {
+        "nome": "Linguagens de programação (80 horas)",
+        "turma": "Turma 2026",
+        "aulas": 4,
+        "agrupar": 2,
+        "dividir": false
+      },
+      {
+        "nome": "Redes de Computadores (40 horas)",
+        "turma": "Turma 2026",
+        "aulas": 2,
+        "agrupar": 2,
+        "dividir": false
+      },
+      {
+        "nome": "Sistemas Operacionais (40 horas)",
+        "turma": "Turma 2026",
+        "aulas": 2,
+        "agrupar": 2,
+        "dividir": false
+      },
+      {
+        "nome": "Banco de dados II (80 horas)",
+        "turma": "Turma 2026",
+        "aulas": 4,
+        "agrupar": 2,
+        "dividir": true
+      },
+      {
+        "nome": "Engenharia de Software (80 horas)",
+        "turma": "Turma 2026",
+        "aulas": 4,
+        "agrupar": 2,
+        "dividir": true
+      },
+      {
+        "nome": "Fábrica de Software I (80 horas)",
+        "turma": "Turma 2026",
+        "aulas": 4,
+        "agrupar": 4,
+        "dividir": false
+      },
+      {
+        "nome": "Fábrica de Software III (80 horas)",
+        "turma": "Turma 2025",
+        "aulas": 4,
+        "agrupar": 4,
+        "dividir": false
+      }
+    ],
+    "professores": [
+      {
+        "nome": "Alvino",
+        "disciplinas": [
+          "Ética, Sociedade e Sustentabilidade (40 horas)"
+        ],
+        "horarios": {
+          "seg": [1, 2, 3, 4],
+          "ter": [1, 2, 3, 4],
+          "qua": [1, 2, 3, 4]
+        }
+      },
+      {
+        "nome": "Edilberto",
+        "disciplinas": [
+          "Estatística (80 horas)"
+        ],
+        "horarios": {
+          "seg": [1, 2, 3, 4],
+          "ter": [1, 2, 3, 4],
+          "qua": [1, 2, 3, 4],
+          "qui": [1, 2, 3, 4],
+          "sex": [1, 2, 3, 4]
+        }
+      },
+      {
+        "nome": "Erick",
+        "disciplinas": [
+          "Linguagens de programação (80 horas)",
+          "Estrutura de dados II (40 horas)",
+          "Devops e Cloud II (40 horas)",
+          "Arquitetura de Software (40 horas)"
+        ],
+        "horarios": {
+          "seg": [1, 2, 3, 4],
+          "ter": [1, 2, 3, 4],
+          "sex": [1, 2, 3, 4]
+        }
+      },
+      {
+        "nome": "Gilberto",
+        "disciplinas": [
+          "Engenharia de Software (80 horas)",
+          "Fábrica de Software I (80 horas)",
+          "Web Services (40 horas)",
+          "Tópicos Especiais II (80 horas)",
+          "Dispositivos Movéis II (40 horas)"
+        ],
+        "horarios": {
+          "ter": [1, 2, 3, 4],
+          "qua": [1, 2, 3, 4],
+          "qui": [1, 2, 3, 4],
+          "sex": [1, 2, 3, 4]
+        }
+      },
+      {
+        "nome": "Lucas",
+        "disciplinas": [
+          "Inteligência Artificial (80 horas)"
+        ],
+        "horarios": {
+          "ter": [1, 2],
+          "qui": [1, 2]
+        }
+      },
+      {
+        "nome": "Marco",
+        "disciplinas": [
+          "Sistemas Operacionais (40 horas)",
+          "Frameworks para front-end (80 horas)",
+          "Fábrica de Software III (80 horas)",
+          "Orientações para o Trabalho de Conclusão de Curso (40 horas)"
+        ],
+        "horarios": {
+          "qui": [],
+          "qua": [1, 2, 3, 4],
+          "ter": [1, 2, 3, 4],
+          "seg": [1, 2, 3, 4]
+        }
+      },
+      {
+        "nome": "Roberto",
+        "disciplinas": [
+          "Redes de Computadores (40 horas)"
+        ],
+        "horarios": {
+          "seg": [1, 2, 3, 4],
+          "ter": [1, 2, 3, 4],
+          "qua": [1, 2, 3, 4],
+          "sex": [1, 2, 3, 4]
+        }
+      },
+      {
+        "nome": "Wesley",
+        "disciplinas": [
+          "Banco de dados II (80 horas)",
+          "Teste de Software II (40 horas)"
+        ],
+        "horarios": {
+          "sex": [],
+          "qua": [],
+          "qui": [1, 2, 3, 4],
+          "ter": [1, 2, 3, 4],
+          "seg": [1, 2, 3, 4]
+        }
+      },
+      {
+        "nome": "Vera",
+        "disciplinas": [
+          "Libras (80 horas)"
+        ],
+        "horarios": {
+          "qua": [1, 2, 3, 4]
+        }
+      },
+      {
+        "nome": "Fábrica",
+        "disciplinas": [
+          "Fábrica de Software III (80 horas)"
+        ],
+        "horarios": {
+          "ter": [1, 2, 3, 4],
+          "seg": [1, 2, 3, 4],
+          "sex": []
+        }
+      }
+    ],
+    "disciplinas_unidas": [
+      {
+        "grupo": "Fábrica de Software",
+        "disciplinas": [
+          "Fábrica de Software I (80 horas)",
+          "Fábrica de Software III (80 horas)"
+        ]
+      }
+    ]
+  },
+  "config": {
+    "quantidadeTempos": 4,
+    "diasAtivos": [
+      "seg",
+      "ter",
+      "qua",
+      "qui",
+      "sex"
+    ]
+  }
+}

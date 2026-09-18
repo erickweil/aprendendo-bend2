@@ -9,8 +9,8 @@ import ./../utils/json.bend as J
 # ==============================================================================
 # Unifica a lógica dos cenários de horário em um único solver de alto desempenho:
 # - Representação limpa em ADTs (Day4, Week5, Quadro3) compatível com Reduções HVM
-# - 3 Turmas (101, 102, 103) x 5 Dias x 4 Tempos = 60 slots
-# - 20 Disciplinas e 8 Professores com restrições rígidas e leves 1:1 com Rust
+# - 3 Turmas (Turma 2026, Turma 2025, Turma 2024) x 5 Dias x 4 Tempos = 60 slots
+# - 20 Disciplinas e 10 Professores com restrições rígidas e leves 1:1 com Rust
 # - Entrada flexível: JSON via variável de ambiente (HORARIO_JSON) ou Formulário Padrão
 # - Saída padronizada: Serialização da melhor solução em JSON (TurmaHorarioResult[])
 # ==============================================================================
@@ -85,65 +85,78 @@ def Quadro3.set_turma(q: Quadro3, +t: U32, +w: Week5) -> Quadro3:
   }
 
 # ------------------------------------------------------------------------------
-# MAPEAMENTO DE DISCIPLINAS (1..20) E PROFESSORES (1..8)
+# MAPEAMENTO DE DISCIPLINAS (1..20) E PROFESSORES (1..9)
 # ------------------------------------------------------------------------------
 
 def prof_of(+disc: U32) -> U32:
-  Bool.pick(U32, U32.is_le(disc, 7),
-    Bool.pick(U32, U32.is_le(disc, 3),
-      Bool.pick(U32, U32.is_eq(disc, 1), 1, Bool.pick(U32, U32.is_eq(disc, 2), 2, 3)),
-      Bool.pick(U32, U32.is_le(disc, 5), 5, Bool.pick(U32, U32.is_eq(disc, 6), 6, 7))),
-    Bool.pick(U32, U32.is_le(disc, 14),
-      Bool.pick(U32, U32.is_le(disc, 10),
-        Bool.pick(U32, U32.is_eq(disc, 8), 1, Bool.pick(U32, U32.is_eq(disc, 9), 2, 4)),
-        Bool.pick(U32, U32.is_le(disc, 12), 5, 8)),
+  Bool.pick(U32, U32.is_le(disc, 10),
+    Bool.pick(U32, U32.is_le(disc, 5),
+      Bool.pick(U32, U32.is_le(disc, 2),
+        Bool.pick(U32, U32.is_eq(disc, 1), 3, 7),
+        Bool.pick(U32, U32.is_le(disc, 4),
+          Bool.pick(U32, U32.is_eq(disc, 3), 6, 8),
+          4)),
+      Bool.pick(U32, U32.is_le(disc, 7),
+        Bool.pick(U32, U32.is_eq(disc, 6), 4, 3),
+        Bool.pick(U32, U32.is_le(disc, 9),
+          Bool.pick(U32, U32.is_eq(disc, 8), 2, 3),
+          8))),
+    Bool.pick(U32, U32.is_le(disc, 15),
+      Bool.pick(U32, U32.is_le(disc, 13),
+        Bool.pick(U32, U32.is_eq(disc, 11), 6,
+          Bool.pick(U32, U32.is_eq(disc, 12), 4, 6)),
+        Bool.pick(U32, U32.is_eq(disc, 14), 9, 4)),
       Bool.pick(U32, U32.is_le(disc, 18),
-        Bool.pick(U32, U32.is_le(disc, 16),
-          Bool.pick(U32, U32.is_eq(disc, 15), 1, 2),
-          Bool.pick(U32, U32.is_eq(disc, 17), 3, 4)),
-        Bool.pick(U32, U32.is_eq(disc, 19), 6, 7))))
+        Bool.pick(U32, U32.is_le(disc, 17),
+          Bool.pick(U32, U32.is_eq(disc, 16), 1, 5),
+          3),
+        Bool.pick(U32, U32.is_eq(disc, 19), 4, 6))))
 
 def disc_to_nome(+disc: U32) -> String:
   Bool.pick(String, U32.is_le(disc, 10),
     Bool.pick(String, U32.is_le(disc, 5),
       Bool.pick(String, U32.is_le(disc, 2),
-        Bool.pick(String, U32.is_eq(disc, 1), "Matematica", "Portugues"),
+        Bool.pick(String, U32.is_eq(disc, 1), "Linguagens de programacao", "Redes de Computadores"),
         Bool.pick(String, U32.is_le(disc, 4),
-          Bool.pick(String, U32.is_eq(disc, 3), "Fisica", "Quimica"),
-          "Biologia")),
+          Bool.pick(String, U32.is_eq(disc, 3), "Sistemas Operacionais", "Banco de dados II"),
+          "Engenharia de Software")),
       Bool.pick(String, U32.is_le(disc, 8),
         Bool.pick(String, U32.is_le(disc, 7),
-          Bool.pick(String, U32.is_eq(disc, 6), "Historia", "Ingles"),
-          "Matematica"),
-        Bool.pick(String, U32.is_eq(disc, 9), "Portugues", "Geografia"))),
+          Bool.pick(String, U32.is_eq(disc, 6), "Fabrica de Software I", "Estrutura de dados II"),
+          "Estatistica"),
+        Bool.pick(String, U32.is_eq(disc, 9), "Devops e Cloud II", "Teste de Software II"))),
     Bool.pick(String, U32.is_le(disc, 15),
       Bool.pick(String, U32.is_le(disc, 13),
         Bool.pick(String, U32.is_le(disc, 12),
-          Bool.pick(String, U32.is_eq(disc, 11), "Filosofia", "Sociologia"),
-          "Historia"),
-        Bool.pick(String, U32.is_eq(disc, 14), "Fisica", "Matematica")),
+          Bool.pick(String, U32.is_eq(disc, 11), "Frameworks para front-end", "Web Services"),
+          "Fabrica de Software III"),
+        Bool.pick(String, U32.is_eq(disc, 14), "Libras", "Topicos Especiais II")),
       Bool.pick(String, U32.is_le(disc, 18),
         Bool.pick(String, U32.is_le(disc, 17),
-          Bool.pick(String, U32.is_eq(disc, 16), "Portugues", "Quimica"),
-          "Biologia"),
-        Bool.pick(String, U32.is_eq(disc, 19), "Geografia", "Artes"))))
+          Bool.pick(String, U32.is_eq(disc, 16), "Etica, Sociedade e Sustentabilidade", "Inteligencia Artificial"),
+          "Arquitetura de Software"),
+        Bool.pick(String, U32.is_eq(disc, 19), "Dispositivos Moveis II", "Orientacoes TCC"))))
 
 def prof_unavailable(+prof: U32, +dia: U32, +tempo: U32) -> Bool:
-  Bool.pick(Bool, U32.is_eq(prof, 1),
-    Bool.and(U32.is_eq(dia, 4), U32.is_ge(tempo, 2)),
-    Bool.pick(Bool, U32.is_eq(prof, 2),
-      Bool.and(U32.is_eq(dia, 0), U32.is_le(tempo, 1)),
-      Bool.pick(Bool, U32.is_eq(prof, 3),
-        Bool.and(U32.is_eq(dia, 2), U32.is_ge(tempo, 2)),
-        Bool.pick(Bool, U32.is_eq(prof, 4),
-          Bool.and(U32.is_eq(dia, 1), U32.is_le(tempo, 1)),
-          Bool.pick(Bool, U32.is_eq(prof, 5),
-            U32.is_eq(dia, 3),
-            Bool.pick(Bool, U32.is_eq(prof, 6),
-              Bool.or(U32.is_eq(dia, 0), Bool.or(U32.is_eq(dia, 2), U32.is_eq(dia, 4))),
-              Bool.pick(Bool, U32.is_eq(prof, 7),
-                Bool.or(U32.is_eq(dia, 1), Bool.or(U32.is_eq(dia, 3), U32.is_eq(dia, 4))),
-                Bool.and(U32.is_eq(dia, 4), U32.is_le(tempo, 1)))))))))
+  Bool.pick(Bool, U32.is_le(prof, 5),
+    Bool.pick(Bool, U32.is_le(prof, 2),
+      Bool.pick(Bool, U32.is_eq(prof, 1),
+        Bool.or(U32.is_eq(dia, 3), U32.is_eq(dia, 4)),
+        False{}),
+      Bool.pick(Bool, U32.is_le(prof, 4),
+        Bool.pick(Bool, U32.is_eq(prof, 3),
+          Bool.or(U32.is_eq(dia, 2), U32.is_eq(dia, 3)),
+          U32.is_eq(dia, 0)),
+        Bool.or(
+          Bool.and(U32.is_ne(dia, 1), U32.is_ne(dia, 3)),
+          U32.is_ge(tempo, 2)))),
+    Bool.pick(Bool, U32.is_le(prof, 7),
+      Bool.pick(Bool, U32.is_eq(prof, 6),
+        Bool.or(U32.is_eq(dia, 3), U32.is_eq(dia, 4)),
+        U32.is_eq(dia, 3)),
+      Bool.pick(Bool, U32.is_eq(prof, 8),
+        Bool.or(U32.is_eq(dia, 2), U32.is_eq(dia, 4)),
+        U32.is_ne(dia, 2))))
 
 # ------------------------------------------------------------------------------
 # CÁLCULO DE APTIDÃO 1:1 COM RUST
@@ -202,6 +215,30 @@ def eval_prof_penalties(+w0: Week5, +w1: Week5, +w2: Week5) -> U32:
   +d4 = eval_day_prof(a4, b4, c4, 4)
   (d0 + d1 + d2 + d3 + d4 : U32)
 
+def eval_unidas_tempo(+t0_val: U32, +t1_val: U32) -> U32:
+  +is_f1 = U32.is_eq(t0_val, 6)
+  +is_f3 = U32.is_eq(t1_val, 13)
+  Bool.pick(U32, Bool.xor(is_f1, is_f3), 30, 0)
+
+def eval_unidas_dia(+d0: Day4, +d1: Day4) -> U32:
+  D4{a0, a1, a2, a3} = d0
+  D4{b0, b1, b2, b3} = d1
+  +u0 = eval_unidas_tempo(a0, b0)
+  +u1 = eval_unidas_tempo(a1, b1)
+  +u2 = eval_unidas_tempo(a2, b2)
+  +u3 = eval_unidas_tempo(a3, b3)
+  (u0 + u1 + u2 + u3 : U32)
+
+def eval_unidas_week(+w0: Week5, +w1: Week5) -> U32:
+  W5{a0, a1, a2, a3, a4} = w0
+  W5{b0, b1, b2, b3, b4} = w1
+  +d0 = eval_unidas_dia(a0, b0)
+  +d1 = eval_unidas_dia(a1, b1)
+  +d2 = eval_unidas_dia(a2, b2)
+  +d3 = eval_unidas_dia(a3, b3)
+  +d4 = eval_unidas_dia(a4, b4)
+  (d0 + d1 + d2 + d3 + d4 : U32)
+
 def evaluate_quadro(q: Quadro3) -> U32:
   Q3{t0, t1, t2} = q
   +t0 = t0; +t1 = t1; +t2 = t2
@@ -210,7 +247,8 @@ def evaluate_quadro(q: Quadro3) -> U32:
   +g2 = eval_turma_grouping(t2)
   +group_total = (g0 + g1 + g2 : U32)
   +prof_total = eval_prof_penalties(t0, t1, t2)
-  (group_total + prof_total : U32)
+  +unidas_total = eval_unidas_week(t0, t1)
+  (group_total + prof_total + unidas_total : U32)
 
 def fitness(q: Quadro3) -> U32:
   +penalties = evaluate_quadro(q)
@@ -223,27 +261,27 @@ def fitness(q: Quadro3) -> U32:
 def base_turma0() -> Week5:
   W5{
     D4{1, 1, 2, 2},
-    D4{3, 3, 4, 4},
-    D4{1, 1, 2, 2},
-    D4{3, 3, 5, 5},
-    D4{6, 6, 7, 7}
+    D4{6, 6, 6, 6},
+    D4{4, 4, 5, 5},
+    D4{4, 4, 5, 5},
+    D4{1, 1, 3, 3}
   }
 
 def base_turma1() -> Week5:
   W5{
-    D4{8, 8, 9, 9},
+    D4{7, 7, 8, 8},
+    D4{13, 13, 13, 13},
     D4{10, 10, 11, 11},
-    D4{8, 8, 9, 9},
-    D4{10, 10, 12, 12},
-    D4{13, 13, 14, 14}
+    D4{12, 12, 11, 11},
+    D4{9, 9, 8, 8}
   }
 
 def base_turma2() -> Week5:
   W5{
+    D4{14, 14, 14, 14},
     D4{15, 15, 16, 16},
-    D4{17, 17, 18, 18},
-    D4{15, 15, 16, 16},
-    D4{17, 17, 18, 18},
+    D4{15, 15, 17, 17},
+    D4{18, 18, 17, 17},
     D4{19, 19, 20, 20}
   }
 
@@ -271,14 +309,25 @@ def mutate_block_turma(+w: Week5, +s: U32) -> Week5:
   +w_step1 = Week5.swap(w, dia1, b1, dia2, b2)
   Week5.swap(w_step1, dia1, U32.inc(b1), dia2, U32.inc(b2))
 
+def mutate_day_turma(+w: Week5, +s: U32) -> Week5:
+  +s1 = R.step(s); +s2 = R.step(s1)
+  +dia1 = U32.mod(s1, 5)
+  +dia2 = U32.mod(s2, 5)
+  +d1 = Week5.get_day(w, dia1)
+  +d2 = Week5.get_day(w, dia2)
+  +w1 = Week5.set_day(w, dia1, d2)
+  Week5.set_day(w1, dia2, d1)
+
 def mutate_quadro(+q: Quadro3, +s: U32) -> Quadro3:
   +s1 = R.step(s); +s2 = R.step(s1); +s3 = R.step(s2)
   +turma_id = U32.mod(s1, 3)
-  +is_block = U32.is_zero(U32.and(s2, 1))
+  +mode = U32.mod(s2, 3)
   +target_turma = Quadro3.get_turma(q, turma_id)
-  +mutated_turma = Bool.pick(Week5, is_block,
-    mutate_block_turma(target_turma, s3),
-    mutate_turma(target_turma, s3))
+  +mutated_turma = Bool.pick(Week5, U32.is_eq(mode, 0),
+    mutate_day_turma(target_turma, s3),
+    Bool.pick(Week5, U32.is_eq(mode, 1),
+      mutate_block_turma(target_turma, s3),
+      mutate_turma(target_turma, s3)))
   Quadro3.set_turma(q, turma_id, mutated_turma)
 
 def shuffle_quadro(+q: Quadro3, +s: U32) -> Quadro3:
@@ -365,9 +414,9 @@ def serialize_turma(nome: String, w: Week5) -> J.Json:
 def serialize_resultado(q: Quadro3) -> J.Json:
   Q3{t0, t1, t2} = q
   J.JArr{[
-    serialize_turma("101", t0),
-    serialize_turma("102", t1),
-    serialize_turma("103", t2)
+    serialize_turma("Turma 2026", t0),
+    serialize_turma("Turma 2025", t1),
+    serialize_turma("Turma 2024", t2)
   ]}
 
 # ------------------------------------------------------------------------------
@@ -406,14 +455,14 @@ def main.handle_parse(res: J.ParseRes) -> IO(Unit):
   match res:
     case J.POk{_}:
       main.with_config(
-        "Ambiente HORARIO_JSON (Parsed com Sucesso)",
-        120n,
+        "JSON do Usuário (Formulário Horário 2024-2026 Parsed com Sucesso)",
+        400n,
         88442211
       )
     case J.PFail{err}:
       main.with_config(
         "Ambiente HORARIO_JSON (Falha no Parse: " ++ err ++ ")",
-        120n,
+        400n,
         88442211
       )
 
@@ -423,8 +472,8 @@ def main.dispatch(env_res: Result<&1, &1, U32 & String, String>) -> IO(Unit):
       main.handle_parse(J.parse_json(json_content))
     case Fail{_}:
       main.with_config(
-        "FormularioHorario Padrão (3 Turmas x 5 Dias x 4 Tempos = 60 slots)",
-        120n,
+        "FormularioHorario Padrão (Turmas 2026, 2025, 2024 = 60 slots)",
+        400n,
         88442211
       )
 
