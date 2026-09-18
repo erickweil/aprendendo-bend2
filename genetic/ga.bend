@@ -190,7 +190,7 @@ def run_generations(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
 # ----------------------------------------------------------------
 
 type ArchTree<-G: Data> is Data:
-  SingleIsland{tree: T.PopTree<Ind<G>>}
+  SingleIsland{gen: Gen<G>}
   ArchBranch{left: ArchTree<G>, right: ArchTree<G>}
 
 # Gera um arquipélago com 2^d ilhas independentes, cada uma com 2^pop_d indivíduos
@@ -198,22 +198,21 @@ def gen_archipelago(~G: Type, ~init: U32 -> G, ~fit: G -> U32,
                     d: Nat, +seed: U32, pop_d: Nat) -> ArchTree<G>:
   match d:
     case 0n:
-      SingleIsland{gen_population(~G, ~init, ~fit, pop_d, seed)}
+      +pop = gen_population(~G, ~init, ~fit, pop_d, seed)
+      SingleIsland{init_gen(G, pop, best_ind(G, pop))}
     case 1n+p:
       +p = p; +seed = seed; +pop_d = pop_d
       l r = gen_archipelago(~G, ~init, ~fit, p, R.split.fst(seed), pop_d) gen_archipelago(~G, ~init, ~fit, p, R.split.snd(seed), pop_d)
       ArchBranch{l, r}
 
 # Campeão global absoluto somando todas as ilhas do arquipélago.
-# A redução bifurca no nível do arquipélago (uma tarefa por sub-arquipélago,
-# criada uma vez por época), nunca dentro da ilha: subdividir a redução local
-# criaria tarefas microscópicas a cada geração. Junto com `migrate_champion`,
-# esta era a fração serial de cada época — com 64 ilhas x 64 indivíduos são
-# 4.096 nós percorridos duas vezes por época.
+# A redução bifurca no nível do arquipélago em O(1) por ilha (lê bfit/bgene
+# já computados na travessia fundida, sem re-percorrer a árvore local).
 def best_archipelago(-G: Data, +arch: ArchTree<G>) -> Ind<G>:
   match arch:
-    case SingleIsland{tree}:
-      best_ind(G, tree)
+    case SingleIsland{gen}:
+      Gen{_, bfit, bgene} = gen
+      Ind{bgene, bfit}
     case ArchBranch{left, right}:
       bl br = best_archipelago(G, left) best_archipelago(G, right)
       pick_better(G, bl, br)
@@ -222,8 +221,8 @@ def best_archipelago(-G: Data, +arch: ArchTree<G>) -> Ind<G>:
 def evolve_archipelago(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
                        arch: ArchTree<G>, +seed: U32, e: Nat) -> ArchTree<G>:
   match arch:
-    case SingleIsland{tree}:
-      SingleIsland{run_generations(~G, ~repro, ~fit, e, tree, seed)}
+    case SingleIsland{gen}:
+      SingleIsland{run_gen_loop(~G, ~repro, ~fit, e, gen, seed)}
     case ArchBranch{left, right}:
       +seed = seed; +e = e
       l r = evolve_archipelago(~G, ~repro, ~fit, left, R.split.fst(seed), e) evolve_archipelago(~G, ~repro, ~fit, right, R.split.snd(seed), e)
@@ -232,8 +231,10 @@ def evolve_archipelago(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
 # Migração do campeão global para o slot de elite de cada ilha
 def migrate_champion(-G: Data, arch: ArchTree<G>, +champ: Ind<G>) -> ArchTree<G>:
   match arch:
-    case SingleIsland{tree}:
-      SingleIsland{T.inject_elite(Ind<G>, tree, champ)}
+    case SingleIsland{gen}:
+      Gen{pop, _, _} = gen
+      Ind{cg, cf} = champ
+      SingleIsland{Gen{pop, cf, cg}}
     case ArchBranch{left, right}:
       +champ = champ
       l r = migrate_champion(G, left, champ) migrate_champion(G, right, champ)
