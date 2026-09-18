@@ -1,5 +1,6 @@
 bend-engine/
-bin/
+bin/*
+!bin/.gitkeep
 GUIDE.md
 
 # Logs
