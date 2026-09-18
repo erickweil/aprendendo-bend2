@@ -1,21 +1,18 @@
 import Base
+import ./../utils/moea.bend as MOEA
+import ./../utils/random.bend as R
+import ./../utils/bits.bend as B
 
-# PRNG Xorshift32
-def step(+x: U32) -> U32:
-  +b = U32.xor(x, U32.shln(x, 13n))
-  +d = U32.xor(b, U32.shrn(b, 17n))
-  U32.xor(d, U32.shln(d, 5n))
-
-def split.fst(+seed: U32) -> U32:
-  step(seed)
-
-def split.snd(+seed: U32) -> U32:
-  step(U32.xor(step(seed), 2654435761))
+# ================================================================
+# CENÁRIO 11: OTIMIZAÇÃO MULTI-OBJETIVO (MOEA / FRONTEIRA DE PARETO)
+# COM MOTOR MOEA GENÉRICO
+# ================================================================
+# Objetivos Conflitantes: Max(Valor) e Min(Peso)
+# Restrição: Peso <= 100 kg
+# Seleção: Dominância de Pareto A > B com nichos de especialistas
+# ================================================================
 
 # 12 Itens para Otimização Multi-Objetivo
-# Objetivo 1: MAXIMIZAR Valor
-# Objetivo 2: MINIMIZAR Peso (Custo de Recursos)
-# Restrição: Capacidade Máxima = 100 kg
 def item_val(+i: U32) -> U32:
   Bool.pick(U32, U32.is_eq(i, 0), 25,
     Bool.pick(U32, U32.is_eq(i, 1), 35,
@@ -45,7 +42,6 @@ def item_wt(+i: U32) -> U32:
 type Obj2 is Data:
   Obj2{val: U32, wt: U32}
 
-# Avaliação dos dois objetivos
 def eval_objectives(+mask: U32) -> Obj2:
   +v0 = Bool.pick(U32, U32.is_ne(U32.and(mask, 1), 0), item_val(0), 0)
   +v1 = Bool.pick(U32, U32.is_ne(U32.and(mask, 2), 0), item_val(1), 0)
@@ -75,7 +71,6 @@ def eval_objectives(+mask: U32) -> Obj2:
   +wb = Bool.pick(U32, U32.is_ne(U32.and(mask, 2048), 0), item_wt(11), 0)
   +tot_wt = (w0 + w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8 + w9 + wa + wb : U32)
 
-  # Penalização de capacidade estrita (> 100 kg zera valor e infla peso)
   +is_valid = U32.is_le(tot_wt, 100)
   +final_val = Bool.pick(U32, is_valid, tot_val, 0)
   +final_wt = Bool.pick(U32, is_valid, tot_wt, 999)
@@ -104,8 +99,6 @@ def MOInd.gene(i: MOInd) -> U32:
   MOInd{g, _, _} = i
   g
 
-# Relação de Dominância de Pareto:
-# A domina B se: val(A) >= val(B) E wt(A) <= wt(B), com pelo menos uma desigualdade estrita
 def dominates(+a: MOInd, +b: MOInd) -> Bool:
   MOInd{_, va, wa} = a
   MOInd{_, vb, wb} = b
@@ -113,121 +106,58 @@ def dominates(+a: MOInd, +b: MOInd) -> Bool:
   +strictly_better = Bool.or(U32.is_gt(va, vb), U32.is_lt(wa, wb))
   Bool.and(not_worse, strictly_better)
 
-# Densidade de Eficiência: (val * 100) / (wt + 1)
 def efficiency(+ind: MOInd) -> U32:
   MOInd{_, v, w} = ind
   U32.div(U32.mul(v, 100), (w + 1 : U32))
 
-# Seleção de Torneio Pareto com desempate por diversidade
 def pareto_pick(+a: MOInd, +b: MOInd, +rnd: U32) -> MOInd:
   +a_dom_b = dominates(a, b)
   +b_dom_a = dominates(b, a)
   Bool.pick(MOInd, a_dom_b, a,
     Bool.pick(MOInd, b_dom_a, b,
-      # Ambos não-dominados: alternar entre maior valor, menor peso ou maior densidade
       Bool.pick(MOInd, U32.is_eq(U32.mod(rnd, 3), 0),
         Bool.pick(MOInd, U32.is_ge(efficiency(a), efficiency(b)), a, b),
         Bool.pick(MOInd, U32.is_eq(U32.mod(rnd, 3), 1),
           Bool.pick(MOInd, U32.is_ge(MOInd.val(a), MOInd.val(b)), a, b),
           Bool.pick(MOInd, U32.is_le(MOInd.wt(a), MOInd.wt(b)), a, b)))))
 
-type PopTree is Data:
-  Leaf{ind: MOInd}
-  Node{left: PopTree, right: PopTree}
-
-def pick_best_val(+a: MOInd, +b: MOInd) -> MOInd:
+def pick_best_val(a: MOInd, b: MOInd) -> MOInd:
+  +a = a; +b = b
   Bool.pick(MOInd, U32.is_ge(MOInd.val(a), MOInd.val(b)), a, b)
 
-def pick_best_eff(+a: MOInd, +b: MOInd) -> MOInd:
+def pick_best_eff(a: MOInd, b: MOInd) -> MOInd:
+  +a = a; +b = b
   Bool.pick(MOInd, U32.is_ge(efficiency(a), efficiency(b)), a, b)
 
-def pick_min_wt(+a: MOInd, +b: MOInd) -> MOInd:
+def pick_min_wt(a: MOInd, b: MOInd) -> MOInd:
+  +a = a; +b = b
   +va = MOInd.val(a); +vb = MOInd.val(b)
   +wa = MOInd.wt(a);  +wb = MOInd.wt(b)
   Bool.pick(MOInd, U32.is_zero(va), b,
     Bool.pick(MOInd, U32.is_zero(vb), a,
       Bool.pick(MOInd, U32.is_le(wa, wb), a, b)))
 
-def best_val(t: PopTree) -> MOInd:
-  match t:
-    case Leaf{ind}:
-      ind
-    case Node{left, right}:
-      bl br = best_val(left) best_val(right)
-      pick_best_val(bl, br)
-
-def best_eff(t: PopTree) -> MOInd:
-  match t:
-    case Leaf{ind}:
-      ind
-    case Node{left, right}:
-      bl br = best_eff(left) best_eff(right)
-      pick_best_eff(bl, br)
-
-def min_wt(t: PopTree) -> MOInd:
-  match t:
-    case Leaf{ind}:
-      ind
-    case Node{left, right}:
-      bl br = min_wt(left) min_wt(right)
-      pick_min_wt(bl, br)
-
-def gen_pop(d: Nat, +seed: U32) -> PopTree:
-  match d:
-    case 0n:
-      Leaf{make_mo_ind(seed)}
-    case 1n+p:
-      +p = p
-      +seed = seed
-      l r = gen_pop(p, split.fst(seed)) gen_pop(p, split.snd(seed))
-      Node{l, r}
-
-def crossover_uniform(+a: U32, +b: U32, +mask: U32) -> U32:
-  U32.or(U32.and(a, mask), U32.and(b, U32.not(mask)))
-
 def mutate_bits(+g: U32, +rnd: U32) -> U32:
   +bit_idx = U32.to_nat(U32.mod(rnd, 12))
   U32.xor(g, U32.shln(1, bit_idx))
 
-# Reprodução com Torneio de Pareto entre vizinhos na árvore
-def reproduce(tree: PopTree, +seed: U32, +partner: MOInd) -> PopTree:
-  match tree:
-    case Leaf{ind}:
-      +s1 = step(seed); +s2 = step(s1); +s3 = step(s2)
-      +winner = pareto_pick(ind, partner, s1)
-      +g_win = MOInd.gene(winner)
-      +g_part = MOInd.gene(partner)
-      +crossed = crossover_uniform(g_win, g_part, s2)
-      +mutated = Bool.pick(U32, U32.is_lt(U32.mod(s3, 10), 4), mutate_bits(crossed, s3), crossed)
-      +child = make_mo_ind(mutated)
-      Leaf{pareto_pick(winner, child, step(s3))}
-    case Node{left, right}:
-      +left = left
-      +right = right
-      +seed = seed
-      +partner = partner
-      +bl = best_eff(left)
-      +br = best_eff(right)
-      l r = reproduce(left, split.fst(seed), br) reproduce(right, split.snd(seed), bl)
-      Node{l, r}
+def mate_mo(ind: MOInd, partner: MOInd, seed: U32) -> MOInd:
+  +ind = ind; +partner = partner; +seed = seed
+  +s1 = R.step(seed); +s2 = R.step(s1); +s3 = R.step(s2)
+  +winner = pareto_pick(ind, partner, s1)
+  +g_win = MOInd.gene(winner)
+  +g_part = MOInd.gene(partner)
+  +crossed = B.crossover_uniform(g_win, g_part, s2)
+  +mutated = Bool.pick(U32, U32.is_lt(U32.mod(s3, 10), 4), mutate_bits(crossed, s3), crossed)
+  +child = make_mo_ind(mutated)
+  pareto_pick(winner, child, R.step(s3))
 
-def step_gen(+tree: PopTree, +seed: U32) -> PopTree:
-  +eff = best_eff(tree)
-  reproduce(tree, seed, eff)
-
-def run_moea(g: Nat, tree: PopTree, +seed: U32) -> PopTree:
-  match g:
-    case 0n:
-      tree
-    case 1n+p:
-      +next_seed = step(seed)
-      +next_tree = step_gen(tree, seed)
-      run_moea(p, next_tree, next_seed)
+def init_mo(seed: U32) -> MOInd:
+  make_mo_ind(seed)
 
 def show_ind(ind: MOInd) -> String:
   MOInd{g, v, w} = ind
-  +v = v
-  +w = w
+  +v = v; +w = w
   +eff = U32.div(U32.mul(v, 100), (w + 1 : U32))
   "Valor: " ++ U32.show(v) ++ " | Peso: " ++ U32.show(w) ++ " kg | Eficiência: " ++ U32.show(eff) ++ " | Genoma: " ++ U32.show(g)
 
@@ -237,16 +167,16 @@ def main_seed() -> U32:
 def main() -> IO(Unit):
   +s0 = main_seed()
   # População: 64 soluções multi-objetivo em árvore paralela
-  +pop0 = gen_pop(6n, s0)
-  +b_val0 = best_val(pop0)
-  +b_eff0 = best_eff(pop0)
-  +m_wt0 = min_wt(pop0)
+  +pop0 = MOEA.gen_pop(~MOInd, ~init_mo, 6n, s0)
+  +b_val0 = MOEA.best_by(~MOInd, ~pick_best_val, pop0)
+  +b_eff0 = MOEA.best_by(~MOInd, ~pick_best_eff, pop0)
+  +m_wt0 = MOEA.best_by(~MOInd, ~pick_min_wt, pop0)
 
   # Executar Otimização Evolutiva Multi-Objetivo (50 gerações)
-  +pop_fin = run_moea(50n, pop0, step(s0))
-  +b_val_fin = best_val(pop_fin)
-  +b_eff_fin = best_eff(pop_fin)
-  +m_wt_fin = min_wt(pop_fin)
+  +pop_fin = MOEA.run_moea(~MOInd, ~mate_mo, ~pick_best_eff, 50n, pop0, R.step(s0))
+  +b_val_fin = MOEA.best_by(~MOInd, ~pick_best_val, pop_fin)
+  +b_eff_fin = MOEA.best_by(~MOInd, ~pick_best_eff, pop_fin)
+  +m_wt_fin = MOEA.best_by(~MOInd, ~pick_min_wt, pop_fin)
 
   +v_wt = MOInd.wt(b_val_fin)
   +e_wt = MOInd.wt(b_eff_fin)

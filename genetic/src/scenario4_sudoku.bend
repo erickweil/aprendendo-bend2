@@ -1,4 +1,6 @@
 import Base
+import ./../ga.bend as GA
+import ./../utils/random.bend as R
 
 type Row9 is Data:
   R9{x0: U32, x1: U32, x2: U32, x3: U32, x4: U32, x5: U32, x6: U32, x7: U32, x8: U32}
@@ -270,21 +272,11 @@ def preencher_a_partir_de_vazio(+vazio: Sudoku9, +s: U32) -> Sudoku9:
   +s5 = step(s4); +s6 = step(s5); +s7 = step(s6); +s8 = step(s7)
   +g3 = Sudoku9.swap_rows(g2, (3 + U32.mod(s5, 3) : U32), (3 + U32.mod(s6, 3) : U32))
   Sudoku9.swap_cols(g3, (3 + U32.mod(s7, 3) : U32), (3 + U32.mod(s8, 3) : U32))
+def init_gene(seed: U32) -> Sudoku9:
+  preencher_a_partir_de_vazio(quadro_vazio(), seed)
 
-def gen_pop(d: Nat, +seed: U32) -> PopTree:
-  match d:
-    case 0n:
-      +g = preencher_a_partir_de_vazio(quadro_vazio(), seed)
-      Leaf{Ind{g, fitness(g)}}
-    case 1n+p:
-      +p = p
-      +seed = seed
-      l r = gen_pop(p, split.fst(seed)) gen_pop(p, split.snd(seed))
-      Node{l, r}
-
-# Operador de mutação
 def mutate_sudoku9(+s: Sudoku9, +rnd: U32) -> Sudoku9:
-  +s1 = step(rnd); +s2 = step(s1); +s3 = step(s2); +s4 = step(s3)
+  +s1 = R.step(rnd); +s2 = R.step(s1); +s3 = R.step(s2); +s4 = R.step(s3)
   +mode = U32.mod(s1, 3)
   +band = U32.mul(U32.mod(s2, 3), 3)
   +o1 = (band + U32.mod(s3, 3) : U32)
@@ -301,43 +293,11 @@ def memetic_improve(+s: Sudoku9, +rnd: U32) -> Sudoku9:
   +f_new = fitness(cand)
   Bool.pick(Sudoku9, U32.is_ge(f_new, f_old), cand, s)
 
-def reproduce(tree: PopTree, +seed: U32, +elite: Ind) -> PopTree:
-  match tree:
-    case Leaf{ind}:
-      Ind{g, _} = ind
-      Ind{ge, _} = elite
-      +s1 = step(seed)
-      +s2 = step(s1)
-      +base = Bool.pick(Sudoku9, U32.is_lt(U32.mod(s1, 10), 6), ge, g)
-      +child = memetic_improve(base, s2)
-      Leaf{Ind{child, fitness(child)}}
-    case Node{left, right}:
-      +seed = seed
-      +elite = elite
-      l r = reproduce(left, split.fst(seed), elite) reproduce(right, split.snd(seed), elite)
-      Node{l, r}
-
-def inject_elite(tree: PopTree, +elite: Ind) -> PopTree:
-  match tree:
-    case Leaf{_}:
-      Leaf{elite}
-    case Node{left, right}:
-      Node{inject_elite(left, elite), right}
-
-def step_gen(tree: PopTree, +seed: U32) -> PopTree:
-  +evaluated = eval_pop(tree)
-  +best = best_pop(evaluated)
-  +next_pop = reproduce(evaluated, seed, best)
-  inject_elite(next_pop, best)
-
-def run_ga(g: Nat, tree: PopTree, +seed: U32) -> PopTree:
-  match g:
-    case 0n:
-      tree
-    case 1n+p:
-      +next_seed = step(seed)
-      +next_tree = step_gen(tree, seed)
-      run_ga(p, next_tree, next_seed)
+def reproduce(parent: Sudoku9, champ: Sudoku9, seed: U32) -> Sudoku9:
+  +s1 = R.step(seed)
+  +s2 = R.step(s1)
+  +base = Bool.pick(Sudoku9, U32.is_lt(U32.mod(s1, 10), 6), champ, parent)
+  memetic_improve(base, s2)
 
 def Row9.show(r: Row9) -> String:
   R9{x0, x1, x2, x3, x4, x5, x6, x7, x8} = r
@@ -358,17 +318,14 @@ def main_seed() -> U32:
 
 def main() -> IO(Unit):
   +s0 = main_seed()
-  +pop0 = gen_pop(5n, s0)
-  +eval0 = eval_pop(pop0)
-  +best0 = best_pop(eval0)
-  +g0 = Ind.gene(best0)
-  +f0 = Ind.fit(best0)
+  +pop0 = GA.gen_population(~Sudoku9, ~init_gene, ~fitness, 5n, s0)
+  +best0 = GA.best_ind(Sudoku9, pop0)
+  +f0 = GA.Ind.fit(Sudoku9, best0)
 
-  +pop_final = run_ga(30n, eval0, step(s0))
-  +eval_final = eval_pop(pop_final)
-  +best_fin = best_pop(eval_final)
-  +g_fin = Ind.gene(best_fin)
-  +f_fin = Ind.fit(best_fin)
+  +pop_final = GA.run_generations(~Sudoku9, ~reproduce, ~fitness, 30n, pop0, R.step(s0))
+  +best_fin = GA.best_ind(Sudoku9, pop_final)
+  +g_fin = GA.Ind.gene(Sudoku9, best_fin)
+  +f_fin = GA.Ind.fit(Sudoku9, best_fin)
   +c_fin = (162 - f_fin : U32)
 
   IO.print(

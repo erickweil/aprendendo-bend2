@@ -1,16 +1,15 @@
 import Base
+import ./../ga.bend as GA
 import ./../utils/random.bend as R
-import ./../utils/poptree.bend as T
 import ./../utils/math.bend as M
 
 # ================================================================
 # CENÁRIO 15: NEUROEVOLUÇÃO E CONTROLE CONTÍNUO (CART-POLE / F32)
+# COM MOTOR GENÉRICO
 # ================================================================
-# Arquitetura:
-# - Física: Simulação contínua do Pêndulo Invertido (Cart-Pole Runge-Kutta/Euler)
-# - Genótipo: Pesos e Bias da Rede Neural de Controle em F32
-# - Seleção e Crossover: Reprodução paralela em Árvore Binária Fork-Join
-# - Biblioteca: genetic/utils/math.bend, random.bend e poptree.bend
+# Física: Simulação contínua do Pêndulo Invertido (Cart-Pole Runge-Kutta/Euler)
+# Genótipo: Pesos e Bias da Rede Neural de Controle em F32
+# Seleção e Crossover: Reprodução no motor ga.bend
 # ================================================================
 
 # Rede Neural / Política Linear-Sigmoidal de Controle
@@ -107,31 +106,8 @@ def eval_policy(+pol: Policy) -> U32:
   +fit_neg = sim_loop(100n, init_neg, pol, 0)
   (fit_pos + fit_neg : U32)
 
-# Indivíduo da População de Neuroevolução
-type NeuroInd is Data:
-  NeuroInd{pol: Policy, fit: U32}
-
-def make_neuro_ind(+pol: Policy) -> NeuroInd:
-  NeuroInd{pol, eval_policy(pol)}
-
-def NeuroInd.pol(i: NeuroInd) -> Policy:
-  NeuroInd{p, _} = i
-  p
-
-def NeuroInd.fit(i: NeuroInd) -> U32:
-  NeuroInd{_, f} = i
-  f
-
-def pick_better_neuro(+a: NeuroInd, +b: NeuroInd) -> NeuroInd:
-  Bool.pick(NeuroInd, U32.is_ge(NeuroInd.fit(a), NeuroInd.fit(b)), a, b)
-
-def best_neuro_pop(tree: T.PopTree<NeuroInd>) -> NeuroInd:
-  match tree:
-    case T.Leaf{ind}:
-      ind
-    case T.Node{left, right}:
-      bl br = best_neuro_pop(left) best_neuro_pop(right)
-      pick_better_neuro(bl, br)
+def fitness(pol: Policy) -> U32:
+  eval_policy(pol)
 
 # Geração de peso aleatório em [-2.0, 2.0]
 def rnd_weight(+seed: U32) -> F32:
@@ -143,15 +119,8 @@ def gen_rand_policy(+seed: U32) -> Policy:
   +s0 = R.step(seed); +s1 = R.step(s0); +s2 = R.step(s1); +s3 = R.step(s2); +s4 = R.step(s3)
   make_policy(rnd_weight(s0), rnd_weight(s1), rnd_weight(s2), rnd_weight(s3), rnd_weight(s4))
 
-def gen_neuro_pop(d: Nat, +seed: U32) -> T.PopTree<NeuroInd>:
-  match d:
-    case 0n:
-      T.leaf(NeuroInd, make_neuro_ind(gen_rand_policy(seed)))
-    case 1n+p:
-      +p = p
-      +seed = seed
-      l r = gen_neuro_pop(p, R.split.fst(seed)) gen_neuro_pop(p, R.split.snd(seed))
-      T.node(NeuroInd, l, r)
+def init_policy(seed: U32) -> Policy:
+  gen_rand_policy(seed)
 
 # Operadores Genéticos em F32: Mutação com jitter contínuo e Crossover
 def mutate_weight(+w: F32, +seed: U32) -> F32:
@@ -175,31 +144,8 @@ def reproduce_policy(+parent: Policy, +champ: Policy, +seed: U32) -> Policy:
     mutate_weight(cross_weight(pb, cb, r4), s4)
   )
 
-def reproduce_neuro(tree: T.PopTree<NeuroInd>, +seed: U32, +champ: NeuroInd) -> T.PopTree<NeuroInd>:
-  match tree:
-    case T.Leaf{+ind}:
-      +s1 = R.step(seed)
-      +child_pol = reproduce_policy(NeuroInd.pol(ind), NeuroInd.pol(champ), s1)
-      +child_ind = make_neuro_ind(child_pol)
-      T.leaf(NeuroInd, pick_better_neuro(child_ind, ind))
-    case T.Node{left, right}:
-      +seed = seed
-      +champ = champ
-      l r = reproduce_neuro(left, R.split.fst(seed), champ) reproduce_neuro(right, R.split.snd(seed), champ)
-      T.node(NeuroInd, l, r)
-
-def step_neuro_gen(+tree: T.PopTree<NeuroInd>, +seed: U32) -> T.PopTree<NeuroInd>:
-  +champ = best_neuro_pop(tree)
-  reproduce_neuro(tree, seed, champ)
-
-def run_neuro(g: Nat, tree: T.PopTree<NeuroInd>, +seed: U32) -> T.PopTree<NeuroInd>:
-  match g:
-    case 0n:
-      tree
-    case 1n+p:
-      +next_seed = R.step(seed)
-      +next_tree = step_neuro_gen(tree, seed)
-      run_neuro(p, next_tree, next_seed)
+def reproduce(parent: Policy, champ: Policy, seed: U32) -> Policy:
+  reproduce_policy(parent, champ, seed)
 
 def Policy.show(p: Policy) -> String:
   Policy{w0, w1, w2, w3, b} = p
@@ -210,17 +156,17 @@ def main_seed() -> U32:
 
 def main() -> IO(Unit):
   +s0 = main_seed()
-  # População inicial: 32 redes neurais em árvore de profundidade 5
-  +pop0 = gen_neuro_pop(5n, s0)
-  +best0 = best_neuro_pop(pop0)
-  +f0 = NeuroInd.fit(best0)
-  +p0 = NeuroInd.pol(best0)
+  # População inicial: 32 redes neurais (profundidade 5)
+  +pop0 = GA.gen_population(~Policy, ~init_policy, ~fitness, 5n, s0)
+  +best0 = GA.best_ind(Policy, pop0)
+  +f0 = GA.Ind.fit(Policy, best0)
+  +p0 = GA.Ind.gene(Policy, best0)
 
-  # Evolução por 45 gerações
-  +pop_fin = run_neuro(45n, pop0, 13579)
-  +best_fin = best_neuro_pop(pop_fin)
-  +f_fin = NeuroInd.fit(best_fin)
-  +p_fin = NeuroInd.pol(best_fin)
+  # Evolução por 45 gerações com o motor genérico
+  +pop_fin = GA.run_generations(~Policy, ~reproduce, ~fitness, 45n, pop0, 13579)
+  +best_fin = GA.best_ind(Policy, pop_fin)
+  +f_fin = GA.Ind.fit(Policy, best_fin)
+  +p_fin = GA.Ind.gene(Policy, best_fin)
 
   IO.print(
     "=== CENÁRIO 15: NEUROEVOLUÇÃO E CONTROLE CONTÍNUO (CART-POLE / F32) ===\n" ++
@@ -228,7 +174,7 @@ def main() -> IO(Unit):
     "Controlador: Rede Neural Contínua F32 com Ativação Softsign / Fast Tanh\n" ++
     "População: 32 redes neurais (Árvore Fork-Join de Profundidade 5)\n" ++
     "Meta de Aptidão: 200/200 passos mantidos em equilíbrio (±0.05 rad iniciais)\n" ++
-    "Módulos da Lib Utilizados: genetic/utils/math.bend, random.bend e poptree.bend\n\n" ++
+    "Módulos da Lib Utilizados: genetic/utils/math.bend, random.bend e ga.bend\n\n" ++
     "Geração 0  - Sobrevivência: " ++ U32.show(f0) ++ "/200 passos | Pesos: " ++ Policy.show(p0) ++ "\n" ++
     "Geração 45 - Sobrevivência: " ++ U32.show(f_fin) ++ "/200 passos | Pesos: " ++ Policy.show(p_fin) ++ "\n\n" ++
     "Controle Equilibrado com Sucesso (>= 180 passos)? " ++

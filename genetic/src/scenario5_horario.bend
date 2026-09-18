@@ -1,4 +1,6 @@
 import Base
+import ./../ga.bend as GA
+import ./../utils/random.bend as R
 
 type Schedule8 is Data:
   S8{x0: U32, x1: U32, x2: U32, x3: U32, x4: U32, x5: U32, x6: U32, x7: U32}
@@ -219,62 +221,20 @@ def shuffle_tt(+tt: Timetable, +s: U32) -> Timetable:
   +tt3 = mutate_tt(tt2, s3)
   mutate_tt(tt3, s4)
 
-def gen_pop(d: Nat, +seed: U32) -> PopTree:
-  match d:
-    case 0n:
-      +g = shuffle_tt(init_tt(), seed)
-      Leaf{Ind{g, fitness(g)}}
-    case 1n+p:
-      +p = p
-      +seed = seed
-      l r = gen_pop(p, split.fst(seed)) gen_pop(p, split.snd(seed))
-      Node{l, r}
+def init_gene(seed: U32) -> Timetable:
+  shuffle_tt(init_tt(), seed)
 
-# Domain-specific Crossover: exchange Turma 2 between parent and elite
 def crossover_tt(a: Timetable, b: Timetable) -> Timetable:
   TT{t1_a, _} = a
   TT{_, t2_b} = b
   TT{t1_a, t2_b}
 
-def reproduce(tree: PopTree, +seed: U32, +elite: Ind) -> PopTree:
-  match tree:
-    case Leaf{ind}:
-      Ind{g, _} = ind
-      Ind{ge, _} = elite
-      +g = g
-      +s1 = step(seed)
-      +s2 = step(s1)
-      # 50% crossover with elite, else keep parent
-      +crossed = Bool.pick(Timetable, U32.is_zero(U32.and(s1, 1)), crossover_tt(g, ge), g)
-      +child = mutate_tt(crossed, s2)
-      Leaf{Ind{child, fitness(child)}}
-    case Node{left, right}:
-      +seed = seed
-      +elite = elite
-      l r = reproduce(left, split.fst(seed), elite) reproduce(right, split.snd(seed), elite)
-      Node{l, r}
-
-def inject_elite(tree: PopTree, +elite: Ind) -> PopTree:
-  match tree:
-    case Leaf{_}:
-      Leaf{elite}
-    case Node{left, right}:
-      Node{inject_elite(left, elite), right}
-
-def step_gen(tree: PopTree, +seed: U32) -> PopTree:
-  +evaluated = eval_pop(tree)
-  +best = best_pop(evaluated)
-  +next_pop = reproduce(evaluated, seed, best)
-  inject_elite(next_pop, best)
-
-def run_ga(g: Nat, tree: PopTree, +seed: U32) -> PopTree:
-  match g:
-    case 0n:
-      tree
-    case 1n+p:
-      +next_seed = step(seed)
-      +next_tree = step_gen(tree, seed)
-      run_ga(p, next_tree, next_seed)
+def reproduce(parent: Timetable, champ: Timetable, seed: U32) -> Timetable:
+  +parent = parent
+  +s1 = R.step(seed)
+  +s2 = R.step(s1)
+  +crossed = Bool.pick(Timetable, U32.is_zero(U32.and(s1, 1)), crossover_tt(parent, champ), parent)
+  mutate_tt(crossed, s2)
 
 def Timetable.show(tt: Timetable) -> String:
   TT{t1, t2} = tt
@@ -286,20 +246,16 @@ def main_seed() -> U32:
 
 def main() -> IO(Unit):
   +s0 = main_seed()
-  # Depth 5 = 32 individuals in the parallel population tree
-  +pop0 = gen_pop(5n, s0)
-  +eval0 = eval_pop(pop0)
-  +best0 = best_pop(eval0)
-  +g0 = Ind.gene(best0)
-  +f0 = Ind.fit(best0)
+  +pop0 = GA.gen_population(~Timetable, ~init_gene, ~fitness, 5n, s0)
+  +best0 = GA.best_ind(Timetable, pop0)
+  +g0 = GA.Ind.gene(Timetable, best0)
+  +f0 = GA.Ind.fit(Timetable, best0)
   +p0 = evaluate_timetable(g0)
 
-  # Run for 80 generations
-  +pop_final = run_ga(80n, eval0, step(s0))
-  +eval_final = eval_pop(pop_final)
-  +best_fin = best_pop(eval_final)
-  +g_fin = Ind.gene(best_fin)
-  +f_fin = Ind.fit(best_fin)
+  +pop_final = GA.run_generations(~Timetable, ~reproduce, ~fitness, 80n, pop0, R.step(s0))
+  +best_fin = GA.best_ind(Timetable, pop_final)
+  +g_fin = GA.Ind.gene(Timetable, best_fin)
+  +f_fin = GA.Ind.fit(Timetable, best_fin)
   +p_fin = evaluate_timetable(g_fin)
 
   IO.print(
