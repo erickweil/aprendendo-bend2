@@ -346,7 +346,6 @@ def eval_unidas_week(+w0: Week5, +w1: Week5, +u1: U32, +u2: U32) -> U32:
 def run_penalty(+len: U32, +packed: U32) -> U32:
   +g = U32.shrn(packed, 1n)
   +dividir = U32.and(packed, 1)
-  +g = g
   +gs = Bool.pick(U32, U32.is_zero(g), 1, g)
   +ideal = Bool.pick(U32, U32.is_eq(dividir, 1), gs,
     U32.mul(U32.div(U32.add(U32.mul(len, 2), gs), U32.mul(gs, 2)), gs))
@@ -494,7 +493,6 @@ def build_pop_tree(d: Nat, +base_q: Quadro3, +spec: FastSpec, +seed: U32) -> T.P
       +f = fitness_cand(cand)
       make_leaf(cand, f)
     case 1n+ +p:
-      +seed = seed
       l r = build_pop_tree(p, base_q, spec, R.split.fst(seed)) build_pop_tree(p, base_q, spec, R.split.snd(seed))
       make_node(l, r)
 
@@ -1000,31 +998,69 @@ def solve_from_form_data(+fd: J.Json, +generations: Nat, +seed: U32) -> IO(Unit)
   +u_pair = load_unidas_pair(unidas_arr, discs)
   solve_from_form_data.step(u_pair, turmas, discs, disc_nomes, disc_profs, prof_masks, n_profs, generations, seed)
 
-def main.handle_form_data(form_data: Maybe<&2, J.Json>) -> IO(Unit):
+def parse_nat(m: Maybe<&2, Nat>, default: Nat) -> Nat:
+  match m:
+    case None{}: default
+    case Some{val}: val
+
+def parse_u32(m: Maybe<&2, U32>, default: U32) -> U32:
+  match m:
+    case None{}: default
+    case Some{val}: val
+
+type RunConfig is Data:
+  RConf{gen: Nat, seed: U32}
+
+def parse_seed_from_rest(rest: List<String>, default_seed: U32) -> U32:
+  match rest:
+    case Nil{}: default_seed
+    case Con{second, _}:
+      parse_u32(U32.read(second), default_seed)
+
+def parse_run_config(args: List<String>, default_gen: Nat, default_seed: U32) -> RunConfig:
+  match args:
+    case Nil{}:
+      RConf{default_gen, default_seed}
+    case Con{first, rest}:
+      +gen = parse_nat(Nat.read(first), default_gen)
+      +seed = parse_seed_from_rest(rest, default_seed)
+      RConf{gen, seed}
+
+def main.handle_form_data(form_data: Maybe<&2, J.Json>, +generations: Nat, +seed: U32) -> IO(Unit):
   match form_data:
     case None{}:
       IO.print("Erro: formData ausente no JSON fornecido.\n")
     case Some{+fd}:
-      solve_from_form_data(fd, 400n, 88442211)
+      solve_from_form_data(fd, generations, seed)
 
-def main.handle_root(root: J.Json) -> IO(Unit):
-  main.handle_form_data(J.Json.get(root, "formData"))
+def main.handle_root(root: J.Json, +generations: Nat, +seed: U32) -> IO(Unit):
+  main.handle_form_data(J.Json.get(root, "formData"), generations, seed)
 
-def main.handle_parse(res: J.ParseRes) -> IO(Unit):
+def main.handle_parse(res: J.ParseRes, +generations: Nat, +seed: U32) -> IO(Unit):
   match res:
     case J.PFail{err}:
       IO.print("Falha ao analisar JSON: " ++ err ++ "\n")
     case J.POk{root}:
-      main.handle_root(root)
+      main.handle_root(root, generations, seed)
 
-def main.dispatch(env_res: Result<&1, &1, U32 & String, String>) -> IO(Unit):
+def main.run_parsed(env_res: Result<&1, &1, U32 & String, String>, +gen: Nat, +seed: U32) -> IO(Unit):
   match env_res:
     case Fail{_}:
       IO.print("Aviso: HORARIO_JSON nao encontrado no ambiente. Forneça o JSON via env HORARIO_JSON.\n")
     case Done{json_str}:
-      main.handle_parse(J.parse_json(json_str))
+      main.handle_parse(J.parse_json(json_str), gen, seed)
+
+def main.dispatch.conf(env_res: Result<&1, &1, U32 & String, String>, conf: RunConfig) -> IO(Unit):
+  RConf{gen, seed} = conf
+  main.run_parsed(env_res, gen, seed)
+
+def main.dispatch(env_res: Result<&1, &1, U32 & String, String>, args: List<String>) -> IO(Unit):
+  main.dispatch.conf(env_res, parse_run_config(args, 400n, 88442211))
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    args : List<String> <- IO.args()
     env_res : Result<&1, &1, U32 & String, String> <- IO.get_env("HORARIO_JSON")
-    main.dispatch(env_res)
+    main.dispatch(env_res, args)
+
+
