@@ -152,18 +152,41 @@ Desenvolvemos uma biblioteca reutilizável e completa de manipulação de JSON e
 - **AST:** Representação limpa em `JNull`, `JBool`, `JNum`, `JStr`, `JArr` e `JObj`.
 - **Parsing:** Analisador léxico e sintático recursivo sem dependências externas.
 - **Consultas Seguras:** `Json.get`, `Json.get_str`, `Json.get_num`, `Json.get_arr`.
-- **Serialização:** `Json.stringify` com formatação compatível com JSON RFC 8259.
+- **Serialização:** `Json.stringify` emite literais em minúsculas (`true`/`false`/`null`) conforme RFC 8259.
+
+> **Limitações conhecidas do parser** (documentadas, não corrigidas): o tokenizador é `@unsafe`
+> (terminação não verificada pelo compilador — a prova de terminação por *fuel* cobre apenas o
+> autômato `parse_pda`, não o tokenizador). Não há suporte a sequências de escape (`\"`, `\n`),
+> números negativos ou ponto flutuante — todo número é lido como `U32`.
 
 ### 3.4 Solver Dinâmico de Horários (100% JSON)
 O solver unificado [`horario_solver.bend`](file:///home/ubuntu/claude/aprendendo-bend2/genetic/src/horario_solver.bend) implementa:
-1. **Zero Mapeamentos Fixos:** Nenhum nome de turma, disciplina ou professor é embutido no código. Tudo é extraído em runtime a partir do JSON fornecido via variável de ambiente `HORARIO_JSON`.
-2. **Tabelas Planas O(1) (`Table16` e `Table32`):** As associações entre disciplinas e professores e as matrizes de indisponibilidade semanal são compactadas em tabelas numéricas planas de `U32`, eliminando alocações na HVM durante as centenas de gerações evolutivas.
-3. **Regras 1:1 com o Sistema Original em Rust:**
-   - Detecção de choques de professores entre turmas no mesmo período.
-   - Verificação de indisponibilidade semanal via máscaras de 20 bits.
-   - Sincronização estrita de disciplinas unidas (ex: turmas diferentes cursando aulas acopladas juntas).
-   - Agrupamento ótimo de aulas consecutivas em blocos de 2 períodos.
-4. **Saída Estruturada:** Serialização da melhor grade horária diretamente para o padrão `TurmaHorarioResult[]`.
+1. **Dados extraídos em runtime:** Nenhum nome de turma, disciplina ou professor é embutido no
+   código. Turmas, disciplinas, cargas horárias, professores e indisponibilidades vêm do JSON
+   fornecido via variável de ambiente `HORARIO_JSON`.
+2. **Tabelas Planas O(1) (`Table16` e `Table32`):** As associações entre disciplinas e professores e
+   as matrizes de indisponibilidade semanal são compactadas em tabelas numéricas planas de `U32`,
+   eliminando alocações na HVM durante as centenas de gerações evolutivas.
+3. **Saída Estruturada:** Serialização da melhor grade horária para o padrão `TurmaHorarioResult[]`.
+
+#### Estado do port em relação ao original em Rust
+
+O solver **não é 1:1** com `my-website/rust-wasm/src/horario/`. O que está portado, o que foi
+simplificado e o que ainda falta:
+
+| Regra (Rust) | Estado no Bend | Observação |
+| :--- | :--- | :--- |
+| Choque de professor entre turmas | ⚠️ Simplificado | O Rust conta conflitos acumulados por slot e pune proporcionalmente; o Bend compara os pares (A,B), (A,C), (B,C) a 50 pts. A **ordenação entre soluções difere**, não só a escala. |
+| Indisponibilidade do professor | ✅ Portado | Máscara de 20 bits, 50 pts por violação. |
+| Múltiplos professores por disciplina | ❌ Falta | `find_prof_for_disc` usa apenas o **primeiro** professor encontrado; o Rust itera `disciplina.professores` inteiro. |
+| Agrupamento em blocos de `agrupar` aulas | ⚠️ Simplificado | O Bend tem blocos de 2 tempos fixos no código. Os campos `agrupar` e `dividir` do JSON são **ignorados**. |
+| `disciplinas_unidas` | ⚠️ Parcial | Apenas o **primeiro grupo** e as **duas primeiras** disciplinas dele, e a comparação é fixa entre as turmas de índice 0 e 1. |
+| Disponibilidade da turma (`turmas[].horarios`) | ❌ Falta | O Rust pune −1000 por slot ativo vazio ou slot inativo preenchido. O Bend assume 5 dias × 4 tempos sempre ativos. |
+| Semana de 7 dias (Dom–Sáb) | ❌ Falta | O genoma `Quadro3` é fixo em Seg–Sex. |
+
+**Limites de forma do genoma:** `Quadro3` é fixo em 3 turmas × 5 dias × 4 tempos; `repeat_val`
+satura em 4 aulas por disciplina; `Table16` comporta 15 professores e `Table32` 31 disciplinas.
+Entradas fora desses limites são **truncadas em silêncio** — ver Fase 2 do plano de correção.
 
 ---
 
@@ -181,14 +204,24 @@ Resultados obtidos com o dataset real de 3 turmas, 20 disciplinas e 10 professor
 
 > O binário compilado em C realiza o parsing completo do JSON, carrega a especificação dinâmica, roda 400 gerações de algoritmo genético e serializa o JSON final em **menos de 0,1 segundo**.
 
-### 🚀 Interpretador Bend 2 CLI — 200 Gerações (Escalabilidade de CPU)
+### 🚀 Interpretador Bend 2 CLI — 400 Gerações (Escalabilidade de CPU)
 | Núcleos / Configuração | Média de Tempo | Speedup Obtido |
 | :--- | :---: | :---: |
 | **1 CPU (taskset -c 0)** | 5578 ms | 1.00x (Baseline) |
 | **2 CPUs (taskset -c 0,1)** | 3001 ms | **1.86x** |
 | **4 CPUs (taskset -c 0-3)** | 2358 ms | **2.36x** |
 
-A avaliação paralela da árvore de população (`PopTree`) escala naturalmente conforme núcleos adicionais de CPU são disponibilizados ao runtime.
+**Leitura honesta desses números:**
+
+- O **binário nativo não escala**: 92.9 → 97.4 → 95.2 ms de 1 para 4 CPUs, ou seja, dentro do ruído
+  e ligeiramente pior. Com 32 indivíduos e ~0,2 ms por geração, o trabalho por fork está **abaixo do
+  overhead de despacho paralelo** da HVM. Paralelismo só compensa aqui aumentando a população ou o
+  custo da avaliação — ver `genetic/PARALLELISM.md`.
+- O speedup de 1.86x/2.36x aparece **apenas no interpretador**, e mede o processo inteiro, incluindo
+  typecheck e compilação do `.bend` — não é speedup do laço genético isolado.
+- Metodologia: 3 amostras com 1 warmup por configuração, numa VM de **4 núcleos** (`nproc` = 4). A
+  linha `taskset -c 0-7` presente em `bench_cpus.py` não é medível nesta máquina. Com alvo de ~93 ms
+  e desvio de ±7 ms, o ruído domina as diferenças do binário nativo.
 
 ---
 

@@ -76,9 +76,9 @@ A nova arquitetura explora os pontos fortes do Bend 2:
 | **14. Evolução Diferencial (DE)** | Otimização numérica contínua em R^4 com `F32` | `Vec4` (4D contínuo) | Custo < 2.0 (Rastrigin) | **1.995 (Convergência Global)** |
 | **15. Neuroevolução (Cart-Pole)** | Controle contínuo da dinâmica do pêndulo invertido em `F32` | `Policy` (5 pesos contínuos) | Sobrevivência 200/200 passos | **200 / 200 passos (Equilíbrio Estável)** |
 | **16. Genética Diplóide (Memória)** | Resgate de memória ancestral sob inversão ambiental brusca | `Diploid` (2 fitas 2n + dominância) | >= 31 bits pós-retorno | **32 / 32 bits (Memória Restaurada)** |
-| **17. Horário Médio (3 Turmas)** | 3 Turmas x 5 dias x 4 tempos, 20 disc, 8 profs, choques e geminadas | `Quadro3` (60 slots) | 0 penalidades | **0 penalidades** (Ótimo) |
+| **17. Horário Médio (3 Turmas)** | 3 Turmas x 5 dias x 4 tempos, 20 disc, 8 profs, choques e geminadas | `Quadro3` (60 slots) | 0 penalidades | **0 penalidades** (na métrica simplificada do Bend, não na do Rust) |
 | **18. Horário Ensino Médio (9 Turmas)** | 9 Turmas x 6 dias x 6 tempos, manhã/tarde, 30 profs | `Quadro9` (324 slots) | Min penalidades | **Convergência Estável** |
-| **Solver Dinâmico (JSON I/O)** | Ingestão dinâmica de JSON real (FormularioHorario) sem hardcoding | `Quadro3` + `FastSpec` | 0 conflitos | **TurmaHorarioResult[] JSON** |
+| **Solver Dinâmico (JSON I/O)** | Ingestão de JSON real (FormularioHorario) em runtime | `Quadro3` + `FastSpec` | 0 penalidades | **300 penalidades** (busca local trivial atinge 100 na mesma métrica) |
 | **PGA. Ilhas Paralelas** | Arquipélago de 4 ilhas com migração de campeão | `Archipelago` x 64 ind. | Distância = 240 | **Distância = 240** (Ótimo) |
 
 ### Operadores usados por cenário

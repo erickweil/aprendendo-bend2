@@ -1,7 +1,7 @@
 # ================================================================
 # BEND 2 GENETIC UTILS - PROVAS FORMAIS (PROOF.bend)
 # ================================================================
-# Demonstração matemática construtiva das 15 Leis do Motor Genético.
+# Demonstração matemática construtiva das 22 Leis do Motor Genético.
 # Cada lei em LAWS.bend é provada através de reflexividade ({==}),
 # indução estrutural, indução matemática e reescritas (%e : P).
 # ================================================================

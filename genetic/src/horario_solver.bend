@@ -6,13 +6,22 @@ import ./../utils/json.bend as J
 import ./../utils/poptree.bend as T
 
 # ==============================================================================
-# SOLVER DINÂMICO DE HORÁRIO ESCOLAR EM BEND 2 (100% JSON)
+# SOLVER DE HORÁRIO ESCOLAR EM BEND 2 — DADOS VINDOS DE JSON
 # ==============================================================================
-# - ZERO mapeamentos fixos ou hardcoded no código Bend
-# - Extração dinâmica de Turmas, Disciplinas, Cargas Horárias e Professores
+# - Turmas, Disciplinas, Cargas Horárias e Professores extraídos em runtime do
+#   JSON em HORARIO_JSON. Nenhum nome é embutido no código.
 # - Tabelas de acesso rápido Table16 e Table32 alimentadas em runtime pelo JSON
 # - Avaliação de alta performance com genoma Quadro3
 # - Serialização do resultado final no padrão TurmaHorarioResult[]
+#
+# ATENÇÃO — a FORMA do problema ainda é fixa no código, e a fitness NÃO é 1:1
+# com o original em Rust (my-website/rust-wasm/src/horario/). Ver a tabela
+# "Estado do port em relação ao original em Rust" no README.md da raiz.
+# Resumo: genoma fixo em 3 turmas x 5 dias x 4 tempos; `repeat_val` satura em 4
+# aulas; Table16 comporta 15 professores e Table32 31 disciplinas; `agrupar` e
+# `dividir` são ignorados; só o 1o professor de cada disciplina é considerado;
+# `disciplinas_unidas` cobre só o 1o par, fixo entre as turmas 0 e 1;
+# `turmas[].horarios` (disponibilidade da turma) não é lido.
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -668,12 +677,12 @@ def solve_from_form_data.report(champion_cand: Cand, +turmas: List<&2, String>, 
 
   IO.print(
     "================================================================\n" ++
-    "  SOLVER DINÂMICO DE HORÁRIO ESCOLAR EM BEND 2 (100% JSON)\n" ++
+    "  SOLVER DE HORÁRIO ESCOLAR EM BEND 2 (dados via HORARIO_JSON)\n" ++
     "================================================================\n" ++
     "Turmas Identificadas: " ++ Nat.show(List.length(&2, String, turmas)) ++ "\n" ++
     "Disciplinas Mapeadas: " ++ Nat.show(List.length(&2, String, disc_nomes)) ++ "\n" ++
     "Professores Mapeados: " ++ Nat.show(n_profs) ++ "\n" ++
-    "Aptidão Ótima:        " ++ U32.show(fit_val) ++ " / 10000 pts\n" ++
+    "Melhor Aptidão:       " ++ U32.show(fit_val) ++ " / 10000 pts\n" ++
     "Penalidades Finais:   " ++ U32.show(penalties) ++ " (Ótimo = 0)\n" ++
     "População:            32 indivíduos (árvore binária profundidade 5)\n" ++
     "Gerações Executadas:  " ++ Nat.show(generations) ++ "\n" ++

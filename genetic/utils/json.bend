@@ -9,10 +9,13 @@ import Base
 # Propriedades de Engenharia & Segurança:
 # 1. Zero recursão mútua proibida (evita erros do verificador estático do Bend 2).
 # 2. Tokenizador linear em def único autônomo com modos rasos (TokMode).
+#    ATENÇÃO: marcado @unsafe — sua terminação NÃO é verificada pelo compilador.
 # 3. Autômato com pilha guiado por fuel indutivo estrutural (fuel: Nat).
-#    Garante prova formal de terminação matemática, impossibilitando
-#    qualquer loop infinito ou vazamento descontrolado de memória (OOM).
-# 4. Suporte a tipos completos: Null, Bool, Num (U32), Str, Arr, Obj.
+#    O fuel garante terminação de `parse_pda` (e só dele), impossibilitando
+#    loop infinito ou consumo descontrolado de memória (OOM) na fase de parsing.
+# 4. Suporte a tipos: Null, Bool, Num, Str, Arr, Obj.
+#    LIMITAÇÕES: sem sequências de escape (\" e \n dentro de strings), sem
+#    números negativos e sem ponto flutuante — todo número é lido como U32.
 # 5. Utilitários ergonômicos: Json.get, Json.get_str, Json.get_num, Json.get_arr.
 # 6. Serializador recíproco Json.stringify com fuel bounded.
 # ==============================================================================
@@ -277,6 +280,13 @@ type StrMode is Data:
   ModeArr{items: List<&2, Json>}
   ModeObj{keys: List<&2, String>, vals: List<&2, Json>}
 
+# JSON exige os literais em minúsculas (RFC 8259 secao 3). `Bool.show` devolve
+# "True"/"False", que nao e JSON valido e nem sequer volta pelo nosso tokenizer.
+def json_bool_lit(b: Bool) -> String:
+  match b:
+    case True{}: "true"
+    case False{}: "false"
+
 def stringify_step(fuel: Nat, m: StrMode) -> String:
   match fuel:
     case 0n: ""
@@ -285,7 +295,7 @@ def stringify_step(fuel: Nat, m: StrMode) -> String:
         case ModeVal{j}:
           match j:
             case JNull{}: "null"
-            case JBool{b}: Bool.show(b)
+            case JBool{b}: json_bool_lit(b)
             case JNum{n}: U32.show(n)
             case JStr{s}: "\"" ++ s ++ "\""
             case JArr{items}: "[" ++ stringify_step(p, ModeArr{items}) ++ "]"
