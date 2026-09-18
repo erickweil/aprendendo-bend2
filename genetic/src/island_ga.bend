@@ -106,7 +106,8 @@ def eval_pop(tree: PopTree) -> PopTree:
       +gene = g
       Leaf{Ind{gene, fitness(gene)}}
     case Node{left, right}:
-      l r = eval_pop(left) eval_pop(right)
+      +l = eval_pop(left)
+      +r = eval_pop(right)
       Node{l, r}
 
 def pick_better(+a: Ind, +b: Ind) -> Ind:
@@ -119,7 +120,8 @@ def best_pop(tree: PopTree) -> Ind:
     case Leaf{ind}:
       ind
     case Node{left, right}:
-      bl br = best_pop(left) best_pop(right)
+      +bl = best_pop(left)
+      +br = best_pop(right)
       pick_better(bl, br)
 
 def shuffle_tour(+p: Perm8, +s: U32) -> Perm8:
@@ -135,7 +137,8 @@ def gen_pop(d: Nat, +seed: U32) -> PopTree:
     case 1n+p:
       +p = p
       +seed = seed
-      l r = gen_pop(p, split.fst(seed)) gen_pop(p, split.snd(seed))
+      +l = gen_pop(p, split.fst(seed))
+      +r = gen_pop(p, split.snd(seed))
       Node{l, r}
 
 def mutate_tour(+p: Perm8, +s: U32) -> Perm8:
@@ -156,7 +159,8 @@ def reproduce(tree: PopTree, +seed: U32, +elite: Ind) -> PopTree:
     case Node{left, right}:
       +seed = seed
       +elite = elite
-      l r = reproduce(left, split.fst(seed), elite) reproduce(right, split.snd(seed), elite)
+      +l = reproduce(left, split.fst(seed), elite)
+      +r = reproduce(right, split.snd(seed), elite)
       Node{l, r}
 
 def inject_elite(tree: PopTree, +elite: Ind) -> PopTree:

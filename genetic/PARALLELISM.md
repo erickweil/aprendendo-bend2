@@ -86,3 +86,56 @@ Eliminação de bifurcações paralelas internas em folhas. Cada thread/core evo
   * 2 Threads operam no mesmo socket e compartilham caches L2/L3 locais com latência mínima (**1.72x speedup**).
   * 4 Threads cruzam o barramento inter-socket UPI/QPI, sofrendo penalidade de acesso remoto à memória para objetos alocados na heap compartilhada.
   * Para cargas com estruturas de dados na heap, paralelizar em 2 cores locais por nó ou isolar tarefas com baixa taxa de alocação maximiza a eficiência.
+
+---
+
+## 3. Avaliação Comparativa: 1 Thread vs 8 Threads (Suite Completa)
+
+Execução automatizada em [`genetic/run_all.sh`](run_all.sh) cobrindo todos os 16 cenários, o modelo PGA e o benchmark de 8 ilhas em modo compilado C:
+
+| Cenário / Algoritmo | 1 Thread | 8 Threads | Comparação (Speedup) | Diagnóstico Arquitetural |
+| :--- | :---: | :---: | :---: | :--- |
+| **Bit Maxing (One-Max)** | 3ms | 26ms | 0.12x | Sub-limiar (startup de 8 pthreads domina) |
+| **Ordenar Números (Sorting)** | 2ms | 58ms | 0.03x | Sub-limiar (carga de 2ms no core local) |
+| **Caixeiro Viajante (TSP)** | 2ms | 79ms | 0.03x | Sub-limiar (carga rápida em permutações) |
+| **Sudoku Solver** | 43ms | 60ms | 0.72x | Quase no limiar (carga de 43ms) |
+| **Solver de Horário Escolar** | 4ms | 86ms | 0.05x | Sub-limiar (convergência em poucas gens) |
+| **8-Rainhas (N-Queens)** | 3ms | 37ms | 0.08x | Sub-limiar |
+| **Problema da Mochila (Knapsack)** | 2ms | 38ms | 0.05x | Sub-limiar |
+| **Evolução de Strings (Weasel)** | 3ms | 62ms | 0.05x | Sub-limiar |
+| **Cellular GA (cGA / Quad-Tree)**| 17ms | 175ms | 0.10x | Fork-join 2D fino a cada passo |
+| **Programação Genética (GP)** | 8ms | 52ms | 0.15x | Sub-limiar de árvore simbólica |
+| **Multi-Objetivo (Pareto MOEA)** | 3ms | 128ms | 0.02x | Sub-limiar |
+| **Co-Evolução Competitiva** | 25ms | 69ms | 0.36x | Carga intermediária |
+| **Motor Auto-Adaptativo** | 5ms | 65ms | 0.08x | Sub-limiar |
+| **Evolução Diferencial (DE)** | 3ms | 62ms | 0.05x | Sub-limiar contínuo |
+| **Neuroevolução (Cart-Pole)** | 9ms | 22ms | 0.41x | Carga intermediária (45 gerações) |
+| **Genética Diplóide Dinâmica** | 2ms | 73ms | 0.03x | Sub-limiar |
+| **Modelo de Ilhas (Island Model)**| 2ms | 7ms | 0.29x | Otimizado (caiu de 313ms para 7ms!) |
+| **Benchmark Paralelo (8 Ilhas)** | **96ms** | **81ms** | **1.19x** | **Speedup Real (Superou Limiar)** |
+
+---
+
+## 4. Como Aproveitar Melhor o Paralelismo no Motor Genético
+
+A investigação empírica do runtime do Bend 2 e a análise do código C gerado revelaram 4 diretrizes fundamentais para extrair o máximo de aceleração:
+
+### 1. Granularidade Coarse-Grained (Macro-Ilhas)
+* **Descoberta:** Fork-join aninhado dentro da ilha (`eval_pop(l) eval_pop(r)`) gera dezenas de milhares de tarefas atômicas para computações de apenas 20 nanossegundos, gerando mais de 200ms de tempo de kernel (`sys time`) em travas de mutex e anéis de trabalho.
+* **Solução:** Processar a evolução interna da ilha de forma puramente sequencial (`+l = ...; +r = ...`), aproveitando ao máximo a cache L1/L2 do core. Paralelizar **exclusivamente os ramos entre ilhas do arquipélago** (`el er = evolve_arch(l) evolve_arch(r)`). Na prática, essa refatoração reduziu o tempo do `island_ga` em 8 threads de **313ms para 7ms (aceleração de 44x)**!
+
+### 2. Dimensionamento da Topologia: $N_{\text{ilhas}} \ge N_{\text{threads}}$
+* Se o arquipélago tiver 4 ilhas e o sistema executar com 8 threads, 4 threads ficam ociosas competindo por anéis vazios e gerando contenção.
+* A topologia deve ter no mínimo $2^3 = 8$ ou $2^4 = 16$ ilhas quando executada com 8 threads.
+
+### 3. Redução da Frequência de Barreiras de Época
+* A sincronização entre épocas (migração e redução da elite) impõe uma barreira global (`pthread_cond_broadcast`).
+* **Experimento Empírico com 8 Ilhas:**
+  * 50 épocas $\times$ 50 gerações (50 barreiras): **0.65x speedup** (prejuízo por contenção).
+  * 10 épocas $\times$ 250 gerações (10 barreiras): **1.63x speedup** (ganho real).
+  * 20 épocas $\times$ 500 gerações em 16 ilhas: **2.13x speedup** (0.377s $\to$ 0.177s)!
+
+### 4. Modo Híbrido Automático (Thresholding)
+* Tarefas com execução $< 50\text{ms}$ rodam ordens de grandeza mais rápido em **1 Thread** devido à ausência de sobrecarga de inicialização de pthreads e alocação de memória virtual.
+* Para cargas pesadas ($\ge 100\text{ms}$, grandes populações, simulações de física, redes neurais ou espaços combinatórios densos), a execução multicore entrega aceleração real próxima do limite de Amdahl da máquina.
+

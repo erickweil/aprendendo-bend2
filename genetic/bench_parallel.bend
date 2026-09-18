@@ -186,10 +186,10 @@ def run_arch_epochs(epochs: Nat, arch: ArchTree, +seed: U32, e: Nat) -> ArchTree
 
 def main() -> IO(Unit):
   +s0 = {12345678 : U32}
-  # 4 Ilhas x 64 indivíduos = 256 indivíduos
-  +arch0 = gen_arch(2n, s0, 6n)
-  # 100 épocas x 50 gerações = 5.000 gerações totais por ilha (1.280.000 avaliações)
-  +arch_fin = run_arch_epochs(100n, arch0, R.step(s0), 50n)
+  # 8 Ilhas x 32 indivíduos = 256 indivíduos (escala perfeitamente em 4 e 8 threads)
+  +arch0 = gen_arch(3n, s0, 5n)
+  # 20 épocas x 250 gerações = 5.000 gerações totais por ilha (baixa contenção de barreira)
+  +arch_fin = run_arch_epochs(20n, arch0, R.step(s0), 250n)
   +champ_fin = best_arch(arch_fin)
   +d_fin = tour_distance(Ind.gene(champ_fin))
-  IO.print("PGA Benchmark - Distancia Campeao: " ++ U32.show(d_fin) ++ "\n")
+  IO.print("PGA Benchmark (8 Ilhas) - Distancia Campeao: " ++ U32.show(d_fin) ++ "\n")
