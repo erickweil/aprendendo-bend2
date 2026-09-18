@@ -65,12 +65,17 @@ def Perm8.set(p: Perm8, +idx: U32, +val: U32) -> Perm8:
   P8{U32.or(U32.and(b, U32.not(U32.shln(7, sh))), U32.shln(U32.and(val, 7), sh))}
 
 def Perm8.swap(+p: Perm8, +i: U32, +j: U32) -> Perm8:
-  +i = i
-  +j = j
-  +vi = Perm8.get(p, i)
-  +vj = Perm8.get(p, j)
-  +p1 = Perm8.set(p, i, vj)
-  Perm8.set(p1, j, vi)
+  P8{b} = p
+  +b = b
+  +shi = Perm8.shift(i)
+  +shj = Perm8.shift(j)
+  +shi = shi; +shj = shj
+  +vi = U32.and(U32.shrn(b, shi), 7)
+  +vj = U32.and(U32.shrn(b, shj), 7)
+  +diff = U32.xor(vi, vj)
+  +diff = diff
+  +mask = U32.or(U32.shln(diff, shi), U32.shln(diff, shj))
+  P8{U32.xor(b, mask)}
 
 # Posição do valor `val` na permutação (0..7; devolve 7 se ausente)
 def Perm8.index_of(+p: Perm8, +val: U32) -> U32:
