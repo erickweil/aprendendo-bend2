@@ -5,7 +5,7 @@ A linguagem Bend2 promete ser tipo que um Haskell, com a sintaxe do Python, com 
 Veja para mais informações:
 - https://bend-lang.com/ Página oficial da linguagem Bend2, landing page
 - https://x.com/bendlang Conta oficial do X da linguagem Bend2
-- https://github.com/bendlang/bend Projeto oficial no github (Ainda não lançado)
+- https://github.com/bendlang/bend Projeto oficial no github
 - https://x.com/VictorTaelin Principal desenvolvedor da linguagem Bend2, que posta atualizações sobre o desenvolvimento da linguagem.
 - https://bend2.dev/ Site que reporta o status atual e informações (como se já foi lançada ou não.)
 - https://github.com/VictorTaelin/ Github do desenvolvedor da linguagem Bend2
@@ -14,14 +14,14 @@ Veja para mais informações:
 
 ## Instalando o Bend2
 
-Seguindo as instruções em https://bend-lang.com/ é muito fácil instalar o Bend2 (irá instalar também o bun)
+Seguindo as instruções em https://bend-lang.com/ é muito fácil instalar o Bend2
 ```bash
 curl -fsSL https://bend-lang.com/install.sh | sh
 ```
 
-> Siga as intruções para adicionar o bun e o bend ao PATH
+> Siga as intruções para adicionar o bend ao PATH
 
-Então para rodar o código basta utilizar o `bend` (Isso utilizará o backend JS)
+Então para rodar o código basta utilizar o `bend` (Isso utilizará o interpretador, que é TS + bun)
 
 ```bash
 bend exemplos/ola.bend

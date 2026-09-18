@@ -14,29 +14,6 @@ def List.pop(-A: Data, lista: List<&2, A>) -> Maybe<&2, A>:
     case Con{h, t}:
       Some{h}
 
-# Char é Chr{code: U32}, então comparar caractere é comparar número
-def Char.eq(a: Char, b: Char) -> Bool:
-  match a b:
-    case Chr{x} Chr{y}:
-      U32.is_eq(x, y)
-
-def split.push(c: Char, partes: List<&2, String>) -> List<&2, String>:
-  match partes:
-    case Nil{}:
-      Con{SCon{c, SNil{}}, Nil{}}
-    case Con{h, t}:
-      Con{SCon{c, h}, t}
-
-# Recursivo primeiro, reconstrói na volta, para manter ordem
-def split(+s: String, +sep: Char) -> List<&2, String>:
-  match s:
-    case SNil{}:
-      Con{SNil{}, Nil{}}
-    case SCon{c, t}:
-      pick(List<&2, String>, Char.eq(c, sep),
-        Con{SNil{}, split(t, sep)},
-        split.push(c, split(t, sep)))
-
 # map_or do Option do Rust
 def Maybe.map_or(-A: Data, -B: Data, maybe: Maybe<&2, A>, f: A -> B, default: B) -> B:
   match maybe:
@@ -158,11 +135,16 @@ def avaliar(+arvore: ArvoreExpr) -> U32:
       avaliar.op(op, esquerda_valor, direita_valor)
 
 # Expressão escrita em notação polonesa reversa (RPN)
-def expressao() -> String:
-  "5 9 + 2 * 3 +"
+def expressao(args: List<String>) -> List<&2, String>:
+  match args:
+    case Nil{}:
+      []
+    case Con{+first, rest}:
+      Con{first, expressao(rest)}
 
-def main() -> IO(Unit):
-  tokens = split(expressao(), ' ')
+def run(args: List<String>) -> IO(Unit):
+  # Expressão escrita em notação polonesa reversa (RPN)
+  tokens = expressao(args)
   parsed_tokens = parse(tokens)
 
   +arvore = ArvoreExpr.from_rpn(parsed_tokens)
@@ -175,3 +157,6 @@ def main() -> IO(Unit):
   )
 
   IO.print(msg)
+
+def main() -> IO(Unit):
+  IO.bind(List<String>, Unit, IO.args(), run)

@@ -26,17 +26,28 @@ def fib_iter(+iter: Nat, +a: U32, +b: U32) -> U32:
 def qual() -> Nat:
   10n
 
-def main() -> IO(Unit):  
-  +n = qual()
-  f_nat = fib(n)
-  f_u32 = fib_iter(n, 0, 1)
+def parse_nat(m: Maybe<&2, Nat>, default: Nat) -> Nat:
+  match m:
+    case None{}: default
+    case Some{val}: val
+
+def get_arg_nat(args: List<String>, default: Nat) -> Nat:
+  match args:
+    case Nil{}: default
+    case Con{first, rest}:
+      parse_nat(Nat.read(first), default)
+
+def run(args: List<String>) -> IO(Unit):
+  +n = get_arg_nat(args, qual())
 
   do IO<Unit>:
-    # Observe que a execução é lazy. Só quando o valor é necessário ele é computado...
     u : Unit <- IO.print("Calculando Fibonacci Nº " ++ Nat.show(n) ++ "...")
     # As linhas abaixo demoram aparecer pois o cálculo só acontece agora que precisa exibir o valor
-    u : Unit <- IO.print(Nat.show(n) ++ "º --> " ++ U32.show(f_u32) ++ " (U32)")
+    u : Unit <- IO.print(Nat.show(n) ++ "º --> " ++ U32.show(fib_iter(n, 0, 1)) ++ " (U32)")
     # O cálculo usando Nat é muito mais lento por ser método recursivo 2^n e também por usar aritmética Nat
-    u : Unit <- IO.print(Nat.show(n) ++ "º --> " ++ Nat.show(f_nat) ++ " (Nat)")
+    u : Unit <- IO.print(Nat.show(n) ++ "º --> " ++ Nat.show(fib(n)) ++ " (Nat)")
 
     IO.print("Finalizado")
+
+def main() -> IO(Unit):
+  IO.bind(List<String>, Unit, IO.args(), run)

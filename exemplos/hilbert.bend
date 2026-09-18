@@ -245,9 +245,21 @@ def draw.fin(profundidade: U32, tree: A.Arvore<Vec2Char>) -> String:
   +largura = powerOfTwo(U32.to_nat(profundidade), 1)
   draw.tree(U32.to_nat(largura), largura, largura, tree, "")
 
-def profundidade() -> U32:
-  3
+def parse_u32(m: Maybe<&2, U32>, default: U32) -> U32:
+  match m:
+    case None{}: default
+    case Some{val}: val
+
+def get_arg_u32(args: List<String>, default: U32) -> U32:
+  match args:
+    case Nil{}: default
+    case Con{first, rest}:
+      parse_u32(U32.read(first), default)
+
+def run(args: List<String>) -> IO(Unit):
+  +prof = get_arg_u32(args, 3)
+  estado = iter(U32.to_nat(prof), True{}, Estado.inicial())
+  IO.write(draw.fin(prof, build_tree(estado)))
 
 def main() -> IO(Unit):
-  estado = iter(U32.to_nat(profundidade()), True{}, Estado.inicial())
-  IO.write(draw.fin(profundidade(), build_tree(estado)))
+  IO.bind(List<String>, Unit, IO.args(), run)
