@@ -25,7 +25,7 @@ run_one() {
 }
 
 printf "%-14s %-10s %8s %8s %8s %10s\n" "BENCH" "TAG" "1T" "2T" "4T" "SPEEDUP4"
-for b in bench_perm bench_bits bench_gp; do
+for b in bench_perm bench_bits bench_gp bench_neuro bench_tsp_heavy bench_islands; do
     bin="/tmp/bench_${b}_$$"
     bend "bench/$b.bend" -o "$bin" >/dev/null 2>&1
     t1=$(run_one "$bin" 1)

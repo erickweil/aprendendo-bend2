@@ -124,9 +124,20 @@ A investigação empírica do runtime do Bend 2 e a análise do código C gerado
 * **Descoberta:** Fork-join aninhado dentro da ilha (`eval_pop(l) eval_pop(r)`) gera dezenas de milhares de tarefas atômicas para computações de apenas 20 nanossegundos, gerando mais de 200ms de tempo de kernel (`sys time`) em travas de mutex e anéis de trabalho.
 * **Solução:** Processar a evolução interna da ilha de forma puramente sequencial (`+l = ...; +r = ...`), aproveitando ao máximo a cache L1/L2 do core. Paralelizar **exclusivamente os ramos entre ilhas do arquipélago** (`el er = evolve_arch(l) evolve_arch(r)`). Na prática, essa refatoração reduziu o tempo do `island_ga` em 8 threads de **313ms para 7ms (aceleração de 44x)**!
 
-### 2. Dimensionamento da Topologia: $N_{\text{ilhas}} \ge N_{\text{threads}}$
-* Se o arquipélago tiver 4 ilhas e o sistema executar com 8 threads, 4 threads ficam ociosas competindo por anéis vazios e gerando contenção.
-* A topologia deve ter no mínimo $2^3 = 8$ ou $2^4 = 16$ ilhas quando executada com 8 threads.
+### 2. Dimensionamento da Topologia: $N_{\text{ilhas}} \approx 16 \times N_{\text{threads}}$
+
+> **Corrigido.** Esta regra dizia $N_{\text{ilhas}} \ge N_{\text{threads}}$. Medições
+> controladas depois (ver [`PERFORMANCE.md`](PERFORMANCE.md) §6) mostraram que isso é
+> insuficiente por uma ordem de grandeza.
+
+* O escalonador é uma máquina fork-join binária **sem work stealing**: cada tarefa vai
+  para um core uma única vez e nunca é movida. Ter tantas tarefas quantos cores não
+  basta — os últimos cores simplesmente não recebem trabalho.
+* Com trabalho puro e perfeitamente balanceado em 4 cores: 4 tarefas dão 1,90x,
+  16 tarefas dão 1,81x, e só a partir de **64 tarefas** chega-se a 2,92x.
+* No motor genético, mantendo 64 indivíduos por ilha: 4 ilhas dão 1,54x, 8 ilhas
+  1,66x, 32 ilhas 2,55x e 64 ilhas de 2,8x a **4,20x**.
+* Regra prática: dimensione o arquipélago em ~16x o número de threads.
 
 ### 3. Redução da Frequência de Barreiras de Época
 * A sincronização entre épocas (migração e redução da elite) impõe uma barreira global (`pthread_cond_broadcast`).

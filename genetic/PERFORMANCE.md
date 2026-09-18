@@ -144,10 +144,116 @@ sem mudança de semântica.
 
 ---
 
-## 5. Em Aberto
+## 5. O Genoma Empacotado
 
-- **`bench_gp` fica mais lento com threads** (0,74x em 4T, e já era 0,65x antes da
-  otimização). Alocação intensa de nós de AST na heap compartilhada é a suspeita —
-  ver `PARALLELISM.md` §Regra 4 sobre contenção de heap. Ainda não investigado.
-- `Perm8` é um registro de 8 campos; empacotá-lo em um `U32` (3 bits por elemento)
-  mediu 1,6x num laço isolado de swap. Não aplicado ainda.
+`Perm8` era um registro de 8 campos, então cada `swap` alocava dois nós de heap —
+e o motor aloca um genoma por indivíduo por geração. Empacotando os 8 elementos
+(valores 0..7) em 3 bits cada dentro de uma palavra de 24 bits:
+
+| Representação | 4M swaps |
+| :--- | ---: |
+| registro de 8 campos | 28 ms |
+| `P8{bits: U32}` (1 campo) | **15 ms** |
+| `U32` cru, sem tipo | 15 ms |
+
+O construtor de 1 campo custa **exatamente o mesmo que o `U32` cru**. Ou seja, não
+é preciso escolher entre segurança de tipo e performance: `Perm8` continua um tipo
+distinto, nenhuma aritmética solta pode ser confundida com uma permutação, e ainda
+assim o genoma inteiro cabe numa palavra.
+
+Efeito medido no motor (binários antigo e novo intercalados): `bench_perm`
+605 ms → 370 ms em 1 thread, **1,64x**.
+
+O corolário de projeto é mais amplo que este tipo: **em Bend, um agregado pequeno
+de campos pequenos vale a pena empacotar numa palavra atrás de um construtor de 1
+campo.** O mesmo vale para `String16`, `Row9` e `Arr4`.
+
+---
+
+## 6. Por Que o Multicore Não Escalava
+
+Em 4 cores, `pow2` (aritmética pura, zero heap) faz 4,03x. O motor genético fazia
+1,6x. As duas primeiras hipóteses estavam erradas, e vale registrar as duas:
+
+**Hipótese 1 — "o gargalo é alocação".** Errada. Um fork-join que aloca e consome
+um registro por folha escala 2,9x; e `bench_gp`, o mais alocador de todos, é
+justamente o único com escala *negativa*.
+
+**Hipótese 2 — "os problemas são simples demais, falta trabalho por tarefa".**
+Errada, e esta foi testada de propósito: `bench_tsp_heavy` usa distância
+euclidiana real em F32 com raiz quadrada (~20x mais computação por indivíduo, com
+alocação idêntica) e escala 1,69x — nada melhor. `bench_neuro`, que roda 200
+passos de simulação física por avaliação, escala 1,85x.
+
+**A causa real é a contagem de tarefas.** O escalonador do Bend é uma máquina
+fork-join binária *sem work stealing*: cada tarefa vai para um core uma única vez
+e nunca é movida. Medindo com trabalho puro, perfeitamente balanceado, variando só
+a profundidade de bifurcação:
+
+| Tarefas | 2 threads | 4 threads |
+| ---: | ---: | ---: |
+| 4 | 1,81x | 1,90x |
+| 16 | 1,81x | 1,81x |
+| 64 | 1,81x | **2,92x** |
+| 1.024 | 1,81x | **3,17x** |
+| 2.097.152 | 1,81x | 3,00x |
+
+Abaixo de ~64 tarefas, os cores 3 e 4 simplesmente não recebem trabalho. E o platô
+é largo: mesmo 2 milhões de tarefas de 8 passos cada continuam em 3,0x, então
+granularidade fina **não** é intrinsecamente cara.
+
+### 6.1 Mas subdividir a geração é pior ainda
+
+A conclusão acima parece sugerir bifurcar a árvore populacional dentro da ilha. É
+o contrário — medido com `fork_d = 3` (8 tarefas por ilha):
+
+| Benchmark | 4T sequencial | 4T com `fork_d = 3` |
+| :--- | ---: | ---: |
+| `bench_perm` | 268 ms | 855 ms |
+| `bench_bits` | 199 ms | 1008 ms |
+
+A diferença em relação ao teste sintético é que lá as tarefas eram criadas **uma
+vez** e viviam o programa inteiro. Uma geração é um fork-join completo: com
+`fork_d = 3`, 5.000 gerações x 8 ilhas viram 320.000 episódios de bifurcação,
+cada um distribuindo microssegundos de trabalho e sincronizando no fim.
+
+O que conta, então, não é "muitas tarefas" e sim **muitas tarefas longevas**. O
+parâmetro continua exposto em `GA.run_generations_at` (padrão `0n`) para
+populações gigantes com aptidão cara, onde a subdivisão pode compensar.
+
+### 6.2 A regra correta de dimensionamento
+
+Uma ilha é exatamente isso: uma tarefa longeva que roda milhares de gerações sem
+sincronizar. Mantendo 64 indivíduos por ilha e variando só a contagem:
+
+| Ilhas | 4 threads |
+| ---: | ---: |
+| 4 | 1,54x |
+| 8 | 1,66x |
+| 16 | 1,63x |
+| 32 | **2,55x** |
+| 64 | **2,8x – 4,2x** |
+
+`bench/bench_islands.bend` (64 ilhas x 64 indivíduos) mede **739 ms → 176 ms em
+4 threads, 4,20x**.
+
+> **Regra:** dimensione o arquipélago em ~16x o número de threads, não em 1x.
+> Isto corrige a Regra 2 de `PARALLELISM.md`, que dizia `N_ilhas >= N_threads`.
+
+`best_archipelago` e `migrate_champion` passaram a reduzir em paralelo no nível do
+arquipélago (uma tarefa por sub-arquipélago, criada uma vez por época). Era a
+fração serial de cada época; em 4 cores o ganho fica dentro do ruído, mas a
+seção serial deixa de crescer com o tamanho do arquipélago.
+
+---
+
+## 7. Em Aberto
+
+- **`bench_gp` fica mais lento com threads** (0,77x em 4T). É o único benchmark com
+  escala negativa e o único cujo genoma é uma árvore de tamanho variável — logo,
+  ilhas com trabalho desbalanceado, que num escalonador sem work stealing custam
+  caro. Ainda não investigado.
+- `bench_bits` e `bench_perm` ainda escalam ~1,6-1,7x com 8 ilhas; re-dimensionar
+  os benchmarks para 64 ilhas deve levá-los ao mesmo patamar do `bench_islands`.
+- Empacotar `String16` (Cenário 8), `Row9`/`Sudoku9` (Cenário 4) e `Arr4`
+  (Cenário 12) da mesma forma que `Perm8`.
