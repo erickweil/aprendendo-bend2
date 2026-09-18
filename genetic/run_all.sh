@@ -11,7 +11,8 @@ echo "    BEND 2 - SUITE DO ALGORITMO GENÉTICO PARALELO EM ÁRVORE    "
 echo "================================================================"
 echo "Compilador: $(bend --version)"
 echo "Arquitetura: Árvore Binária Fork-Join + PRNG Puro com Seed-Split"
-echo "Topologia de Teste: 1 Thread vs 8 Threads (Multicore Scale)"
+echo "Topologia de Teste: 1 Thread vs 8 Threads (esta VM tem $(nproc) nucleos;"
+echo "  com 8 threads em menos nucleos os numeros medem oversubscription, nao escala)"
 echo "================================================================"
 echo ""
 
@@ -31,6 +32,50 @@ echo "================================================================"
 echo "Verificando que os operadores de permutação fecham sobre permutações"
 echo "válidas (OX1, PMX, Directed Swap, 2-Opt, Scramble, Neighbor Swap)..."
 bend tests/operators_test.bend
+echo "================================================================"
+echo ""
+
+echo "================================================================"
+echo ">> [FASE 0.2] TESTES DO PARSER JSON E DA CARGA/VALIDACAO DO SOLVER"
+echo "================================================================"
+# Estes dois arquivos contam falhas e imprimem "HOUVE FALHAS". Como eles saem
+# com status 0 de qualquer jeito, o veredito e conferido aqui no grep.
+run_test_file() {
+    local label="$1"
+    local file="$2"
+    echo "-- $label ($file)"
+    local out
+    out="$(bend "$file")"
+    echo "$out"
+    if echo "$out" | grep -q "HOUVE FALHAS"; then
+        echo "✗ $label FALHOU"
+        exit 1
+    fi
+}
+
+run_test_file "Parser/serializador JSON" "tests/json_test.bend"
+run_test_file "Carga dinamica e validacao" "tests/dynamic_test.bend"
+echo "================================================================"
+echo ""
+
+echo "================================================================"
+echo ">> [FASE 0.3] SOLVER DE HORARIO COM O DATASET REAL"
+echo "================================================================"
+export HORARIO_JSON="$(cat data/horario_input.json)"
+bend src/horario_solver.bend
+
+echo ""
+echo "-- Conferindo que a validacao de entrada REJEITA entrada fora da forma fixa"
+BAD_JSON="$(python3 -c "import json;d=json.load(open('data/horario_input.json'));d['formData']['turmas'].append({'nome':'X','horarios':{'seg':[1]}});print(json.dumps(d,ensure_ascii=False))")"
+REJ="$(HORARIO_JSON="$BAD_JSON" bend src/horario_solver.bend)"
+echo "$REJ"
+if echo "$REJ" | grep -q "Quadro3 exige exatamente 3"; then
+    echo "✓ Entrada invalida corretamente rejeitada sem evoluir"
+else
+    echo "✗ A validacao de entrada NAO rejeitou 4 turmas"
+    exit 1
+fi
+unset HORARIO_JSON
 echo "================================================================"
 echo ""
 

@@ -233,16 +233,23 @@ aprendendo-bend2/
 │   │   ├── horario_solver.bend # Solver orientado a JSON (seção 5B = validação de entrada)
 │   │   ├── scenario1_onemax.bend a scenario18_*.bend
 │   └── tests/
-│       ├── json_test.bend     # Testes do parser JSON
+│       ├── json_test.bend     # 17 checagens do parser/serializador JSON
 │       ├── operators_test.bend# Testes exaustivos dos operadores
-│       └── dynamic_test.bend  # Validação de extração dinâmica da AST JSON
+│       └── dynamic_test.bend  # 22 checagens de carga e validação (importa o solver)
 ```
 
 ---
 
 ## 5. Checklist de Verificação Antes de Enviar Commits
 
-Sempre execute os passos abaixo antes de finalizar qualquer modificação:
+`genetic/run_all.sh` já executa as fases 0 a 0.3 (provas, operadores, testes do
+JSON, carga/validação e o solver com o dataset real, incluindo a conferência de
+que entrada inválida é rejeitada). Para rodar só o essencial à mão:
+
+> **Os testes contam falhas mas saem com status 0.** Confira a última linha:
+> `TODOS OS TESTES PASSARAM` vs `HOUVE FALHAS`. `run_all.sh` faz esse grep
+> sozinho e aborta.
+
 ```bash
 export BEND_NO_TELEMETRY=1
 
@@ -252,21 +259,24 @@ bend genetic/PROOF.bend
 # 2. Executar testes de operadores e invariantes
 bend genetic/tests/operators_test.bend
 
-# 3. Executar teste do parser JSON
+# 3. Executar testes do parser/serializador JSON (17 checagens)
 bend genetic/tests/json_test.bend
 
-# 4. Executar o solver com o dataset real
+# 4. Executar testes de carga e validação (22 checagens, hermético)
+bend genetic/tests/dynamic_test.bend
+
+# 5. Executar o solver com o dataset real
 export HORARIO_JSON=$(cat genetic/data/horario_input.json)
 bend genetic/src/horario_solver.bend
 
-# 5. Conferir que a validação de entrada AINDA REJEITA entrada fora da forma
+# 6. Conferir que a validação de entrada AINDA REJEITA entrada fora da forma
 #    fixa (não deve evoluir nada; deve listar o motivo). Ex.: 4 turmas.
 python3 -c "import json;d=json.load(open('genetic/data/horario_input.json'));\
 d['formData']['turmas'].append({'nome':'X','horarios':{'seg':[1]}});\
 print(json.dumps(d,ensure_ascii=False))" > /tmp/bad.json
 HORARIO_JSON=$(cat /tmp/bad.json) bend genetic/src/horario_solver.bend
 
-# 6. Commit e Push imediato
+# 7. Commit e Push imediato
 git commit -am "tipo(escopo): mensagem descritiva"
 git push origin feature/motor-genetico
 ```

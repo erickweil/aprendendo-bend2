@@ -1,196 +1,152 @@
 import Base
 import ./../utils/json.bend as J
+import ./../src/horario_solver.bend as H
 
-type Day4 is Data:
-  D4{t0: U32, t1: U32, t2: U32, t3: U32}
+# ==============================================================================
+# TESTES DA CARGA DINAMICA E DA VALIDACAO DE ENTRADA (horario_solver.bend)
+# ==============================================================================
+# Este arquivo IMPORTA horario_solver.bend. A versao anterior tinha ~190 linhas
+# copiadas do solver (com um repeat_val que ja divergia do original), entao
+# testava uma copia, nao o codigo em producao — e imprimia
+# "STATUS: CARGA DINAMICA 100% BEM-SUCEDIDA!" incondicionalmente.
+#
+# E hermetico: usa o fixture embutido abaixo, sem depender de HORARIO_JSON nem
+# do dataset real. 3 turmas x 20 aulas, 15 disciplinas, 5 professores.
+# P0 fica indisponivel em seg/tempo 1, logo sua mascara deve ser exatamente 1.
+# ==============================================================================
 
-type Week5 is Data:
-  W5{d0: Day4, d1: Day4, d2: Day4, d3: Day4, d4: Day4}
+def fixture() -> String:
+  "{\"formData\":{\"turmas\":[{\"nome\":\"T-A\",\"horarios\":{\"seg\":[1,2,3,4],\"ter\":[1,2,3,4],\"qua\":[1,2,3,4],\"qui\":[1,2,3,4],\"sex\":[1,2,3,4]}},{\"nome\":\"T-B\",\"horarios\":{\"seg\":[1,2,3,4],\"ter\":[1,2,3,4],\"qua\":[1,2,3,4],\"qui\":[1,2,3,4],\"sex\":[1,2,3,4]}},{\"nome\":\"T-C\",\"horarios\":{\"seg\":[1,2,3,4],\"ter\":[1,2,3,4],\"qua\":[1,2,3,4],\"qui\":[1,2,3,4],\"sex\":[1,2,3,4]}}],\"disciplinas\":[{\"nome\":\"T-A-D0\",\"turma\":\"T-A\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-A-D1\",\"turma\":\"T-A\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-A-D2\",\"turma\":\"T-A\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-A-D3\",\"turma\":\"T-A\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-A-D4\",\"turma\":\"T-A\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-B-D0\",\"turma\":\"T-B\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-B-D1\",\"turma\":\"T-B\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-B-D2\",\"turma\":\"T-B\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-B-D3\",\"turma\":\"T-B\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-B-D4\",\"turma\":\"T-B\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-C-D0\",\"turma\":\"T-C\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-C-D1\",\"turma\":\"T-C\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-C-D2\",\"turma\":\"T-C\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-C-D3\",\"turma\":\"T-C\",\"aulas\":4,\"agrupar\":2,\"dividir\":false},{\"nome\":\"T-C-D4\",\"turma\":\"T-C\",\"aulas\":4,\"agrupar\":2,\"dividir\":false}],\"disciplinas_unidas\":[],\"professores\":[{\"nome\":\"P0\",\"disciplinas\":[\"T-A-D0\",\"T-A-D1\",\"T-A-D2\"],\"horarios\":{\"seg\":[2,3,4],\"ter\":[1,2,3,4],\"qua\":[1,2,3,4],\"qui\":[1,2,3,4],\"sex\":[1,2,3,4]}},{\"nome\":\"P1\",\"disciplinas\":[\"T-A-D3\",\"T-A-D4\",\"T-B-D0\"],\"horarios\":{\"seg\":[1,2,3,4],\"ter\":[1,2,3,4],\"qua\":[1,2,3,4],\"qui\":[1,2,3,4],\"sex\":[1,2,3,4]}},{\"nome\":\"P2\",\"disciplinas\":[\"T-B-D1\",\"T-B-D2\",\"T-B-D3\"],\"horarios\":{\"seg\":[1,2,3,4],\"ter\":[1,2,3,4],\"qua\":[1,2,3,4],\"qui\":[1,2,3,4],\"sex\":[1,2,3,4]}},{\"nome\":\"P3\",\"disciplinas\":[\"T-B-D4\",\"T-C-D0\",\"T-C-D1\"],\"horarios\":{\"seg\":[1,2,3,4],\"ter\":[1,2,3,4],\"qua\":[1,2,3,4],\"qui\":[1,2,3,4],\"sex\":[1,2,3,4]}},{\"nome\":\"P4\",\"disciplinas\":[\"T-C-D2\",\"T-C-D3\",\"T-C-D4\"],\"horarios\":{\"seg\":[1,2,3,4],\"ter\":[1,2,3,4],\"qua\":[1,2,3,4],\"qui\":[1,2,3,4],\"sex\":[1,2,3,4]}}]}}"
 
-type DiscEntry is Data:
-  DEntry{nome: String, turma: String, aulas: U32, agrupar: U32}
+def line(ok: Bool, name: String) -> String:
+  match ok:
+    case True{}:  "  [OK]    " ++ name ++ "\n"
+    case False{}: "  [FALHA] " ++ name ++ "\n"
 
-def load_turmas_names(items: List<&2, J.Json>) -> List<&2, String>:
-  match items:
-    case Nil{}: Nil{}
-    case +h <> t:
-      +nome = J.Json.get_str(h, "nome", "Turma")
-      nome <> load_turmas_names(t)
+def fail_count(ok: Bool) -> U32:
+  Bool.pick(U32, ok, 0, 1)
 
-def load_disciplinas(items: List<&2, J.Json>) -> List<&2, DiscEntry>:
-  match items:
-    case Nil{}: Nil{}
-    case +h <> t:
-      +nome = J.Json.get_str(h, "nome", "")
-      +turma = J.Json.get_str(h, "turma", "")
-      +aulas = J.Json.get_num(h, "aulas", 2)
-      +agrupar = J.Json.get_num(h, "agrupar", 2)
-      DEntry{nome, turma, aulas, agrupar} <> load_disciplinas(t)
+def verdict(n: U32) -> String:
+  Bool.pick(String, U32.is_zero(n), "TODOS OS TESTES PASSARAM\n", "HOUVE FALHAS\n")
 
-def json_is_target_num(j: J.Json, +target: U32) -> Bool:
-  match j:
-    case J.JNum{val}: U32.is_eq(val, target)
-    case _: False{}
+def mask_at.step(m: Maybe<&2, U32>, +default: U32) -> U32:
+  match m:
+    case None{}: default
+    case Some{v}: v
 
-def list_contains_num(l: List<&2, J.Json>, +target: U32) -> Bool:
+def mask_at(l: List<&2, U32>, +idx: U32, +default: U32) -> U32:
+  mask_at.step(List.get(&2, U32, l, U32.to_nat(idx)), default)
+
+def all_positive(l: List<&2, U32>) -> Bool:
   match l:
-    case Nil{}: False{}
+    case Nil{}: True{}
     case h <> t:
-      Bool.pick(Bool, json_is_target_num(h, target), True{}, list_contains_num(t, target))
+      Bool.pick(Bool, U32.is_gt(h, 0), all_positive(t), False{})
 
-def is_tempo_unavailable(+tempos_list: List<&2, J.Json>, +tempo_idx: U32) -> U32:
-  +tempo_num = U32.inc(tempo_idx)
-  +is_avail = list_contains_num(tempos_list, tempo_num)
-  Bool.pick(U32, is_avail, 0, 1)
+def mk_disc(nome: String, turma: String, aulas: U32) -> H.DiscEntry:
+  H.DEntry{nome, turma, aulas, 2}
 
-def day_unavail_mask(+day_arr: List<&2, J.Json>) -> U32:
-  +b0 = is_tempo_unavailable(day_arr, 0)
-  +b1 = is_tempo_unavailable(day_arr, 1)
-  +b2 = is_tempo_unavailable(day_arr, 2)
-  +b3 = is_tempo_unavailable(day_arr, 3)
-  +m0 = b0
-  +m1 = U32.shln(b1, 1n)
-  +m2 = U32.shln(b2, 2n)
-  +m3 = U32.shln(b3, 3n)
-  U32.or(m0, U32.or(m1, U32.or(m2, m3)))
+def run_checks.fd(+fd: J.Json) -> String:
+  +turmas_arr = J.Json.get_arr(fd, "turmas")
+  +discs_arr  = J.Json.get_arr(fd, "disciplinas")
+  +profs_arr  = J.Json.get_arr(fd, "professores")
 
-def prof_horarios_to_mask(h_obj: Maybe<&2, J.Json>) -> U32:
-  match h_obj:
+  +turmas     = H.load_turmas_names(turmas_arr)
+  +discs      = H.load_disciplinas(discs_arr)
+  +disc_profs = H.build_disc_profs(discs, profs_arr)
+  +masks      = H.load_profs_unavail_masks(profs_arr)
+
+  +n0 = H.list_get_str(turmas, 0, "?")
+  +n1 = H.list_get_str(turmas, 1, "?")
+  +n2 = H.list_get_str(turmas, 2, "?")
+  +s0 = H.collect_turma_slots(discs, n0, 1)
+  +s1 = H.collect_turma_slots(discs, n1, 1)
+  +s2 = H.collect_turma_slots(discs, n2, 1)
+
+  # --- extracao do JSON ---
+  +t1 = Nat.is_eq(List.length(&2, String, turmas), 3n)
+  +t2 = Nat.is_eq(List.length(&2, H.DiscEntry, discs), 15n)
+  +t3 = Nat.is_eq(List.length(&2, J.Json, profs_arr), 5n)
+  +t4 = String.eq(n0, "T-A")
+  +t5 = Nat.is_eq(List.length(&2, U32, s0), 20n)
+  +t6 = Nat.is_eq(List.length(&2, U32, s1), 20n)
+  +t7 = Nat.is_eq(List.length(&2, U32, s2), 20n)
+  +t8 = Nat.is_eq(List.length(&2, U32, disc_profs), 15n)
+  +t9 = all_positive(disc_profs)
+
+  # --- mascaras de indisponibilidade ---
+  +t10 = U32.is_eq(mask_at(masks, 0, 999), 1)        # P0: so o slot 0 bloqueado
+  +t11 = U32.is_eq(mask_at(masks, 1, 999), 0)        # P1: totalmente livre
+  +t12 = U32.is_eq(H.prof_horarios_to_mask(None{}), 1048575) # sem "horarios": tudo bloqueado
+
+  # --- validacao: o fixture e valido ---
+  +errs_ok = H.validate_input(turmas, discs, disc_profs, 3n, 15n, 5n, n0, n1, n2, 20n, 20n, 20n)
+  +t13 = Nat.is_eq(List.length(&2, String, errs_ok), 0n)
+
+  # --- validacao: cada checagem tem que ACUSAR ---
+  +t14 = Nat.is_eq(List.length(&2, String, H.check_aulas([mk_disc("X", "T-A", 6)])), 1n)
+  +t15 = Nat.is_eq(List.length(&2, String, H.check_aulas([mk_disc("X", "T-A", 0)])), 1n)
+  +t16 = Nat.is_eq(List.length(&2, String, H.check_aulas([mk_disc("X", "T-A", 4)])), 0n)
+  +t17 = Nat.is_eq(List.length(&2, String, H.check_slots("T-A", 18n)), 1n)
+  +t18 = Nat.is_eq(List.length(&2, String, H.check_slots("T-A", 20n)), 0n)
+  +t19 = Nat.is_eq(List.length(&2, String,
+    H.check_disc_turmas([mk_disc("X", "T-INEXISTENTE", 4)], ["T-A", "T-B", "T-C"])), 1n)
+  +t20 = Nat.is_eq(List.length(&2, String,
+    H.check_disc_turmas([mk_disc("X", "T-B", 4)], ["T-A", "T-B", "T-C"])), 0n)
+  +t21 = Nat.is_eq(List.length(&2, String,
+    H.check_disc_profs([mk_disc("X", "T-A", 4)], [0])), 1n)
+  +t22 = Nat.is_eq(List.length(&2, String,
+    H.check_disc_profs([mk_disc("X", "T-A", 4)], [3])), 0n)
+
+  +n = (fail_count(t1) + fail_count(t2) + fail_count(t3) + fail_count(t4) +
+        fail_count(t5) + fail_count(t6) + fail_count(t7) + fail_count(t8) +
+        fail_count(t9) + fail_count(t10) + fail_count(t11) + fail_count(t12) +
+        fail_count(t13) + fail_count(t14) + fail_count(t15) + fail_count(t16) +
+        fail_count(t17) + fail_count(t18) + fail_count(t19) + fail_count(t20) +
+        fail_count(t21) + fail_count(t22) : U32)
+
+  line(t1,  "load_turmas_names devolve 3 turmas") ++
+  line(t2,  "load_disciplinas devolve 15 disciplinas") ++
+  line(t3,  "professores[] tem 5 itens") ++
+  line(t4,  "primeira turma e \"T-A\"") ++
+  line(t5,  "collect_turma_slots(T-A) soma 20 aulas") ++
+  line(t6,  "collect_turma_slots(T-B) soma 20 aulas") ++
+  line(t7,  "collect_turma_slots(T-C) soma 20 aulas") ++
+  line(t8,  "build_disc_profs devolve 15 mapeamentos") ++
+  line(t9,  "nenhuma disciplina ficou sem professor (pid > 0)") ++
+  line(t10, "mascara de P0 (indisponivel em seg/tempo 1) == 1") ++
+  line(t11, "mascara de P1 (sempre disponivel) == 0") ++
+  line(t12, "professor sem \"horarios\" fica totalmente bloqueado") ++
+  line(t13, "validate_input aceita o fixture sem nenhum erro") ++
+  line(t14, "check_aulas ACUSA aulas=6") ++
+  line(t15, "check_aulas ACUSA aulas=0") ++
+  line(t16, "check_aulas aceita aulas=4") ++
+  line(t17, "check_slots ACUSA turma com 18 aulas") ++
+  line(t18, "check_slots aceita turma com 20 aulas") ++
+  line(t19, "check_disc_turmas ACUSA disciplina orfa") ++
+  line(t20, "check_disc_turmas aceita turma existente") ++
+  line(t21, "check_disc_profs ACUSA pid == 0") ++
+  line(t22, "check_disc_profs aceita pid > 0") ++
+  "Falhas: " ++ U32.show(n) ++ "\n" ++
+  verdict(n)
+
+def run_checks.root(fd_m: Maybe<&2, J.Json>) -> String:
+  match fd_m:
     case None{}:
-      1048575 # 2^20 - 1
-    case Some{+val}:
-      +m_seg = day_unavail_mask(J.Json.get_arr(val, "seg"))
-      +m_ter = day_unavail_mask(J.Json.get_arr(val, "ter"))
-      +m_qua = day_unavail_mask(J.Json.get_arr(val, "qua"))
-      +m_qui = day_unavail_mask(J.Json.get_arr(val, "qui"))
-      +m_sex = day_unavail_mask(J.Json.get_arr(val, "sex"))
-      +s0 = m_seg
-      +s1 = U32.shln(m_ter, 4n)
-      +s2 = U32.shln(m_qua, 8n)
-      +s3 = U32.shln(m_qui, 12n)
-      +s4 = U32.shln(m_sex, 16n)
-      U32.or(s0, U32.or(s1, U32.or(s2, U32.or(s3, s4))))
-
-def json_is_target_str(j: J.Json, +target: String) -> Bool:
-  match j:
-    case J.JStr{val}: String.eq(val, target)
-    case _: False{}
-
-def list_contains_str(l: List<&2, J.Json>, +target: String) -> Bool:
-  match l:
-    case Nil{}: False{}
-    case h <> t:
-      Bool.pick(Bool, json_is_target_str(h, target), True{}, list_contains_str(t, target))
-
-def find_prof_for_disc(+disc_nome: String, profs: List<&2, J.Json>, +cur_id: U32) -> U32:
-  match profs:
-    case Nil{}: 0
-    case +h <> t:
-      +discs_list = J.Json.get_arr(h, "disciplinas")
-      Bool.pick(U32, list_contains_str(discs_list, disc_nome),
-        cur_id,
-        find_prof_for_disc(disc_nome, t, U32.inc(cur_id)))
-
-def build_disc_profs(discs: List<&2, DiscEntry>, +profs: List<&2, J.Json>) -> List<&2, U32>:
-  match discs:
-    case Nil{}: Nil{}
-    case h <> t:
-      DEntry{nome, _, _, _} = h
-      +pid = find_prof_for_disc(nome, profs, 1)
-      pid <> build_disc_profs(t, profs)
-
-def repeat_val(+val: U32, +count: U32) -> List<&2, U32>:
-  match count:
-    case 0: Nil{}
-    case 1: [val]
-    case 2: [val, val]
-    case 3: [val, val, val]
-    case _: [val, val, val, val]
-
-def collect_turma_slots(discs: List<&2, DiscEntry>, +turma_nome: String, +disc_id: U32) -> List<&2, U32>:
-  match discs:
-    case Nil{}: Nil{}
-    case h <> t:
-      DEntry{_, t_nome, aulas, _} = h
-      +matching = String.eq(t_nome, turma_nome)
-      +added = Bool.pick(List<&2, U32>, matching, repeat_val(disc_id, aulas), Nil{})
-      List.append(&2, U32, added, collect_turma_slots(t, turma_nome, U32.inc(disc_id)))
-
-def load_profs_unavail_masks(profs: List<&2, J.Json>) -> List<&2, U32>:
-  match profs:
-    case Nil{}: Nil{}
-    case +h <> t:
-      +m = prof_horarios_to_mask(J.Json.get(h, "horarios"))
-      m <> load_profs_unavail_masks(t)
-
-def slots20_to_week5(slots: List<&2, U32>) -> Week5:
-  match slots:
-    case s0 <> s1 <> s2 <> s3 <> s4 <> s5 <> s6 <> s7 <> s8 <> s9 <> s10 <> s11 <> s12 <> s13 <> s14 <> s15 <> s16 <> s17 <> s18 <> s19 <> _:
-      W5{
-        D4{s0, s1, s2, s3},
-        D4{s4, s5, s6, s7},
-        D4{s8, s9, s10, s11},
-        D4{s12, s13, s14, s15},
-        D4{s16, s17, s18, s19}
-      }
-    case _:
-      W5{
-        D4{0, 0, 0, 0},
-        D4{0, 0, 0, 0},
-        D4{0, 0, 0, 0},
-        D4{0, 0, 0, 0},
-        D4{0, 0, 0, 0}
-      }
-
-def main.handle_form_data(form_data: Maybe<&2, J.Json>) -> IO(Unit):
-  match form_data:
-    case None{}:
-      IO.print("formData ausente\n")
+      "  [FALHA] fixture sem formData\nFalhas: 1\nHOUVE FALHAS\n"
     case Some{+fd}:
-      +turmas_arr = J.Json.get_arr(fd, "turmas")
-      +discs_arr = J.Json.get_arr(fd, "disciplinas")
-      +profs_arr = J.Json.get_arr(fd, "professores")
-      +turmas = load_turmas_names(turmas_arr)
-      +discs = load_disciplinas(discs_arr)
-      +disc_profs = build_disc_profs(discs, profs_arr)
-      +prof_masks = load_profs_unavail_masks(profs_arr)
-      
-      # Testa slots para Turma 2026
-      +t0_slots = collect_turma_slots(discs, "Turma 2026", 1)
-      +t1_slots = collect_turma_slots(discs, "Turma 2025", 1)
-      +t2_slots = collect_turma_slots(discs, "Turma 2024", 1)
-      
-      IO.print(
-        "=== TESTE DE CARGA DINÂMICA COMPLETO ===\n" ++
-        "Total Turmas Lidas:            " ++ Nat.show(List.length(&2, String, turmas)) ++ "\n" ++
-        "Total Disciplinas Lidas:       " ++ Nat.show(List.length(&2, DiscEntry, discs)) ++ "\n" ++
-        "Total Professores Lidos:       " ++ Nat.show(List.length(&2, J.Json, profs_arr)) ++ "\n" ++
-        "Mapeamentos Disc -> Prof:      " ++ Nat.show(List.length(&2, U32, disc_profs)) ++ "\n" ++
-        "Máscaras de Indisponibilidade: " ++ Nat.show(List.length(&2, U32, prof_masks)) ++ "\n" ++
-        "Slots Turma 2026 (esperado 20):" ++ Nat.show(List.length(&2, U32, t0_slots)) ++ "\n" ++
-        "Slots Turma 2025 (esperado 20):" ++ Nat.show(List.length(&2, U32, t1_slots)) ++ "\n" ++
-        "Slots Turma 2024 (esperado 20):" ++ Nat.show(List.length(&2, U32, t2_slots)) ++ "\n" ++
-        "STATUS: CARGA DINÂMICA 100% BEM-SUCEDIDA!\n"
-      )
+      run_checks.fd(fd)
 
-def main.handle_root(root: J.Json) -> IO(Unit):
-  main.handle_form_data(J.Json.get(root, "formData"))
-
-def main.handle_parse(res: J.ParseRes) -> IO(Unit):
-  match res:
-    case J.PFail{err}:
-      IO.print("Falha no parse: " ++ err ++ "\n")
+# `match` nao escrutina valor computado, entao o ParseRes entra como parametro.
+def run_checks(r: J.ParseRes) -> String:
+  match r:
+    case J.PFail{msg}:
+      "  [FALHA] fixture embutido nao parseia: " ++ msg ++ "\nFalhas: 1\nHOUVE FALHAS\n"
     case J.POk{root}:
-      main.handle_root(root)
-
-def main.dispatch(env_res: Result<&1, &1, U32 & String, String>) -> IO(Unit):
-  match env_res:
-    case Fail{_}:
-      IO.print("HORARIO_JSON nao encontrado no ambiente.\n")
-    case Done{json_str}:
-      main.handle_parse(J.parse_json(json_str))
+      run_checks.root(J.Json.get(root, "formData"))
 
 def main() -> IO(Unit):
-  do IO<Unit>:
-    env_res : Result<&1, &1, U32 & String, String> <- IO.get_env("HORARIO_JSON")
-    main.dispatch(env_res)
+  IO.print(
+    "=== TESTES DE CARGA DINAMICA E VALIDACAO ===\n" ++
+    run_checks(J.parse_json(fixture()))
+  )
