@@ -26,3 +26,25 @@ def dot4(+x0: F32, +x1: F32, +x2: F32, +x3: F32,
 # Conversão de graus para radianos
 def deg_to_rad(+deg: F32) -> F32:
   ((deg * F32.pi()) / 180.0 : F32)
+
+# ----------------------------------------------------------------
+# AMOSTRAGEM CONTÍNUA DETERMINÍSTICA (F32 a partir de sementes U32)
+# ----------------------------------------------------------------
+
+# Amostra uniforme em [0.0, 1.0) com `buckets` níveis discretos
+def rnd_norm(+seed: U32, +buckets: U32) -> F32:
+  +b = buckets
+  (U32.to_f32(U32.mod(seed, b)) / U32.to_f32(b) : F32)
+
+# Amostra uniforme simétrica em [-1.0, 1.0] com 4000 níveis (passo 0.0005)
+def rnd_unit(+seed: U32) -> F32:
+  ((U32.to_f32(U32.mod(seed, 4000)) / {2000.0 : F32}) - {1.0 : F32} : F32)
+
+# Amostra uniforme simétrica em [-1.0, 1.0] com 200 níveis (passo 0.01)
+def rnd_unit_coarse(+seed: U32) -> F32:
+  ((U32.to_f32(U32.mod(seed, 200)) / {100.0 : F32}) - {1.0 : F32} : F32)
+
+# Amostra uniforme em [lo, hi] com 10000 níveis discretos
+def rnd_range_f32(+seed: U32, +lo: F32, +hi: F32) -> F32:
+  +norm = (U32.to_f32(U32.mod(seed, 10000)) / {10000.0 : F32} : F32)
+  (lo + ((hi - lo) * norm) : F32)

@@ -2,6 +2,7 @@ import Base
 import ./../ga.bend as GA
 import ./../utils/bits.bend as Bits
 import ./../utils/random.bend as R
+import ./../operators.bend as Op
 
 # ================================================================
 # CENÁRIO 1: BIT MAXING (ONE-MAX) COM MOTOR GENÉTICO GENÉRICO
@@ -19,12 +20,15 @@ def init_gene(seed: U32) -> U32:
 def fitness(gene: U32) -> U32:
   Bits.popcount(gene)
 
-# Operador de Reprodução: Crossover Uniforme + Mutação Pontual
+# Reprodução: pipeline Crossover Uniforme + Flip de 1 bit, montado pelo
+# combinador `Op.pipe` de operators.bend.
+# Nota: o `problem_onemax.rs` original usa Single-Point Crossover +
+# `mutation_replace` por gene (P_c = P_m = 0.9, taxa por gene 1/32); essa
+# configuração também converge aqui (`Op.pipe_rated(~U32, ~Op.cross_bits_1point,
+# ~mut, 90, 90, ...)`), porém precisa de 60 gerações em vez de 25, porque o
+# motor em árvore usa elitismo com o campeão no lugar de seleção por torneio.
 def reproduce(parent: U32, champ: U32, seed: U32) -> U32:
-  +s1 = R.step(seed)
-  +s2 = R.step(s1)
-  +child = Bits.crossover_uniform(parent, champ, s1)
-  Bits.mutate_bit(child, s2)
+  Op.pipe(~U32, ~Op.cross_bits_uniform, ~Op.mut_bit_flip32, parent, champ, seed)
 
 def main() -> IO(Unit):
   +s0 = {12345678 : U32}

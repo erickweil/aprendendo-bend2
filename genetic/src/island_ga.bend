@@ -2,6 +2,7 @@ import Base
 import ./../ga.bend as GA
 import ./../utils/perm.bend as Perm
 import ./../utils/random.bend as R
+import ./../operators.bend as Op
 
 # ================================================================
 # CENÁRIO PGA: MODELO DE ILHAS PARALELAS COM MOTOR GENÉTICO GENÉRICO
@@ -55,16 +56,15 @@ def shuffle_tour(+p: Perm.Perm8, +s: U32) -> Perm.Perm8:
 def init_gene(seed: U32) -> Perm.Perm8:
   shuffle_tour(Perm.P8{0, 4, 1, 5, 2, 6, 3, 7}, seed)
 
-def mutate_tour(+p: Perm.Perm8, +s: U32) -> Perm.Perm8:
-  +s1 = R.step(s)
-  +s2 = R.step(s1)
-  Perm.Perm8.swap(p, U32.mod(s1, 8), U32.mod(s2, 8))
+# Mutação de busca local: 60% inversão 2-opt de segmento + 40% swap de vizinho
+def mut_island(p: Perm.Perm8, seed: U32) -> Perm.Perm8:
+  Op.combine_mutations(~Perm.Perm8, ~Op.mut_perm_reverse_segment, ~Op.mut_perm_neighbor_swap,
+                       60, p, seed)
 
+# Reprodução por ilha: Order Crossover (OX1) + mutação 2-opt/vizinho,
+# montada pelos combinadores higher-order de operators.bend
 def reproduce(parent: Perm.Perm8, champ: Perm.Perm8, seed: U32) -> Perm.Perm8:
-  +s1 = R.step(seed)
-  +s2 = R.step(s1)
-  +base = Bool.pick(Perm.Perm8, U32.is_lt(U32.mod(s1, 10), 6), champ, parent)
-  mutate_tour(base, s2)
+  Op.pipe(~Perm.Perm8, ~Op.cross_perm_ox1, ~mut_island, parent, champ, seed)
 
 def main_seed() -> U32:
   654321

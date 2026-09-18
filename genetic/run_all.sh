@@ -18,9 +18,19 @@ echo ""
 echo "================================================================"
 echo ">> [FASE 0] VERIFICAÇÃO FORMAL DE LEIS MATEMÁTICAS (LAWS & PROOF)"
 echo "================================================================"
-echo "Verificando 15 leis do motor genético e utilitários via 'bend utils/PROOF.bend'..."
-bend utils/PROOF.bend
-echo "✓ Todas as 15 leis matemáticas foram verificadas e provadas com sucesso!"
+echo "Verificando 22 leis do motor genético, utilitários e combinadores"
+echo "de operadores via 'bend PROOF.bend'..."
+bend PROOF.bend
+echo "✓ Todas as 22 leis matemáticas foram verificadas e provadas com sucesso!"
+echo "================================================================"
+echo ""
+
+echo "================================================================"
+echo ">> [FASE 0.1] TESTE EXAUSTIVO DOS OPERADORES (operators.bend)"
+echo "================================================================"
+echo "Verificando que os operadores de permutação fecham sobre permutações"
+echo "válidas (OX1, PMX, Directed Swap, 2-Opt, Scramble, Neighbor Swap)..."
+bend tests/operators_test.bend
 echo "================================================================"
 echo ""
 

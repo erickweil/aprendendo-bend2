@@ -2,6 +2,7 @@ import Base
 import ./../ga.bend as GA
 import ./../utils/perm.bend as Perm
 import ./../utils/random.bend as R
+import ./../operators.bend as Op
 
 # ================================================================
 # CENÁRIO 3: CAIXEIRO VIAJANTE (TSP 8 CIDADES) COM MOTOR GENÉRICO
@@ -54,17 +55,17 @@ def shuffle_tour(+p: Perm.Perm8, +s: U32) -> Perm.Perm8:
 def init_gene(seed: U32) -> Perm.Perm8:
   shuffle_tour(Perm.P8{0, 4, 1, 5, 2, 6, 3, 7}, seed)
 
-def mutate_tour(+p: Perm.Perm8, +s: U32) -> Perm.Perm8:
-  +s1 = R.step(s)
-  +s2 = R.step(s1)
-  Perm.Perm8.swap(p, U32.mod(s1, 8), U32.mod(s2, 8))
+# Mutação combinada do `problem_tsp.rs` original:
+# 50% Swap aleatório + 50% Swap de vizinho, via combinador higher-order
+def mut_tsp(p: Perm.Perm8, seed: U32) -> Perm.Perm8:
+  Op.combine_mutations(~Perm.Perm8, ~Op.mut_perm_random_swap, ~Op.mut_perm_neighbor_swap,
+                       50, p, seed)
 
-# Reprodução: herdada da elite com mutação por permutação 2-opt
+# Reprodução: porte fiel de `problem_tsp.rs` — Order Crossover (OX1),
+# que preserva a validade da permutação por construção, seguido da
+# mutação combinada. Montado inteiramente por combinadores de operators.bend.
 def reproduce(parent: Perm.Perm8, champ: Perm.Perm8, seed: U32) -> Perm.Perm8:
-  +s1 = R.step(seed)
-  +s2 = R.step(s1)
-  +base = Bool.pick(Perm.Perm8, U32.is_lt(U32.mod(s1, 10), 6), champ, parent)
-  mutate_tour(base, s2)
+  Op.pipe(~Perm.Perm8, ~Op.cross_perm_ox1, ~mut_tsp, parent, champ, seed)
 
 def main() -> IO(Unit):
   +s0 = {12345678 : U32}

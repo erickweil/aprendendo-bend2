@@ -1,6 +1,7 @@
 import Base
 import ./../ga.bend as GA
 import ./../utils/random.bend as R
+import ./../operators.bend as Op
 
 # ================================================================
 # CENÁRIO 7: PROBLEMA DA MOCHILA (0/1 KNAPSACK) COM MOTOR GENÉRICO
@@ -66,28 +67,26 @@ def fitness(mask: U32) -> U32:
   +w = total_weight(mask)
   +v = total_value(mask)
   +cap = max_capacity()
-  Bool.pick(U32, U32.is_le(w, cap),
-    v,
-    Bool.pick(U32, U32.is_gt((v - U32.mul(U32.sub(w, cap), 4) : U32), 0),
-      (v - U32.mul(U32.sub(w, cap), 4) : U32),
-      0))
+  # Penalidade graduada: 40 pontos de valor por kg de excesso, com piso em 0.
+  # O coeficiente 40 > maior valor/kg do conjunto garante que nenhuma solução
+  # inválida possa superar a melhor solução viável, preservando ainda assim o
+  # gradiente que permite a uma solução levemente acima do peso evoluir de volta
+  # para a região viável (a penalidade-morte com fitness 0 apaga esse gradiente).
+  # O excesso e a subtração final são calculados com guarda explícita porque
+  # U32.sub faz wrap-around em Bend (3 - 10 == 4294967289); a versão anterior
+  # calculava `v - 4*(w - cap)` sem guarda e, quando a penalidade superava o
+  # valor, o wrap devolvia ~4.29e9 de aptidão para soluções inválidas.
+  +over = Bool.pick(U32, U32.is_le(w, cap), 0, (w - cap : U32))
+  +penalty = U32.mul(over, 40)
+  +penalty = penalty
+  Bool.pick(U32, U32.is_gt(v, penalty), (v - penalty : U32), 0)
 
 def init_knapsack(seed: U32) -> U32:
   U32.and(R.step(seed), 1023)
 
-def crossover(+p1: U32, +p2: U32, +mask: U32) -> U32:
-  U32.and(U32.or(U32.and(mask, p1), U32.and(U32.not(mask), p2)), 1023)
-
-def mutate_mask(+gene: U32, +s: U32) -> U32:
-  +s1 = R.step(s)
-  +bit = U32.mod(s1, 10)
-  +flip = U32.shln(1, U32.to_nat(bit))
-  U32.xor(gene, flip)
-
+# Reprodução via pipeline de operadores reutilizáveis (Crossover Uniforme + Flip de 10 bits)
 def reproduce(parent: U32, champ: U32, seed: U32) -> U32:
-  +s1 = R.step(seed); +s2 = R.step(s1)
-  +crossed = crossover(parent, champ, s1)
-  mutate_mask(crossed, s2)
+  Op.pipe(~U32, ~Op.cross_bits_uniform10, ~Op.mut_bit_flip10, parent, champ, seed)
 
 def main_seed() -> U32:
   223344

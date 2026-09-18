@@ -1,6 +1,7 @@
 import Base
 import ./../ga.bend as GA
 import ./../utils/random.bend as R
+import ./../operators.bend as Op
 
 # ================================================================
 # CENÁRIO 8: EVOLUÇÃO DE STRINGS (DAWKINS WEASEL) COM MOTOR GENÉRICO
@@ -99,14 +100,16 @@ def String16.set(s: String16, +idx: U32, +val: U32) -> String16:
     Bool.pick(U32, U32.is_eq(idx, 15), val, c15)
   }
 
-def mutate_string(+s: String16, +rnd: U32) -> String16:
+# Assinaturas afins (sem `+` nos parâmetros) para casarem com o tipo
+# `G -> G -> U32 -> G` esperado pelos combinadores de operators.bend
+def mutate_string(s: String16, rnd: U32) -> String16:
   +s1 = R.step(rnd)
   +s2 = R.step(s1)
   +idx = U32.mod(s1, 16)
   +new_char = random_char(s2)
   String16.set(s, idx, new_char)
 
-def crossover_string(a: String16, b: String16, +mask: U32) -> String16:
+def crossover_string(a: String16, b: String16, mask: U32) -> String16:
   S16{
     a0, a1, a2, a3, a4, a5, a6, a7,
     a8, a9, a10, a11, a12, a13, a14, a15
@@ -115,6 +118,7 @@ def crossover_string(a: String16, b: String16, +mask: U32) -> String16:
     b0, b1, b2, b3, b4, b5, b6, b7,
     b8, b9, b10, b11, b12, b13, b14, b15
   } = b
+  +mask = mask
   S16{
     Bool.pick(U32, U32.is_ne(U32.and(mask, 1), 0), a0, b0),
     Bool.pick(U32, U32.is_ne(U32.and(mask, 2), 0), a1, b1),
@@ -134,11 +138,12 @@ def crossover_string(a: String16, b: String16, +mask: U32) -> String16:
     Bool.pick(U32, U32.is_ne(U32.and(mask, 32768), 0), a15, b15)
   }
 
+# Reprodução: mesmo pipeline canônico dos demais cenários, montado pelo
+# combinador polimórfico `Op.pipe` sobre o genoma próprio `String16`.
+# Os operadores em si são específicos do domínio (16 caracteres), mas a
+# orquestração (bifurcação de sementes e composição) vem da biblioteca.
 def reproduce(parent: String16, champ: String16, seed: U32) -> String16:
-  +s1 = R.step(seed)
-  +s2 = R.step(s1)
-  +crossed = crossover_string(parent, champ, s1)
-  mutate_string(crossed, s2)
+  Op.pipe(~String16, ~crossover_string, ~mutate_string, parent, champ, seed)
 
 def String16.show(s: String16) -> String:
   S16{

@@ -2,6 +2,7 @@ import Base
 import ./../ga.bend as GA
 import ./../utils/random.bend as R
 import ./../utils/math.bend as M
+import ./../operators.bend as Op
 
 # ================================================================
 # CENÁRIO 15: NEUROEVOLUÇÃO E CONTROLE CONTÍNUO (CART-POLE / F32)
@@ -122,14 +123,14 @@ def gen_rand_policy(+seed: U32) -> Policy:
 def init_policy(seed: U32) -> Policy:
   gen_rand_policy(seed)
 
-# Operadores Genéticos em F32: Mutação com jitter contínuo e Crossover
+# Operadores Genéticos em F32 vindos da Seção D de operators.bend:
+#   Op.mut_f32_jitter(40, 1.0, w, s) -> 40% de chance de somar ruído em [-1, 1]
+#   Op.cross_f32_uniform(w1, w2, r)  -> herda w1 ou w2 com 50% cada
 def mutate_weight(+w: F32, +seed: U32) -> F32:
-  +should_mut = R.chance(seed, 40)
-  +jitter = rnd_weight(R.step(seed))
-  Bool.pick(F32, should_mut, (w + (jitter * {0.5 : F32}) : F32), w)
+  Op.mut_f32_jitter(40, {1.0 : F32}, w, seed)
 
 def cross_weight(+w1: F32, +w2: F32, +rnd: U32) -> F32:
-  Bool.pick(F32, R.chance(rnd, 50), w1, w2)
+  Op.cross_f32_uniform(w1, w2, rnd)
 
 def reproduce_policy(+parent: Policy, +champ: Policy, +seed: U32) -> Policy:
   Policy{pw0, pw1, pw2, pw3, pb} = parent

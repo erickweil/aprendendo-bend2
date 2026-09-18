@@ -3,6 +3,7 @@ import ./../ga.bend as GA
 import ./../utils/random.bend as R
 import ./../utils/bits.bend as B
 import ./../utils/poptree.bend as T
+import ./../operators.bend as Op
 
 # ================================================================
 # CENÁRIO 13: MOTOR EVOLUTIVO AUTO-ADAPTATIVO (SELF-ADAPTIVE GA)
@@ -66,35 +67,20 @@ def mutate_rate(+r: U32, +rnd: U32) -> U32:
   Bool.pick(U32, U32.is_lt(new_r, 1), 1,
     Bool.pick(U32, U32.is_gt(new_r, 10), 10, new_r))
 
-# Operador 1: Swap de dois blocos de 8 bits
-def swap_blocks(+g: U32, +rnd: U32) -> U32:
-  +b1 = U32.mod(rnd, 4)
-  +b2 = U32.mod(R.step(rnd), 4)
-  +sh1 = U32.to_nat(U32.mul(b1, 8))
-  +sh2 = U32.to_nat(U32.mul(b2, 8))
-  +v1 = U32.and(U32.shrn(g, sh1), 255)
-  +v2 = U32.and(U32.shrn(g, sh2), 255)
-  +g_clean1 = U32.and(g, U32.not(U32.shln(255, sh1)))
-  +g_clean2 = U32.and(g_clean1, U32.not(U32.shln(255, sh2)))
-  U32.or(g_clean2, U32.or(U32.shln(v2, sh1), U32.shln(v1, sh2)))
-
-# Operador 2: Inversão de um bloco de 8 bits
-def invert_block(+g: U32, +rnd: U32) -> U32:
-  +blk = U32.to_nat(U32.mul(U32.mod(rnd, 4), 8))
-  U32.xor(g, U32.shln(255, blk))
-
-# Operador 0: Flip de bit pontual
-def flip_bit(+g: U32, +rnd: U32) -> U32:
-  +bit_idx = U32.to_nat(U32.mod(rnd, 32))
-  U32.xor(g, U32.shln(1, bit_idx))
+# Os três operadores sobre os quais o indivíduo pode se auto-adaptar vêm
+# diretamente da biblioteca operators.bend:
+#   op 0 -> Op.mut_bit_flip32        (flip pontual de 1 bit)
+#   op 1 -> Op.mut_bits_swap_blocks  (troca de dois blocos de 8 bits)
+#   op 2 -> Op.mut_bits_invert_block (inversão de um bloco de 8 bits)
 
 # Aplica a mutação genética usando os parâmetros auto-adaptados do próprio indivíduo
 def apply_adaptive_mutation(+g: U32, +rate: U32, +op: U32, +rnd: U32) -> U32:
   +s1 = R.step(rnd); +s2 = R.step(s1)
   +should_mutate = U32.is_lt(U32.mod(rnd, 10), rate)
   Bool.pick(U32, should_mutate,
-    Bool.pick(U32, U32.is_eq(op, 0), flip_bit(g, s1),
-      Bool.pick(U32, U32.is_eq(op, 1), swap_blocks(g, s1), invert_block(g, s1))),
+    Bool.pick(U32, U32.is_eq(op, 0), Op.mut_bit_flip32(g, s1),
+      Bool.pick(U32, U32.is_eq(op, 1), Op.mut_bits_swap_blocks(g, s1),
+                                       Op.mut_bits_invert_block(g, s1))),
     g)
 
 def reproduce(parent: SAGene, champ: SAGene, seed: U32) -> SAGene:
@@ -102,7 +88,7 @@ def reproduce(parent: SAGene, champ: SAGene, seed: U32) -> SAGene:
   SAGene{g_elt, r_elt, o_elt} = champ
   +s1 = R.step(seed); +s2 = R.step(s1); +s3 = R.step(s2); +s4 = R.step(s3)
 
-  +crossed_g = B.crossover_uniform(g_ind, g_elt, s1)
+  +crossed_g = Op.cross_bits_uniform(g_ind, g_elt, s1)
   +child_rate = Bool.pick(U32, U32.is_zero(U32.and(s2, 1)), r_ind, r_elt)
   +child_op   = Bool.pick(U32, U32.is_zero(U32.and(s2, 2)), o_ind, o_elt)
 

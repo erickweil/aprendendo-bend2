@@ -2,6 +2,7 @@ import Base
 import ./../ga.bend as GA
 import ./../utils/perm.bend as Perm
 import ./../utils/random.bend as R
+import ./../operators.bend as Op
 
 # ================================================================
 # CENÁRIO 6: PROBLEMA DAS 8-RAINHAS (N-QUEENS) COM MOTOR GENÉRICO
@@ -51,14 +52,15 @@ def shuffle_queens(+p: Perm.Perm8, +s: U32) -> Perm.Perm8:
 def init_queens(seed: U32) -> Perm.Perm8:
   shuffle_queens(Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, seed)
 
-def mutate_queens(+p: Perm.Perm8, +s: U32) -> Perm.Perm8:
-  +s1 = R.step(s); +s2 = R.step(s1)
-  Perm.Perm8.swap(p, U32.mod(s1, 8), U32.mod(s2, 8))
+# Mutação híbrida: 70% Swap aleatório + 30% Scramble de janela de 3 elementos
+# (escolha exclusiva por sorteio, via combinador higher-order)
+def mut_queens(p: Perm.Perm8, seed: U32) -> Perm.Perm8:
+  Op.combine_mutations(~Perm.Perm8, ~Op.mut_perm_random_swap, ~Op.mut_perm_scramble,
+                       70, p, seed)
 
+# Reprodução: Order Crossover (OX1) + mutação híbrida
 def reproduce(parent: Perm.Perm8, champ: Perm.Perm8, seed: U32) -> Perm.Perm8:
-  +s1 = R.step(seed); +s2 = R.step(s1)
-  +base = Bool.pick(Perm.Perm8, U32.is_zero(U32.and(s1, 1)), champ, parent)
-  mutate_queens(base, s2)
+  Op.pipe(~Perm.Perm8, ~Op.cross_perm_ox1, ~mut_queens, parent, champ, seed)
 
 def main_seed() -> U32:
   551122

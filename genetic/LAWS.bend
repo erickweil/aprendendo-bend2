@@ -7,9 +7,13 @@
 # ================================================================
 
 import Base
-import ./stats.bend as Stats
-import ./poptree.bend as Tree
-import ./island.bend as Island
+import ./utils/stats.bend as Stats
+import ./utils/poptree.bend as Tree
+import ./utils/island.bend as Island
+import ./utils/bits.bend as Bits
+import ./utils/perm.bend as Perm
+import ./utils/random.bend as R
+import ./operators.bend as Op
 
 # ----------------------------------------------------------------
 # PARTE 1: LEIS DE REDUÇÃO ESTATÍSTICA (PopStats)
@@ -131,3 +135,81 @@ law single_island_capacity:
   for +pop_depth: Nat
   for +val: U32
   {Island.total_pop_size(U32, Island.SingleIsland{Tree.gen_uniform(U32, pop_depth, val)}) == Tree.pow2(pop_depth) : Nat}
+
+# ----------------------------------------------------------------
+# PARTE 4: LEIS DOS COMBINADORES DE OPERADORES (operators.bend)
+# ----------------------------------------------------------------
+# Estas leis respondem formalmente à pergunta "os combinadores
+# higher-order custam alguma coisa?": elas afirmam que o pipeline
+# montado por combinadores é DEFINICIONALMENTE IGUAL ao código
+# escrito à mão. Se provadas por reflexividade ({==}), os dois
+# lados normalizam para o mesmo termo — a abstração desaparece
+# em tempo de compilação, e não apenas "roda igualmente rápido".
+
+# LEI 16: Pipeline de Reprodução Binário = Código Manual
+# O `Op.pipe` sobre crossover uniforme + flip de bit é exatamente o
+# corpo original escrito à mão do Cenário 1 (One-Max):
+#   s1 = step(seed); s2 = step(s1)
+#   mutate_bit(crossover_uniform(parent, champ, s1), s2)
+law pipe_bits_is_manual_code:
+  for +parent: U32
+  for +champ: U32
+  for +seed: U32
+  {Op.pipe(~U32, ~Op.cross_bits_uniform, ~Op.mut_bit_flip32, parent, champ, seed)
+   == Bits.mutate_bit(Bits.crossover_uniform(parent, champ, R.step(seed)), R.step(R.step(seed))) : U32}
+
+# LEI 17: Pipeline de Reprodução sobre Permutações = Composição Manual
+# O mesmo combinador, instanciado num genoma completamente diferente
+# (Perm8), continua sendo pura composição — a propriedade não depende
+# da representação do genoma.
+# Nota: instanciar esta lei com `cross_perm_ox1` também é verdadeiro, mas
+# normalizar o OX1 simbolicamente (8 níveis de recursão sobre uma permutação
+# não-concreta) faz o verificador explodir combinatorialmente. A validade do
+# OX1 é coberta pelo teste exaustivo em tests/operators_test.bend.
+law pipe_perm_is_manual_code:
+  for +parent: Perm.Perm8
+  for +champ: Perm.Perm8
+  for +seed: U32
+  {Op.pipe(~Perm.Perm8, ~Op.cross_perm_elite_bias, ~Op.mut_perm_neighbor_swap, parent, champ, seed)
+   == Op.mut_perm_neighbor_swap(Op.cross_perm_elite_bias(parent, champ, R.step(seed)), R.step(R.step(seed))) : Perm.Perm8}
+
+# LEI 18: Encadeamento de Mutações = Composição das Duas Mutações
+# `chain_mutations` (equivalente do `mutation_combine` original) aplica
+# ambos os operadores em sequência com sementes bifurcadas.
+law chain_mutations_is_composition:
+  for +g: U32
+  for +seed: U32
+  {Op.chain_mutations(~U32, ~Op.mut_bit_flip32, ~Op.mut_bits_invert_block, g, seed)
+   == Op.mut_bits_invert_block(Op.mut_bit_flip32(g, R.split.fst(seed)), R.split.snd(seed)) : U32}
+
+# LEI 19: Despacho Exclusivo de Mutação (ramo verdadeiro)
+# Nenhum trabalho do operador descartado é realizado: o `match` sobre
+# Bool escolhe um único ramo, e o outro nunca é construído.
+law branch_mut_true_selects_first:
+  for +g: U32
+  for +seed: U32
+  {Op.branch_mut(~U32, ~Op.mut_bit_flip32, ~Op.mut_bits_invert_block, True{}, g, seed)
+   == Op.mut_bit_flip32(g, seed) : U32}
+
+# LEI 20: Despacho Exclusivo de Mutação (ramo falso)
+law branch_mut_false_selects_second:
+  for +g: U32
+  for +seed: U32
+  {Op.branch_mut(~U32, ~Op.mut_bit_flip32, ~Op.mut_bits_invert_block, False{}, g, seed)
+   == Op.mut_bits_invert_block(g, seed) : U32}
+
+# LEI 21: Reprodução Clássica de Holland — sem crossover, o filho é o pai 1
+# intacto (nenhum alelo do pai 2 vaza para o filho).
+law branch_cross_false_clones_parent:
+  for +p1: Perm.Perm8
+  for +p2: Perm.Perm8
+  for +seed: U32
+  {Op.branch_cross(~Perm.Perm8, ~Op.cross_perm_ox1, False{}, p1, p2, seed) == p1 : Perm.Perm8}
+
+# LEI 22: Saturação do Order Crossover (OX1)
+# Se todos os 8 alelos já foram herdados na fatia do pai 1 (máscara
+# saturada = 255), a fase de preenchimento circular é a identidade:
+# nenhuma posição do filho é sobrescrita pelo pai 2.
+law ox1_fill_saturated_is_identity:
+  for +child: Perm.Perm8
+  {Op.ox1_fill(8n, Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, child, 255, 0, 0, 0) == child : Perm.Perm8}

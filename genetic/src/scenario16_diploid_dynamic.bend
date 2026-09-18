@@ -2,6 +2,7 @@ import Base
 import ./../ga.bend as GA
 import ./../utils/random.bend as R
 import ./../utils/bits.bend as B
+import ./../operators.bend as Op
 import ./../utils/stats.bend as S
 
 # ================================================================
@@ -61,17 +62,19 @@ def fertilize(+p1: Diploid, +p2: Diploid, +seed: U32) -> Diploid:
   +s0 = R.step(seed); +s1 = R.step(s0); +s2 = R.step(s1); +s3 = R.step(s2); +s4 = R.step(s3)
   +r0 = R.step(s4);   +r1 = R.step(r0); +r2 = R.step(r1)
 
-  # Crossover homólogo das fitas
-  +child_c1_raw = B.crossover_uniform(c1_1, c1_2, s0)
-  +child_c2_raw = B.crossover_uniform(c2_1, c2_2, s1)
-  +child_dom_raw = B.crossover_uniform(d1, d2, s2)
+  # Crossover homólogo das fitas (crossover uniforme da biblioteca)
+  +child_c1_raw = Op.cross_bits_uniform(c1_1, c1_2, s0)
+  +child_c2_raw = Op.cross_bits_uniform(c2_1, c2_2, s1)
+  +child_dom_raw = Op.cross_bits_uniform(d1, d2, s2)
 
-  # Mutação pontual
-  +child_c1 = Bool.pick(U32, R.chance(s3, 30), B.mutate_bit(child_c1_raw, r0), child_c1_raw)
-  +child_c2 = Bool.pick(U32, R.chance(s4, 30), B.mutate_bit(child_c2_raw, r1), child_c2_raw)
+  # Mutação pontual condicionada à taxa. `Op.branch_maybe_mut` é o despacho
+  # linear do combinador: só um dos ramos toca o genoma (match sobre Bool),
+  # em vez de materializar as duas alternativas como faz `Bool.pick`.
+  +child_c1 = Op.branch_maybe_mut(~U32, ~Op.mut_bit_flip32, R.chance(s3, 30), child_c1_raw, r0)
+  +child_c2 = Op.branch_maybe_mut(~U32, ~Op.mut_bit_flip32, R.chance(s4, 30), child_c2_raw, r1)
 
   # Mutação na dominância (chave de regulação epigenética)
-  +child_dom_mut = Bool.pick(U32, R.chance(r2, 40), B.mutate_bit(child_dom_raw, r2), child_dom_raw)
+  +child_dom_mut = Op.branch_maybe_mut(~U32, ~Op.mut_bit_flip32, R.chance(r2, 40), child_dom_raw, r2)
   +child_dom = Bool.pick(U32, R.chance(s2, 15), U32.not(child_dom_mut), child_dom_mut)
 
   make_diploid(child_c1, child_c2, child_dom)

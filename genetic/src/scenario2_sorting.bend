@@ -2,6 +2,7 @@ import Base
 import ./../ga.bend as GA
 import ./../utils/perm.bend as Perm
 import ./../utils/random.bend as R
+import ./../operators.bend as Op
 
 # ================================================================
 # CENÁRIO 2: ORDENAR NÚMEROS (SORTING) COM MOTOR GENÉTICO GENÉRICO
@@ -41,18 +42,11 @@ def shuffle(+p: Perm.Perm8, +s: U32) -> Perm.Perm8:
 def init_gene(seed: U32) -> Perm.Perm8:
   shuffle(Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, seed)
 
-# Mutação: troca duas posições
-def mutate(+p: Perm.Perm8, +s: U32) -> Perm.Perm8:
-  +s1 = R.step(s)
-  +s2 = R.step(s1)
-  Perm.Perm8.swap(p, U32.mod(s1, 8), U32.mod(s2, 8))
-
-# Reprodução guiada por elitismo
+# Reprodução: PMX (Partially Mapped Crossover) + Swap de vizinho.
+# O PMX preserva a sub-rota herdada do pai e resolve os conflitos por
+# mapeamento inverso de posições, fechando sobre permutações válidas.
 def reproduce(parent: Perm.Perm8, champ: Perm.Perm8, seed: U32) -> Perm.Perm8:
-  +s1 = R.step(seed)
-  +s2 = R.step(s1)
-  +base = Bool.pick(Perm.Perm8, U32.is_lt(U32.mod(s1, 10), 6), champ, parent)
-  mutate(base, s2)
+  Op.pipe(~Perm.Perm8, ~Op.cross_perm_pmx, ~Op.mut_perm_neighbor_swap, parent, champ, seed)
 
 def main() -> IO(Unit):
   +s0 = {12345678 : U32}

@@ -7,9 +7,13 @@
 # ================================================================
 
 import Base
-import ./stats.bend as Stats
-import ./poptree.bend as Tree
-import ./island.bend as Island
+import ./utils/stats.bend as Stats
+import ./utils/poptree.bend as Tree
+import ./utils/island.bend as Island
+import ./utils/bits.bend as Bits
+import ./utils/perm.bend as Perm
+import ./utils/random.bend as R
+import ./operators.bend as Op
 import ./LAWS.bend as Laws
 
 # ----------------------------------------------------------------
@@ -128,3 +132,42 @@ def Laws.archipelago_dimension(d, pop_depth, val):
 # PROVA DA LEI 15: Capacidade Populacional da Ilha Individual
 def Laws.single_island_capacity(pop_depth, val):
   Laws.gen_uniform_size(pop_depth, val)
+
+# ----------------------------------------------------------------
+# PROVAS DA PARTE 4: COMBINADORES DE OPERADORES (operators.bend)
+# ----------------------------------------------------------------
+# Todas as sete leis são provadas por REFLEXIVIDADE PURA ({==}).
+# Isso é o resultado mais forte possível sobre o custo da abstração:
+# o verificador normaliza os dois lados e obtém literalmente o mesmo
+# termo. Os parâmetros `~` são substituídos em tempo de compilação,
+# então não existe closure, ponteiro de função nem despacho dinâmico
+# no código gerado — é uma abstração de custo zero por construção,
+# não por otimização do compilador.
+
+# PROVA DA LEI 16: Pipeline Binário = Código Manual
+def Laws.pipe_bits_is_manual_code(parent, champ, seed):
+  {==}
+
+# PROVA DA LEI 17: Pipeline sobre Permutações = Composição Manual
+def Laws.pipe_perm_is_manual_code(parent, champ, seed):
+  {==}
+
+# PROVA DA LEI 18: Encadeamento de Mutações = Composição
+def Laws.chain_mutations_is_composition(g, seed):
+  {==}
+
+# PROVA DA LEI 19: Despacho Exclusivo (ramo verdadeiro)
+def Laws.branch_mut_true_selects_first(g, seed):
+  {==}
+
+# PROVA DA LEI 20: Despacho Exclusivo (ramo falso)
+def Laws.branch_mut_false_selects_second(g, seed):
+  {==}
+
+# PROVA DA LEI 21: Reprodução Clássica de Holland
+def Laws.branch_cross_false_clones_parent(p1, p2, seed):
+  {==}
+
+# PROVA DA LEI 22: Saturação do Order Crossover (Avaliação Simbólica)
+def Laws.ox1_fill_saturated_is_identity(child):
+  {==}
