@@ -73,15 +73,30 @@ def mutate_rate(+r: U32, +rnd: U32) -> U32:
 #   op 1 -> Op.mut_bits_swap_blocks  (troca de dois blocos de 8 bits)
 #   op 2 -> Op.mut_bits_invert_block (inversão de um bloco de 8 bits)
 
+# Despacho linear do operador auto-adaptado: com `Bool.pick` os três
+# operadores eram executados a cada reprodução e dois descartados.
+def adaptive_dispatch(should: Bool, is_flip: Bool, is_swap: Bool,
+                      +g: U32, +rnd: U32) -> U32:
+  match should:
+    case False{}:
+      g
+    case True{}:
+      match is_flip:
+        case True{}:
+          Op.mut_bit_flip32(g, rnd)
+        case False{}:
+          match is_swap:
+            case True{}:
+              Op.mut_bits_swap_blocks(g, rnd)
+            case False{}:
+              Op.mut_bits_invert_block(g, rnd)
+
 # Aplica a mutação genética usando os parâmetros auto-adaptados do próprio indivíduo
 def apply_adaptive_mutation(+g: U32, +rate: U32, +op: U32, +rnd: U32) -> U32:
-  +s1 = R.step(rnd); +s2 = R.step(s1)
-  +should_mutate = U32.is_lt(U32.mod(rnd, 10), rate)
-  Bool.pick(U32, should_mutate,
-    Bool.pick(U32, U32.is_eq(op, 0), Op.mut_bit_flip32(g, s1),
-      Bool.pick(U32, U32.is_eq(op, 1), Op.mut_bits_swap_blocks(g, s1),
-                                       Op.mut_bits_invert_block(g, s1))),
-    g)
+  +s1 = R.step(rnd)
+  +op = op
+  adaptive_dispatch(U32.is_lt(U32.mod(rnd, 10), rate),
+                    U32.is_eq(op, 0), U32.is_eq(op, 1), g, s1)
 
 def reproduce(parent: SAGene, champ: SAGene, seed: U32) -> SAGene:
   SAGene{g_ind, r_ind, o_ind} = parent

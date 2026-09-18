@@ -229,11 +229,19 @@ def crossover_tt(a: Timetable, b: Timetable) -> Timetable:
   TT{_, t2_b} = b
   TT{t1_a, t2_b}
 
+# Despacho linear: sem isso o `crossover_tt` era executado mesmo quando o
+# sorteio mandava herdar o pai intacto.
+def cross_or_keep(do_cross: Bool, +parent: Timetable, +champ: Timetable) -> Timetable:
+  match do_cross:
+    case True{}:
+      crossover_tt(parent, champ)
+    case False{}:
+      parent
+
 def reproduce(parent: Timetable, champ: Timetable, seed: U32) -> Timetable:
-  +parent = parent
   +s1 = R.step(seed)
   +s2 = R.step(s1)
-  +crossed = Bool.pick(Timetable, U32.is_zero(U32.and(s1, 1)), crossover_tt(parent, champ), parent)
+  +crossed = cross_or_keep(U32.is_zero(U32.and(s1, 1)), parent, champ)
   mutate_tt(crossed, s2)
 
 def Timetable.show(tt: Timetable) -> String:

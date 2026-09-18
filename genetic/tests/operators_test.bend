@@ -147,7 +147,9 @@ def sweep_comb(n: Nat, +s: U32, +acc: U32) -> U32:
 
 # Demonstração de que a inversão 2-opt é uma reversão completa do trecho
 def rev_demo(+lo: U32, +hi: U32) -> String:
-  Perm.Perm8.show(Op.perm_reverse_range(4n, Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, lo, hi))
+  +lo = lo
+  +hi = hi
+  Perm.Perm8.show(Op.perm_reverse_range(4n, U32.is_lt(lo, hi), Perm.P8{0, 1, 2, 3, 4, 5, 6, 7}, lo, hi))
 
 def verdict(+got: U32, +want: U32) -> String:
   U32.show(got) ++ " / " ++ U32.show(want) ++

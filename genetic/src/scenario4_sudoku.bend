@@ -275,17 +275,31 @@ def preencher_a_partir_de_vazio(+vazio: Sudoku9, +s: U32) -> Sudoku9:
 def init_gene(seed: U32) -> Sudoku9:
   preencher_a_partir_de_vazio(quadro_vazio(), seed)
 
+# Despacho linear da vizinhança: cada um dos três operadores reconstrói uma
+# grade 9x9 inteira. Como argumentos de `Bool.pick` as três grades eram
+# construídas a cada mutação e duas descartadas.
+def sudoku_neighborhood(is_rows: Bool, is_cols: Bool, +s: Sudoku9,
+                        +o1: U32, +o2: U32, +r: U32, +c: U32) -> Sudoku9:
+  match is_rows:
+    case True{}:
+      Sudoku9.swap_rows(s, o1, o2)
+    case False{}:
+      match is_cols:
+        case True{}:
+          Sudoku9.swap_cols(s, o1, o2)
+        case False{}:
+          Sudoku9.swap_cell(s, o1, r, c)
+
 def mutate_sudoku9(+s: Sudoku9, +rnd: U32) -> Sudoku9:
   +s1 = R.step(rnd); +s2 = R.step(s1); +s3 = R.step(s2); +s4 = R.step(s3)
+  +s3 = s3; +s4 = s4
   +mode = U32.mod(s1, 3)
+  +mode = mode
   +band = U32.mul(U32.mod(s2, 3), 3)
   +o1 = (band + U32.mod(s3, 3) : U32)
   +o2 = (band + U32.mod(s4, 3) : U32)
-  Bool.pick(Sudoku9, U32.is_eq(mode, 0),
-    Sudoku9.swap_rows(s, o1, o2),
-    Bool.pick(Sudoku9, U32.is_eq(mode, 1),
-      Sudoku9.swap_cols(s, o1, o2),
-      Sudoku9.swap_cell(s, o1, U32.mod(s3, 9), U32.mod(s4, 9))))
+  sudoku_neighborhood(U32.is_eq(mode, 0), U32.is_eq(mode, 1), s, o1, o2,
+                      U32.mod(s3, 9), U32.mod(s4, 9))
 
 def memetic_improve(+s: Sudoku9, +rnd: U32) -> Sudoku9:
   +cand = mutate_sudoku9(s, rnd)

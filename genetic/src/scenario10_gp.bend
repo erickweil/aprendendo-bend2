@@ -75,59 +75,130 @@ def fitness(e: Expr) -> U32:
   +penalty = (U32.mul(err, 50) + sz : U32)
   Bool.pick(U32, U32.is_lt(penalty, 1000), (1000 - penalty : U32), 0)
 
-def gen_expr(d: Nat, +seed: U32) -> Expr:
-  match d:
-    case 0n:
-      Bool.pick(Expr, U32.is_zero(U32.and(seed, 1)),
-        expr_var(),
-        expr_val((1 + U32.mod(R.step(seed), 4) : U32)))
-    case 1n+p:
+# ----------------------------------------------------------------
+# SELETORES LINEARES DE AST
+# ----------------------------------------------------------------
+# Passar `expr_add(a, b)` e `expr_mul(a, b)` como argumentos de um
+# `Bool.pick` faz o chamador construir OS DOIS nós. Estes seletores
+# recebem os ingredientes e escolhem com `match` sobre um parâmetro,
+# então apenas o nó vencedor é alocado.
+
+def leaf_or_var(as_val: Bool, +v: U32) -> Expr:
+  match as_val:
+    case True{}:
+      expr_val(v)
+    case False{}:
+      expr_var()
+
+def gen_node(is_branch: Bool, is_add: Bool, +a: Expr, +b: Expr,
+             as_val: Bool, +v: U32) -> Expr:
+  match is_branch:
+    case False{}:
+      leaf_or_var(as_val, v)
+    case True{}:
+      match is_add:
+        case True{}:
+          expr_add(a, b)
+        case False{}:
+          expr_mul(a, b)
+
+# `build` = False devolve uma folha barata em O(1). Isso torna a recursão
+# condicional sem recursão mútua (proibida no Bend): o pai chama os dois
+# filhos sempre, mas o ramo não escolhido custa uma folha em vez de uma
+# subárvore inteira. Antes, as 4 chamadas recursivas especulativas eram
+# construídas e 2 descartadas a cada nível.
+def gen_expr(d: Nat, build: Bool, +seed: U32) -> Expr:
+  match d build:
+    case 0n _:
+      +seed = seed
+      leaf_or_var(U32.is_ne(U32.and(seed, 1), 0), (1 + U32.mod(R.step(seed), 4) : U32))
+    case 1n+p False{}:
+      +seed = seed
+      leaf_or_var(U32.is_ne(U32.and(seed, 1), 0), (1 + U32.mod(R.step(seed), 4) : U32))
+    case 1n+p True{}:
       +p = p
       +s1 = R.step(seed); +s2 = R.step(s1); +s3 = R.step(s2)
+      +s2 = s2; +s3 = s3
       +mode = U32.mod(s1, 3)
-      Bool.pick(Expr, U32.is_eq(mode, 0),
-        expr_add(gen_expr(p, s2), gen_expr(p, s3)),
-        Bool.pick(Expr, U32.is_eq(mode, 1),
-          expr_mul(gen_expr(p, s2), gen_expr(p, s3)),
-          Bool.pick(Expr, U32.is_zero(U32.and(s2, 1)),
-            expr_var(),
-            expr_val((1 + U32.mod(s3, 4) : U32)))))
+      +mode = mode
+      +is_branch = U32.is_lt(mode, 2)
+      +is_branch = is_branch
+      +a = gen_expr(p, is_branch, s2)
+      +b = gen_expr(p, is_branch, s3)
+      gen_node(is_branch, U32.is_eq(mode, 0), a, b,
+               U32.is_ne(U32.and(s2, 1), 0), (1 + U32.mod(s3, 4) : U32))
 
 def init_expr(seed: U32) -> Expr:
-  gen_expr(2n, seed)
+  gen_expr(2n, True{}, seed)
 
-def mutate_expr(e: Expr, +rnd: U32) -> Expr:
-  match e:
-    case Var{}:
-      +s1 = R.step(rnd)
-      Bool.pick(Expr, U32.is_lt(U32.mod(rnd, 10), 3),
-        expr_val((1 + U32.mod(s1, 4) : U32)),
-        expr_var())
-    case Val{v}:
-      +s1 = R.step(rnd)
-      Bool.pick(Expr, U32.is_lt(U32.mod(rnd, 10), 4),
-        expr_var(),
-        expr_val((1 + U32.mod(s1, 4) : U32)))
-    case Add{+l, +r}:
+# Reconstrói o nó a partir dos dois filhos já resolvidos:
+#   is_swap -> troca o operador (Add vira Mul e vice-versa)
+#   is_drop -> colapsa o nó no filho esquerdo (controle de bloat)
+#   senão   -> mantém o operador
+def rebuild_add(is_swap: Bool, is_drop: Bool, +ml: Expr, +mr: Expr) -> Expr:
+  match is_swap:
+    case True{}:
+      expr_mul(ml, mr)
+    case False{}:
+      match is_drop:
+        case True{}:
+          ml
+        case False{}:
+          expr_add(ml, mr)
+
+def rebuild_mul(is_swap: Bool, is_drop: Bool, +ml: Expr, +mr: Expr) -> Expr:
+  match is_swap:
+    case True{}:
+      expr_add(ml, mr)
+    case False{}:
+      match is_drop:
+        case True{}:
+          ml
+        case False{}:
+          expr_mul(ml, mr)
+
+# `do_mut` = False devolve a expressão intacta em O(1). Com isso o nó pai
+# chama os dois filhos, mas só o filho sorteado paga uma descida recursiva:
+# antes as duas subárvores eram mutadas por completo e uma era descartada.
+def mutate_expr(e: Expr, do_mut: Bool, +rnd: U32) -> Expr:
+  match e do_mut:
+    case _ False{}:
+      e
+    case Var{} True{}:
+      +rnd = rnd
+      leaf_or_var(U32.is_lt(U32.mod(rnd, 10), 3), (1 + U32.mod(R.step(rnd), 4) : U32))
+    case Val{_} True{}:
+      +rnd = rnd
+      leaf_or_var(U32.is_ge(U32.mod(rnd, 10), 4), (1 + U32.mod(R.step(rnd), 4) : U32))
+    case Add{+l, +r} True{}:
       +s1 = R.step(rnd)
       +mode = U32.mod(rnd, 4)
-      Bool.pick(Expr, U32.is_eq(mode, 0),
-        expr_mul(l, r),
-        Bool.pick(Expr, U32.is_eq(mode, 1),
-          expr_add(mutate_expr(l, s1), r),
-          Bool.pick(Expr, U32.is_eq(mode, 2),
-            expr_add(l, mutate_expr(r, s1)),
-            l)))
-    case Mul{+l, +r}:
+      +mode = mode
+      +ml = mutate_expr(l, U32.is_eq(mode, 1), s1)
+      +mr = mutate_expr(r, U32.is_eq(mode, 2), s1)
+      rebuild_add(U32.is_eq(mode, 0), U32.is_eq(mode, 3), ml, mr)
+    case Mul{+l, +r} True{}:
       +s1 = R.step(rnd)
       +mode = U32.mod(rnd, 4)
-      Bool.pick(Expr, U32.is_eq(mode, 0),
-        expr_add(l, r),
-        Bool.pick(Expr, U32.is_eq(mode, 1),
-          expr_mul(mutate_expr(l, s1), r),
-          Bool.pick(Expr, U32.is_eq(mode, 2),
-            expr_mul(l, mutate_expr(r, s1)),
-            l)))
+      +mode = mode
+      +ml = mutate_expr(l, U32.is_eq(mode, 1), s1)
+      +mr = mutate_expr(r, U32.is_eq(mode, 2), s1)
+      rebuild_mul(U32.is_eq(mode, 0), U32.is_eq(mode, 3), ml, mr)
+
+# Enxerta a subárvore doadora `b` no lugar do filho esquerdo ou direito
+def graft_add(on_left: Bool, +l: Expr, +r: Expr, +b: Expr) -> Expr:
+  match on_left:
+    case True{}:
+      expr_add(b, r)
+    case False{}:
+      expr_add(l, b)
+
+def graft_mul(on_left: Bool, +l: Expr, +r: Expr, +b: Expr) -> Expr:
+  match on_left:
+    case True{}:
+      expr_mul(b, r)
+    case False{}:
+      expr_mul(l, b)
 
 def crossover_expr(a: Expr, +b: Expr, +rnd: U32) -> Expr:
   match a:
@@ -136,18 +207,14 @@ def crossover_expr(a: Expr, +b: Expr, +rnd: U32) -> Expr:
     case Val{_}:
       b
     case Add{+l, +r}:
-      Bool.pick(Expr, U32.is_zero(U32.and(rnd, 1)),
-        expr_add(b, r),
-        expr_add(l, b))
+      graft_add(U32.is_zero(U32.and(rnd, 1)), l, r, b)
     case Mul{+l, +r}:
-      Bool.pick(Expr, U32.is_zero(U32.and(rnd, 1)),
-        expr_mul(b, r),
-        expr_mul(l, b))
+      graft_mul(U32.is_zero(U32.and(rnd, 1)), l, r, b)
 
 def reproduce(parent: Expr, champ: Expr, seed: U32) -> Expr:
   +s1 = R.step(seed); +s2 = R.step(s1); +s3 = R.step(s2)
   +crossed = crossover_expr(parent, champ, s1)
-  +child = Bool.pick(Expr, U32.is_lt(U32.mod(s2, 10), 6), mutate_expr(crossed, s3), crossed)
+  +child = mutate_expr(crossed, U32.is_lt(U32.mod(s2, 10), 6), s3)
   +f_child = fitness(child)
   +f_base = fitness(crossed)
   Bool.pick(Expr, U32.is_ge(f_child, f_base), child, crossed)

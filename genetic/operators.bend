@@ -268,7 +268,9 @@ def ox1_fill(n: Nat, +p2: Perm.Perm8, +child: Perm.Perm8, +mask: U32,
       +free = U32.is_zero(U32.and(mask, B.bit_of(v)))
       +free = free
       +wpos = U32.mod((start + written : U32), 8)
-      +child2 = Bool.pick(Perm.Perm8, free, Perm.Perm8.set(child, wpos, v), child)
+      # `set_if` só aloca o registro do filho quando o alelo é aproveitado;
+      # o contador é escalar, então `Bool.pick` aqui não desperdiça nada.
+      +child2 = Perm.Perm8.set_if(free, child, wpos, v)
       +written2 = Bool.pick(U32, free, U32.inc(written), written)
       ox1_fill(q, p2, child2, mask, start, U32.inc(k), written2)
 
@@ -290,17 +292,35 @@ def cross_perm_ox1(p1: Perm.Perm8, p2: Perm.Perm8, seed: U32) -> Perm.Perm8:
 # --- Crossover PMX (Partially Mapped Crossover) ---
 
 # Resolve conflitos por mapeamento inverso: enquanto o alelo já
-# pertence à fatia herdada do pai 1, salta para p2[pos_em_p1(v)]
-def pmx_resolve(n: Nat, +p1: Perm.Perm8, +p2: Perm.Perm8, +v: U32, +mask: U32) -> U32:
-  match n:
-    case 0n:
+# pertence à fatia herdada do pai 1, salta para p2[pos_em_p1(v)].
+# A condição de conflito é um PARÂMETRO, calculado pelo chamador: assim o
+# `match` corta a recursão de fato. Passando-a como argumento de `Bool.pick`
+# a chamada recursiva era sempre executada e depois descartada, fixando o
+# custo em 8 níveis mesmo quando não havia conflito nenhum.
+def pmx_resolve(n: Nat, conflict: Bool, +p1: Perm.Perm8, +p2: Perm.Perm8,
+                +v: U32, +mask: U32) -> U32:
+  match n conflict:
+    case 0n _:
       v
-    case 1n+q:
-      +v = v
-      +free = U32.is_zero(U32.and(mask, B.bit_of(v)))
+    case 1n+q False{}:
+      v
+    case 1n+q True{}:
       +nv = Perm.Perm8.get(p2, find_index(p1, v))
-      +rec = pmx_resolve(q, p1, p2, nv, mask)
-      Bool.pick(U32, free, v, rec)
+      +nv = nv
+      pmx_resolve(q, U32.is_ne(U32.and(mask, B.bit_of(nv)), 0), p1, p2, nv, mask)
+
+# Posição fora da fatia: resolve o conflito e escreve. Posição dentro da
+# fatia: devolve o filho intocado sem resolver nada.
+def pmx_place(inside: Bool, +p1: Perm.Perm8, +p2: Perm.Perm8, child: Perm.Perm8,
+              +mask: U32, +i: U32) -> Perm.Perm8:
+  match inside:
+    case True{}:
+      child
+    case False{}:
+      +v0 = Perm.Perm8.get(p2, i)
+      +v0 = v0
+      +v = pmx_resolve(8n, U32.is_ne(U32.and(mask, B.bit_of(v0)), 0), p1, p2, v0, mask)
+      Perm.Perm8.set(child, i, v)
 
 def pmx_fill(n: Nat, +p1: Perm.Perm8, +p2: Perm.Perm8, +child: Perm.Perm8,
              +mask: U32, +i: U32, +lo: U32, +hi: U32) -> Perm.Perm8:
@@ -310,9 +330,7 @@ def pmx_fill(n: Nat, +p1: Perm.Perm8, +p2: Perm.Perm8, +child: Perm.Perm8,
     case 1n+q:
       +i = i
       +inside = Bool.and(U32.is_ge(i, lo), U32.is_le(i, hi))
-      +v0 = Perm.Perm8.get(p2, i)
-      +v = pmx_resolve(8n, p1, p2, v0, mask)
-      +child2 = Bool.pick(Perm.Perm8, inside, child, Perm.Perm8.set(child, i, v))
+      +child2 = pmx_place(inside, p1, p2, child, mask, i)
       pmx_fill(q, p1, p2, child2, mask, U32.inc(i), lo, hi)
 
 # Partially Mapped Crossover (PMX): preserva a sub-rota [lo, hi] do
@@ -367,18 +385,22 @@ def mut_perm_neighbor_swap(p: Perm.Perm8, seed: U32) -> Perm.Perm8:
   +j = U32.mod(U32.inc(i), 8)
   Perm.Perm8.swap(p, i, j)
 
-# Inverte in-place o trecho [lo, hi] (fuel = nº máximo de trocas)
-def perm_reverse_range(n: Nat, +p: Perm.Perm8, +lo: U32, +hi: U32) -> Perm.Perm8:
-  match n:
-    case 0n:
+# Inverte in-place o trecho [lo, hi] (fuel = nº máximo de trocas).
+# `cont` é parâmetro, calculado pelo chamador, para que o `match` realmente
+# interrompa a recursão. Como argumento de `Bool.pick` a recursão inteira era
+# executada e descartada: todo 2-opt custava os 4 níveis de troca.
+def perm_reverse_range(n: Nat, cont: Bool, +p: Perm.Perm8, +lo: U32, +hi: U32) -> Perm.Perm8:
+  match n cont:
+    case 0n _:
       p
-    case 1n+q:
-      +p = p
-      +cont = U32.is_lt(lo, hi)
-      +lo = lo
-      +hi = hi
-      +rec = perm_reverse_range(q, Perm.Perm8.swap(p, lo, hi), U32.inc(lo), (hi - 1 : U32))
-      Bool.pick(Perm.Perm8, cont, rec, p)
+    case 1n+q False{}:
+      p
+    case 1n+q True{}:
+      +lo2 = U32.inc(lo)
+      +hi2 = (hi - 1 : U32)
+      +lo2 = lo2
+      +hi2 = hi2
+      perm_reverse_range(q, U32.is_lt(lo2, hi2), Perm.Perm8.swap(p, lo, hi), lo2, hi2)
 
 # 2-Opt: inversão completa de uma subsequência do ciclo,
 # desatando cruzamentos de arestas em TSP
@@ -386,7 +408,9 @@ def mut_perm_reverse_segment(p: Perm.Perm8, seed: U32) -> Perm.Perm8:
   +seed = seed
   +lo = cut_lo(seed)
   +hi = cut_hi(seed)
-  perm_reverse_range(4n, p, lo, hi)
+  +lo = lo
+  +hi = hi
+  perm_reverse_range(4n, U32.is_lt(lo, hi), p, lo, hi)
 
 # Embaralha localmente uma janela de 3 elementos consecutivos
 def mut_perm_scramble(p: Perm.Perm8, seed: U32) -> Perm.Perm8:
@@ -399,11 +423,9 @@ def mut_perm_scramble(p: Perm.Perm8, seed: U32) -> Perm.Perm8:
   +a = i
   +b = U32.mod(U32.inc(i), 8)
   +c = U32.mod((i + 2 : U32), 8)
-  +q1 = Bool.pick(Perm.Perm8, R.chance(s1, 50), Perm.Perm8.swap(p, a, b), p)
-  +q1 = q1
-  +q2 = Bool.pick(Perm.Perm8, R.chance(s2, 50), Perm.Perm8.swap(q1, b, c), q1)
-  +q2 = q2
-  Bool.pick(Perm.Perm8, R.chance(R.step(s2), 50), Perm.Perm8.swap(q2, a, c), q2)
+  +q1 = Perm.Perm8.swap_if(R.chance(s1, 50), p, a, b)
+  +q2 = Perm.Perm8.swap_if(R.chance(s2, 50), q1, b, c)
+  Perm.Perm8.swap_if(R.chance(R.step(s2), 50), q2, a, c)
 
 # ----------------------------------------------------------------
 # SEÇÃO D: OPERADORES CONTÍNUOS (F32 / Vec4)
