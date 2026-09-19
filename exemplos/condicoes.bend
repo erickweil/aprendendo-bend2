@@ -1,9 +1,5 @@
 # Todo código deve importar Base
 import Base
-
-# Valor a ser usado no exemplo
-def valor() -> U32:
-  1
   
 # Função auxiliar padrão para retornar o valor baseado em um teste lógico
 # é necessária pois o match só pode ser utilizado em valores recebido em parâmetros,
@@ -25,8 +21,19 @@ def descrever(v: Nat) -> String:
     case 1n+p:
       "maior que zero"
 
-def main() -> IO(Unit):
-  +valor_u32 = valor()  
+def parse_u32(m: Maybe<&2, U32>, default: U32) -> U32:
+  match m:
+    case None{}: default
+    case Some{val}: val
+
+def get_arg_u32(args: List<String>, default: U32) -> U32:
+  match args:
+    case Nil{}: default
+    case Con{first, rest}:
+      parse_u32(U32.read(first), default)
+
+def run(args: List<String>) -> IO(Unit):
+  +valor_u32 = get_arg_u32(args, 1)
   +valor_nat = U32.to_nat(valor_u32)
   
   # Com o número Nat, é possível criar uma função que usa o match diretamente
@@ -41,4 +48,7 @@ def main() -> IO(Unit):
   msg = msg ++ pick(String, (valor_u32 > 0 : U32), "Maior que Zero", "Zero")
 
   IO.print(msg)
+
+def main() -> IO(Unit):
+  IO.bind(List<String>, Unit, IO.args(), run)
 

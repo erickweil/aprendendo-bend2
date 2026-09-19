@@ -30,6 +30,30 @@ def inverter(+s: String, acc: String) -> String:
     case SCon{head, tail}:
       inverter(tail, SCon{head, acc})
 
+
+# Char é Chr{code: U32}, então comparar caractere é comparar número
+def Char.eq(a: Char, b: Char) -> Bool:
+  match a b:
+    case Chr{x} Chr{y}:
+      U32.is_eq(x, y)
+
+def split.push(c: Char, partes: List<&2, String>) -> List<&2, String>:
+  match partes:
+    case Nil{}:
+      Con{SCon{c, SNil{}}, Nil{}}
+    case Con{h, t}:
+      Con{SCon{c, h}, t}
+
+# Recursivo primeiro, reconstrói na volta, para manter ordem
+def split(+s: String, +sep: Char) -> List<&2, String>:
+  match s:
+    case SNil{}:
+      Con{SNil{}, Nil{}}
+    case SCon{c, t}:
+      pick(List<&2, String>, Char.eq(c, sep),
+        Con{SNil{}, split(t, sep)},
+        split.push(c, split(t, sep)))
+
 def frase() -> String:
   "Subi no Ônibus Arara em Roma"
 
