@@ -106,13 +106,10 @@ def cross(ctx: Sort, a: List<&2, U32>, b: List<&2, U32>, seed: U32) -> List<&2, 
   +n = Sort.n(ctx)
   Op.cross_ox1(~U32, ~key, a, b, n, n, seed)
 
-# Troca aleatória seguida de troca de vizinhos, com a taxa por gene do motor
+# Troca aleatória + troca de vizinhos, cada uma com metade da taxa por gene
+# (mutation_combine, como no sorting.ts)
 def mutate(ctx: Sort, g: List<&2, U32>, rate: U32, seed: U32) -> List<&2, U32>:
-  +ctx = ctx
-  +n = Sort.n(ctx)
-  +rate = rate
-  +seed = seed
-  M.mut_neighbor(U32, M.mut_swap(~U32, g, n, rate, R.split.fst(seed)), n, rate, R.split.snd(seed))
+  M.combine(~U32, ~M.mut_swap(~U32), ~M.mut_neighbor(~U32), {0.5 : F32}, {0.5 : F32}, g, Sort.n(ctx), rate, seed)
 
 # ----------------------------------------------------------------
 # SAÍDA

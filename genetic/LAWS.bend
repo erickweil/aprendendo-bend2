@@ -65,58 +65,57 @@ law stats_leaf_sum:
   {Stats.PopStats.sum(Stats.leaf_stats(v)) == v : U32}
 
 # ----------------------------------------------------------------
-# PARTE 2: LEIS DOS COMBINADORES (operators.bend / mutations.bend)
+# PARTE 2: COMBINADORES E DESPACHO (mutations.bend / ga.bend)
 # ----------------------------------------------------------------
-# Estas leis respondem formalmente à pergunta "os combinadores de ordem
-# superior custam alguma coisa?": elas afirmam que o pipeline montado por
-# combinadores é DEFINICIONALMENTE IGUAL ao código escrito à mão. Provadas por
-# reflexividade ({==}), os dois lados normalizam para o mesmo termo — a
-# abstração desaparece em tempo de compilação.
-#
-# Operadores concretos sobre genoma `List<&2, U32>` de 8 genes, usados como
-# instância (as leis não quantificam sobre parâmetros `~`):
+# Estas leis respondem formalmente à pergunta "a abstração de ordem superior
+# custa alguma coisa?": elas afirmam que o código montado por templates é
+# DEFINICIONALMENTE IGUAL ao escrito à mão. Provadas por reflexividade ({==}),
+# os dois lados normalizam para o mesmo termo.
 
-def cross_u(a: List<&2, U32>, b: List<&2, U32>, s: U32) -> List<&2, U32>:
+# Instâncias concretas (as leis não quantificam sobre parâmetros `~`):
+def cross_u(ctx: U32, a: List<&2, U32>, b: List<&2, U32>, s: U32) -> List<&2, U32>:
   Op.cross_uniform(U32, a, b, s)
 
-def mut_n(g: List<&2, U32>, s: U32) -> List<&2, U32>:
-  M.mut_neighbor(U32, g, 8, R.per(1, 8), s)
+def mut_s(ctx: U32, g: List<&2, U32>, rate: U32, s: U32) -> List<&2, U32>:
+  M.mut_swap(~U32, g, ctx, rate, s)
 
-def bump(x: U32, s: U32) -> U32:
-  U32.inc(x)
-
-def mut_r(g: List<&2, U32>, s: U32) -> List<&2, U32>:
-  M.mut_replace(~U32, ~bump, g, 8, R.per(1, 8), s)
-
-# LEI 8: Pipeline de Reprodução = Código Manual
-# `Op.pipe` com cruzamento uniforme + troca de vizinhos é exatamente
-#   mut_n(cross_u(p, c, step(seed)), step(step(seed)))
-law pipe_is_manual_code:
-  for +p: List<&2, U32>
-  for +c: List<&2, U32>
+# LEI 8: mutation_combine = composição manual com a taxa dividida
+# `combine` com troca aleatória + troca de vizinhos (templates aninhados) é
+# exatamente os dois operadores em sequência, cada um com sua fração da taxa.
+law combine_is_manual_code:
+  for +l: List<&2, U32>
+  for +n: U32
+  for +rate: U32
   for +seed: U32
-  {Op.pipe(~List<&2, U32>, ~cross_u, ~mut_n, p, c, seed)
-   == mut_n(cross_u(p, c, R.step(seed)), R.step(R.step(seed))) : List<&2, U32>}
+  {M.combine(~U32, ~M.mut_swap(~U32), ~M.mut_neighbor(~U32), {0.5 : F32}, {0.5 : F32}, l, n, rate, seed)
+   == M.mut_neighbor(~U32, M.mut_swap(~U32, l, n, R.scale(rate, {0.5 : F32}), R.split.fst(seed)),
+                     n, R.scale(rate, {0.5 : F32}), R.split.snd(seed)) : List<&2, U32>}
 
-# LEI 9: Encadeamento de Mutações = Composição das Duas Mutações
-law chain_mutations_is_composition:
+# LEI 9: sem sorteio de cruzamento, o filho é o pai 1 (o cruzamento nem é
+# construído)
+law cross_maybe_false_clones:
+  for +ctx: U32
+  for +a: List<&2, U32>
+  for +b: List<&2, U32>
+  for +seed: U32
+  {GA.cross_maybe(~U32, ~List<&2, U32>, ~cross_u, False{}, ctx, a, b, seed) == a : List<&2, U32>}
+
+# LEI 10: com sorteio, o filho é exatamente o cruzamento do problema
+law cross_maybe_true_crosses:
+  for +ctx: U32
+  for +a: List<&2, U32>
+  for +b: List<&2, U32>
+  for +seed: U32
+  {GA.cross_maybe(~U32, ~List<&2, U32>, ~cross_u, True{}, ctx, a, b, seed)
+   == cross_u(ctx, a, b, seed) : List<&2, U32>}
+
+# LEI 11: sem sorteio de mutação, o genoma passa intacto
+law mutate_maybe_false_keeps:
+  for +ctx: U32
   for +g: List<&2, U32>
+  for +rate: U32
   for +seed: U32
-  {M.chain_mutations(~List<&2, U32>, ~mut_n, ~mut_r, g, seed)
-   == mut_r(mut_n(g, R.split.fst(seed)), R.split.snd(seed)) : List<&2, U32>}
-
-# LEI 10: Despacho Exclusivo de Mutação (ramo verdadeiro)
-# O `match` sobre Bool escolhe um único ramo; o outro nunca é construído.
-law branch_mut_true_selects_first:
-  for +g: List<&2, U32>
-  for +seed: U32
-  {M.branch_mut(~List<&2, U32>, ~mut_n, ~mut_r, True{}, g, seed) == mut_n(g, seed) : List<&2, U32>}
-
-# LEI 11: Despacho Exclusivo de Mutação (ramo falso)
-law branch_mut_false_selects_second:
-  for +g: List<&2, U32>
-  for +seed: U32
-  {M.branch_mut(~List<&2, U32>, ~mut_n, ~mut_r, False{}, g, seed) == mut_r(g, seed) : List<&2, U32>}
+  {GA.mutate_maybe(~U32, ~List<&2, U32>, ~mut_s, False{}, ctx, g, rate, seed) == g : List<&2, U32>}
 
 # ----------------------------------------------------------------
 # PARTE 3: LEIS DO MOTOR REAL (ga.bend)

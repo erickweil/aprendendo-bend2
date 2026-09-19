@@ -11,7 +11,7 @@ genetic/
 ├── ga.bend              # o motor: GAConfig, torneio, elitismo, estagnação,
 │                        # diversity_check, ilhas com migração em anel
 ├── operators.bend       # cruzamentos: 1 ponto, 2 pontos, uniforme, OX1
-├── mutations.bend       # mutações: substituição, troca, troca de vizinhos
+├── mutations.bend       # mutações: substituição, troca, vizinhos, combine
 ├── stats.bend           # estatísticas agregadas da população em O(log N)
 ├── LAWS.bend            # 14 leis formais
 ├── PROOF.bend           # as 14 provas construtivas
@@ -23,7 +23,7 @@ genetic/
     ├── onemax.bend      # genes Bool, qualquer N (100, 1K, 1M)
     ├── sorting.bend     # genoma-permutação: ordenar uma lista
     ├── tsp.bend         # genoma-permutação: caixeiro viajante
-    └── sudoku.bend      # genoma lista de linhas; 3 puzzles
+    └── sudoku.bend      # modelo do sudoku.ts; 3 puzzles + quadro vazio
 ```
 
 ## Como rodar
@@ -117,20 +117,37 @@ Todos genéricos sobre `G`, todos para qualquer tamanho, todos testados com
 
 | Rust | Bend 2 | observação |
 |---|---|---|
-| `crossover_1_point` | `Op.cross_1point` | copia o prefixo, compartilha a cauda |
-| `crossover_2_point` | `Op.cross_2point` | dois *splices*, cauda compartilhada |
+| `crossover_1_point` | `Op.cross_1point` | corte em [0, n); copia o prefixo, compartilha a cauda |
+| `crossover_2_point` | `Op.cross_2point` | cortes distintos; dois *splices*, cauda compartilhada |
 | `crossover_uniform` | `Op.cross_uniform` | |
 | `CrossoverOX1` | `Op.cross_ox1(~G, ~key, a, b, n, keys, seed)` | `~key` e `keys` são o `get_index` e o `possible_gene_values` do Rust; marcas num `Array` |
 | `mutation_replace` | `M.mut_replace(~G, ~gen, …)` | |
 | `mutation_random_swap` | `M.mut_swap(~G, …)` | via `Array`, O(n) |
-| `mutation_neighbor_swap` | `M.mut_neighbor` | |
-| `mutation_combine` | `M.chain_mutations` | |
-| `for_each_poisson` | `M.gap` | salto geométrico entre mutações |
-| `tournament_selection` | `GA.tournament` | sorteio descendo a árvore, O(log N) |
+| `mutation_neighbor_swap` | `M.mut_neighbor` | vizinha da esquerda ou direita, com volta, via `Array` |
+| `mutation_combine` | `M.combine(~G, ~ma, ~mb, fa, fb, …)` | cada operador com sua fração da taxa; aninhável |
+| `for_each_poisson` | `R.gap` | salto geométrico entre mutações |
+| `poisson_knuth_sample` | `R.poisson` | quantidade de mutações (usado no sudoku) |
+| `tournament_selection` | `GA.tournament` | por índice, O(log N) por sorteio; o 2º pai exclui o 1º |
 
-As mutações portam o `for_each_poisson`: sorteiam a **distância até a próxima
-mutação** em vez de um número aleatório por gene, e quando a próxima mutação
-cairia depois do fim, devolvem o resto da lista compartilhado.
+Todas as mutações têm a mesma assinatura final `(lista, n, taxa, semente)`,
+para que `combine` possa compô-las — `M.combine(~U32, ~M.mut_swap(~U32),
+~M.mut_neighbor(~U32), 0,5, 0,5, …)` é o `mutation_combine` do TSP do Rust
+(templates aninhados funcionam desde o bend 2.0.16). A substituição usa o salto
+geométrico do `for_each_poisson` e devolve a cauda compartilhada depois da
+última mutação.
+
+### Aleatoriedade
+
+`utils/random.bend` concentra o gerador e tudo sobre Poisson. O passo é
+xorshift32 com uma guarda no zero: a versão anterior tinha um **estado
+absorvente** (`step(0) = 0`), e para a semente 3783986154 o `split.snd` caía
+nele — dali em diante todo número daquele ramo era 0. Os `split.*` são fluxos
+com constantes distintas (antes `split.fst` era literalmente `step`). Para
+transformar semente em probabilidade ou índice, `mix` aplica meio `lowbias32`.
+Um hash completo por passo, no estilo SplitMix, foi medido: custa o dobro, e o
+gerador é chamado em quase toda operação. `R.hit`, `R.range`,
+`R.range_except`, `R.bool`, `R.unit`, `R.gap` e `R.poisson` são validados
+estatisticamente em `utils/random_test.bend`.
 
 **Taxas** são limiares sobre 2^32 (`R.per(num, den)`, `R.hit(seed, limiar)`),
 porque o `R.chance` de 1% não expressa uma taxa por gene de 1/N com N = 1 milhão.
@@ -177,6 +194,9 @@ de alguns MB por genoma o limite passa a ser a banda de memória, não o motor.
 ## O que não foi portado
 
 - **`CrossoverIPX`** (multiconjuntos, usado nos horários) — ainda não.
+- **`mutationShiftSwapOperator`** (TS) — ainda não.
+- **Exclusão por hash no torneio** (o Rust pula candidatos com o mesmo hash do
+  primeiro pai quando há diversity_check) — só a exclusão por índice foi portada.
 - **Dois filhos por cruzamento** — cada folha da população produz um filho.
 - **`f64` como aptidão** — aqui é `U32`, comparada milhões de vezes na redução
   em árvore; métricas contínuas entram invertidas e escaladas (veja `tsp.bend`).
@@ -194,27 +214,23 @@ cruzamento de 1 ponto com 90%, mutação com 90% e taxa por gene 1/N, torneio de
 rota ótima de pontos num círculo é o polígono convexo, de comprimento conhecido
 (≈ 3106): o exemplo é verificável, e o GA a encontra em 8/8 sementes testadas.
 
-**`sudoku.bend`** — adaptação do `sudoku.ts`. Cada linha guarda só os valores
-das células livres, como permutação dos dígitos que faltam: linhas corretas e
-dicas intactas por construção. Aptidão = dígitos distintos por coluna + por
-caixa (162 = resolvido). Configuração do teste do TS: torneio 10, 90%/90%,
-1/81 por gene, diversity_check.
+**`sudoku.bend`** — porte do `sudoku.ts`, no mesmo modelo: o genoma é o
+quadro inteiro (9 linhas de 9), cada linha começa como permutação de 1–9 com as
+dicas no lugar, e a aptidão conta os dígitos que aparecem exatamente uma vez em
+cada linha, coluna e caixa (243) mais +8 por dica mantida. O cruzamento faz, por
+linha, OX1 (50%) ou copia a linha de um dos pais — **e o OX1 pode mover as
+dicas**, que ficam presas só pelo bônus: é o caminho por estados inválidos que
+tira a busca do mínimo local. A mutação troca duas células livres da mesma
+linha; a quantidade de trocas é `R.poisson(81 × taxa)`, uma por quadro em média
+com a taxa 1/81. O puzzle 3 é o quadro vazio.
 
-| puzzle | resolvidos (12 sementes, até 2000 gerações) |
-|---|---|
-| 0 — fácil (30 dicas) | 9/12, em 40–480 gerações |
-| 1 — médio (32 dicas) | 12/12, em 20–40 gerações |
-| 2 — "difícil" (23 dicas) | 0/12 (para em 158–160) |
+Uma versão anterior travava as dicas por construção (o genoma guardava só as
+células livres). Era mais barata por geração, mas empacava em 158–160/162 no
+puzzle difícil.
 
-**Esta codificação é um passo atrás em relação ao TS, não uma melhoria.**
-Travar as dicas elimina justamente os caminhos por estados inválidos que
-permitem sair do mínimo local: nos experimentos com a versão TS, deixar o OX1
-mover as dicas (mantidas só por um bônus na aptidão) foi essencial. Outras duas
-lições da versão TS que ainda faltam aqui: mutação baixa, que em média faz uma
-única alteração no quadro inteiro; e o fato de um quadro VAZIO ser ordens de
-grandeza mais fácil de completar pelo GA do que um parcialmente preenchido.
-Os três puzzles, aliás, se resolvem inteiros por propagação simples de
-restrições — o "difícil" é difícil para o GA, não para o sudoku.
+A aptidão percorre o quadro uma vez só, com as 27 unidades num `Array` local
+(7 µs por avaliação; a primeira versão, acumulando colunas e caixas em listas,
+custava 30 µs).
 
 ## Leis formais
 

@@ -42,9 +42,7 @@ def len(-A: Data, l: List<&2, A>) -> U32:
 # aqui e entra como parâmetro.
 def nth.go(-A: Data, l: List<&2, A>, here: Bool, +i: U32, +dflt: A) -> A:
   match l here:
-    case Nil{} True{}:
-      dflt
-    case Nil{} False{}:
+    case Nil{} _:
       dflt
     case Con{h, t} True{}:
       h
@@ -57,9 +55,7 @@ def nth(-A: Data, l: List<&2, A>, +i: U32, +dflt: A) -> A:
 
 def set_at.go(-A: Data, l: List<&2, A>, here: Bool, +i: U32, x: A) -> List<&2, A>:
   match l here:
-    case Nil{} True{}:
-      Nil{}
-    case Nil{} False{}:
+    case Nil{} _:
       Nil{}
     case Con{h, t} True{}:
       Con{x, t}
@@ -72,11 +68,9 @@ def set_at(-A: Data, l: List<&2, A>, +i: U32, x: A) -> List<&2, A>:
 
 def take.go(-A: Data, l: List<&2, A>, stop: Bool, +k: U32) -> List<&2, A>:
   match l stop:
-    case Nil{} True{}:
+    case _ True{}:
       Nil{}
     case Nil{} False{}:
-      Nil{}
-    case Con{h, t} True{}:
       Nil{}
     case Con{h, t} False{}:
       Con{h, take.go(A, t, U32.is_eq(k, 1), U32.sub(k, 1))}
@@ -87,9 +81,7 @@ def take(-A: Data, l: List<&2, A>, +k: U32) -> List<&2, A>:
 
 def drop.go(-A: Data, l: List<&2, A>, stop: Bool, +k: U32) -> List<&2, A>:
   match l stop:
-    case Nil{} True{}:
-      Nil{}
-    case Nil{} False{}:
+    case Nil{} _:
       Nil{}
     case Con{h, t} True{}:
       Con{h, t}

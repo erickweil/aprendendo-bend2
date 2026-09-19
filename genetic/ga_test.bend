@@ -61,15 +61,15 @@ def elitism(+seed: U32) -> U32:
 # Taxas efetivas: com max_stag = 100 e 75 gerações paradas, excesso = 25 de
 # 50 → mutação x1,5 e torneio x0,5
 def eff_ok(e: GA.Eff) -> U32:
-  GA.Eff{ts, cr, mr, gr} = e
+  GA.Eff{ts, cr, mr, gr, np} = e
   (ok(U32.is_eq(U32.from_nat(ts), 5)) + ok(U32.is_eq(gr, 1500)) + ok(U32.is_eq(mr, 3000)) + ok(U32.is_eq(cr, 7)) : U32)
 
 def eff_base(e: GA.Eff) -> U32:
-  GA.Eff{ts, cr, mr, gr} = e
+  GA.Eff{ts, cr, mr, gr, np} = e
   (ok(U32.is_eq(U32.from_nat(ts), 10)) + ok(U32.is_eq(gr, 1000)) + ok(U32.is_eq(mr, 2000)) : U32)
 
 def eff_ts(e: GA.Eff) -> Nat:
-  GA.Eff{ts, _, _, _} = e
+  GA.Eff{ts, _, _, _, _} = e
   ts
 
 # Diversidade: uma população de 16 cópias do mesmo indivíduo. Com a checagem

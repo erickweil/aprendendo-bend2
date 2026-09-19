@@ -53,31 +53,24 @@ def Laws.stats_leaf_sum(v):
   {==}
 
 # ----------------------------------------------------------------
-# PROVAS DA PARTE 2: COMBINADORES DE OPERADORES (operators.bend)
+# PROVAS DA PARTE 2: COMBINADORES E DESPACHO
 # ----------------------------------------------------------------
-# As quatro leis desta parte são provadas por REFLEXIVIDADE PURA ({==}).
-# Isso é o resultado mais forte possível sobre o custo da abstração:
-# o verificador normaliza os dois lados e obtém literalmente o mesmo
-# termo. Os parâmetros `~` são substituídos em tempo de compilação,
-# então não existe closure, ponteiro de função nem despacho dinâmico
-# no código gerado — é uma abstração de custo zero por construção,
-# não por otimização do compilador.
+# Todas por reflexividade pura: os templates são substituídos em tempo de
+# compilação, então não há closure nem despacho dinâmico — os dois lados são
+# literalmente o mesmo termo.
 
-# PROVA DA LEI 8: Pipeline = Código Manual
-def Laws.pipe_is_manual_code(p, c, seed):
+def Laws.combine_is_manual_code(l, n, rate, seed):
   {==}
 
-# PROVA DA LEI 9: Encadeamento de Mutações = Composição
-def Laws.chain_mutations_is_composition(g, seed):
+def Laws.cross_maybe_false_clones(ctx, a, b, seed):
   {==}
 
-# PROVA DA LEI 10: Despacho Exclusivo (ramo verdadeiro)
-def Laws.branch_mut_true_selects_first(g, seed):
+def Laws.cross_maybe_true_crosses(ctx, a, b, seed):
   {==}
 
-# PROVA DA LEI 11: Despacho Exclusivo (ramo falso)
-def Laws.branch_mut_false_selects_second(g, seed):
+def Laws.mutate_maybe_false_keeps(ctx, g, rate, seed):
   {==}
+
 # ----------------------------------------------------------------
 # PROVAS DA PARTE 3: MOTOR REAL (ga.bend)
 # ----------------------------------------------------------------

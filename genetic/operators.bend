@@ -26,23 +26,14 @@ import ./utils/genes.bend as V
 # é alocado, e nenhum número aleatório é sorteado por gene.
 
 # Os `k` primeiros genes de `a` seguidos de `b` a partir da posição k.
-# Percorre os dois pais juntos só até o corte; o resto de `b` é devolvido
-# como está.
+# Percorre os dois pais juntos só até o corte; o resto de `b` volta como está.
 def splice.go(-G: Data, a: List<&2, G>, b: List<&2, G>, stop: Bool, +k: U32) -> List<&2, G>:
   match a b stop:
-    case Nil{} Nil{} True{}:
+    case _ Nil{} _:
       Nil{}
-    case Nil{} Nil{} False{}:
-      Nil{}
-    case Nil{} Con{y, ys} True{}:
+    case _ Con{y, ys} True{}:
       Con{y, ys}
     case Nil{} Con{y, ys} False{}:
-      Con{y, ys}
-    case Con{x, xs} Nil{} True{}:
-      Nil{}
-    case Con{x, xs} Nil{} False{}:
-      Nil{}
-    case Con{x, xs} Con{y, ys} True{}:
       Con{y, ys}
     case Con{x, xs} Con{y, ys} False{}:
       Con{x, splice.go(G, xs, ys, U32.is_eq(k, 1), (k - 1 : U32))}
@@ -50,47 +41,40 @@ def splice.go(-G: Data, a: List<&2, G>, b: List<&2, G>, stop: Bool, +k: U32) -> 
 def splice(-G: Data, a: List<&2, G>, b: List<&2, G>, +k: U32) -> List<&2, G>:
   splice.go(G, a, b, U32.is_zero(k), k)
 
-# Prefixo de A até um corte em [1, n-1], sufixo de B
+# Prefixo de A até um corte em [0, n) (random_range(0, len) do Rust; com corte
+# 0 o filho é B inteiro), sufixo de B
 def cross_1point(-G: Data, a: List<&2, G>, b: List<&2, G>, +n: U32, +seed: U32) -> List<&2, G>:
-  splice(G, a, b, (1 + U32.mod(seed, U32.max((n - 1 : U32), 1)) : U32))
+  splice(G, a, b, R.range(seed, n))
 
-# Dois cortes ordenados: A[0, lo) ++ B[lo, hi) ++ A[hi, n)
-# Montado como dois splices: primeiro B[0, hi) ++ A[hi, n), depois o prefixo
-# A[0, lo) sobre isso. A cauda A[hi, n) é compartilhada com o pai.
+# Dois cortes DISTINTOS e ordenados (como no Rust): A[0, lo) ++ B[lo, hi) ++
+# A[hi, n). Montado como dois splices: primeiro B[0, hi) ++ A[hi, n), depois o
+# prefixo A[0, lo) sobre isso. A cauda A[hi, n) é compartilhada com o pai.
 def cross_2point(-G: Data, +a: List<&2, G>, b: List<&2, G>, +n: U32, +seed: U32) -> List<&2, G>:
-  +c1 = U32.mod(seed, n)
-  +c2 = U32.mod(R.step(seed), n)
+  +c1 = R.range(seed, n)
+  +c2 = R.range_except(R.step(seed), n, c1)
   splice(G, a, splice(G, b, a, U32.max(c1, c2)), U32.min(c1, c2))
 
 # ----------------------------------------------------------------
 # CRUZAMENTO UNIFORME
 # ----------------------------------------------------------------
-# Cada posição vem de um pai ou do outro com 50% de chance. A escolha da
-# próxima posição é sorteada aqui e desce como PARÂMETRO (Armadilha 5).
+# Cada posição vem de um pai ou do outro com 50% de chance (random_bool). A
+# escolha da próxima posição é sorteada aqui e desce como PARÂMETRO.
 
 def uniform.go(-G: Data, a: List<&2, G>, b: List<&2, G>, from_a: Bool, +seed: U32) -> List<&2, G>:
   match a b from_a:
-    case Nil{} Nil{} True{}:
+    case Nil{} _ _:
       Nil{}
-    case Nil{} Nil{} False{}:
-      Nil{}
-    case Nil{} Con{y, ys} True{}:
-      Nil{}
-    case Nil{} Con{y, ys} False{}:
-      Nil{}
-    case Con{x, xs} Nil{} True{}:
-      Nil{}
-    case Con{x, xs} Nil{} False{}:
+    case _ Nil{} _:
       Nil{}
     case Con{x, xs} Con{y, ys} True{}:
       +ns = R.step(seed)
-      Con{x, uniform.go(G, xs, ys, U32.is_even(U32.shrn(ns, 16n)), ns)}
+      Con{x, uniform.go(G, xs, ys, R.bool(ns), ns)}
     case Con{x, xs} Con{y, ys} False{}:
       +ns = R.step(seed)
-      Con{y, uniform.go(G, xs, ys, U32.is_even(U32.shrn(ns, 16n)), ns)}
+      Con{y, uniform.go(G, xs, ys, R.bool(ns), ns)}
 
 def cross_uniform(-G: Data, a: List<&2, G>, b: List<&2, G>, +seed: U32) -> List<&2, G>:
-  uniform.go(G, a, b, U32.is_even(U32.shrn(seed, 16n)), seed)
+  uniform.go(G, a, b, R.bool(seed), seed)
 
 # ----------------------------------------------------------------
 # ORDER CROSSOVER (OX1) — para genomas que SÃO uma permutação
@@ -103,8 +87,8 @@ def cross_uniform(-G: Data, a: List<&2, G>, b: List<&2, G>, +seed: U32) -> List<
 # Como no Rust, o chamador fornece `~key: G -> U32`, que dá a cada gene um
 # índice único em [0, keys) — `keys` é o `possible_gene_values` do
 # `CrossoverOX1::new`. Pode ser maior que o comprimento `n`: numa linha de
-# sudoku com 5 células livres as chaves são os dígitos 1..9 (keys = 10). As marcas de "já copiado" ficam num `Array<U32>`
-# local — O(1) por consulta no nativo, e sem limite de tamanho (o Rust usa um
+# sudoku as chaves são os dígitos 1..9 (keys = 10). As marcas de "já copiado"
+# ficam num `Array<U32>` local — O(1) por consulta no nativo, e sem limite de tamanho (o Rust usa um
 # vetor de marcas com epoch; aqui o array é novo a cada cruzamento, então nem
 # o epoch é necessário).
 #
@@ -147,8 +131,9 @@ def unmarked(~G: Data, ~key: G -> U32, l: List<&2, G>, a: Array<U32>) -> List<&2
 
 def cross_ox1(~G: Data, ~key: G -> U32, a: List<&2, G>, b: List<&2, G>,
               +n: U32, +keys: U32, +seed: U32) -> List<&2, G>:
-  +c1 = U32.mod(seed, n)
-  +c2 = U32.mod(R.step(seed), n)
+  # dois cortes distintos, como no Rust (random_range_except)
+  +c1 = R.range(seed, n)
+  +c2 = R.range_except(R.step(seed), n, c1)
   +p1 = U32.min(c1, c2)
   +p2 = U32.max(c1, c2)
   +seg = V.take(G, V.drop(G, a, p1), ((p2 - p1 : U32) + 1 : U32))
@@ -156,29 +141,3 @@ def cross_ox1(~G: Data, ~key: G -> U32, a: List<&2, G>, b: List<&2, G>,
   marks = mark(~G, ~key, seg, Array.new(U32, V.depth_for(keys), 0))
   rest = unmarked(~G, ~key, V.rotate(G, b, start), marks)
   V.rotate(G, V.append(G, rest, seg), U32.mod((n - start : U32), n))
-
-# ----------------------------------------------------------------
-# COMBINADORES DE REPRODUÇÃO
-# ----------------------------------------------------------------
-# Taxas são limiares sobre 2^32 (veja `R.per`): `R.per(9, 10)` = 90%.
-
-# Despacho exclusivo entre cruzar e clonar o pai 1
-def branch_cross(~G: Type, ~cross: G -> G -> U32 -> G,
-                 cond: Bool, p1: G, p2: G, +seed: U32) -> G:
-  match cond:
-    case True{}:
-      cross(p1, p2, seed)
-    case False{}:
-      p1
-
-# Cruza com probabilidade `rate`; senão herda o pai 1 intacto (Holland)
-def crossover_or_clone(~G: Type, ~cross: G -> G -> U32 -> G,
-                       +rate: U32, p1: G, p2: G, +seed: U32) -> G:
-  branch_cross(~G, ~cross, R.hit(seed, rate), p1, p2, R.step(seed))
-
-# Pipeline canônico: cruzamento seguido de mutação, sementes independentes
-def pipe(~G: Type, ~cross: G -> G -> U32 -> G, ~mut: G -> U32 -> G,
-         p1: G, p2: G, +seed: U32) -> G:
-  +s1 = R.step(seed)
-  +s2 = R.step(s1)
-  mut(cross(p1, p2, s1), s2)

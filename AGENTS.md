@@ -249,16 +249,12 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 
 ---
 
-### 🔴 Armadilha 9: `split.fst` é literalmente `step`
-> **Conceito:** Em `utils/random.bend`, `split.fst(seed)` é definido como `step(seed)` — são a mesma função.
+### 🔴 Armadilha 9: Fluxos de semente que se sobrepõem
+> **Conceito:** Sem estado global, a aleatoriedade é uma semente passada adiante. Dois consumidores que avançam pela MESMA sequência de estados usam os mesmos números.
 
-* **O Erro:** usar `R.step(seed)` para avançar a semente de uma iteração cujo corpo já bifurca com `split.fst`/`split.snd`:
-  ```bend
-  +next_seed = R.step(seed)                     # ❌ == split.fst(seed)
-  breed_tree(..., seed, ...)                    #    o ramo esquerdo recebe split.fst(seed)
-  ```
-  A iteração seguinte reusa exatamente a sub-árvore de sementes do ramo esquerdo da anterior: metade do fluxo aleatório é reciclada a cada passo, silenciosamente.
-* **A Solução:** avance o laço externo por um caminho que os ramos não usam — `R.split.trd` / `R.split.fth` existem exatamente para isso.
+* **O Erro:** avançar um laço externo com `R.step(seed)` quando o corpo também consome `R.step(seed)` — a iteração seguinte começa exatamente onde a atual continua, e as duas se sobrepõem. Numa versão antiga de `utils/random.bend`, `split.fst` era literalmente `step`, o que tornava isso fácil de cometer sem perceber.
+* **Onde já mordeu:** no laço de gerações do motor (metade do fluxo aleatório reciclado), e duas vezes em testes estatísticos (Poisson com λ=10 e taxa de mutação saíam fora da faixa porque as amostras não eram independentes).
+* **A Solução:** avance o laço externo com um `split.*` que o corpo não usa (`R.split.trd` é o convencional aqui). Os `split.*` atuais usam constantes distintas e nunca coincidem com `step`.
 
 ---
 
@@ -270,12 +266,12 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 
 ---
 
-### 🔴 Armadilha 11: Semente Pequena Não É Aleatória
-> **Conceito:** O xorshift a partir de uma semente pequena produz números pequenos nos primeiros passos: `step(5) = 1351845`.
+### 🔴 Armadilha 11: Gerador sem estado absorvente e semente pequena
+> **Conceito:** xorshift32 tem um ponto fixo: `xorshift(0) = 0`. Se um fluxo chega a 0, todo número dali em diante é 0.
 
-* **O Erro:** usar a semente diretamente como número uniforme. `R.hit(seed, limiar)` com `seed = 5` acerta sempre; um salto geométrico calculado de `u = seed / 2^32` com `seed` pequeno pula quase a lista inteira. Medido: taxa de mutação 1/100000 saía em 62% do esperado.
-* **A Solução:** `R.mix(seed)` (multiplicação pela constante de Knuth, uma bijeção em U32) antes de transformar a semente em probabilidade. `R.hit` e o salto das mutações já fazem isso.
-* **E ao testar estatística,** não use `R.step(s)` para a semente da próxima execução se a execução atual também avança com `R.step` — as execuções reusam o mesmo fluxo deslocado em um passo e deixam de ser independentes (a Armadilha 9 de novo). Use `R.split.trd`.
+* **O bug que existiu:** `split.snd(s) = step(step(s) xor K)` dava exatamente 0 para `s = 3783986154`, e uma semente 0 vinda da linha de comando também prendia o fluxo. `R.step` agora desvia o 0 para uma constante; não há estado absorvente (testado em `utils/random_test.bend`).
+* **Semente pequena não é um número uniforme:** o xorshift a partir de uma semente pequena produz números pequenos nos primeiros passos. Nunca use a semente direto como probabilidade ou índice: `R.hit`, `R.range`, `R.unit` passam por `R.mix` (meio `lowbias32`, que também espalha os bits altos para os baixos que o `mod` usa).
+* **Custo medido:** um hash completo por passo custaria o dobro do xorshift, e o gerador é chamado em quase toda operação — por isso o hash só entra no `mix`.
 
 ---
 

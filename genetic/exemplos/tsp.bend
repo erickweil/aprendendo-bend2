@@ -127,11 +127,7 @@ def cross(ctx: Cities, a: List<&2, U32>, b: List<&2, U32>, seed: U32) -> List<&2
 
 # mutation_combine do Rust: cada operador recebe metade da taxa por gene
 def mutate(ctx: Cities, g: List<&2, U32>, rate: U32, seed: U32) -> List<&2, U32>:
-  +ctx = ctx
-  +n = Cities.n(ctx)
-  +half = U32.shrn(rate, 1n)
-  +seed = seed
-  M.mut_neighbor(U32, M.mut_swap(~U32, g, n, half, R.split.fst(seed)), n, half, R.split.snd(seed))
+  M.combine(~U32, ~M.mut_swap(~U32), ~M.mut_neighbor(~U32), {0.5 : F32}, {0.5 : F32}, g, Cities.n(ctx), rate, seed)
 
 # ----------------------------------------------------------------
 # EXECUÇÃO

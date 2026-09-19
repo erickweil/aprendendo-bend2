@@ -124,13 +124,6 @@ def Gen.bgene(-G: Data, g: Gen<G>) -> G:
   Gen{_, _, bg} = g
   bg
 
-# Troca o campeão registrado. Como o slot de elite da próxima geração recebe
-# o campeão, isto REINTRODUZ um indivíduo na população (usado pela migração
-# e pela reintrodução do melhor durante a estagnação).
-def Gen.with_champ(-G: Data, g: Gen<G>, +f: U32, bgene: G) -> Gen<G>:
-  Gen{p, _, _} = g
-  Gen{p, f, bgene}
-
 # Seletores do campeão: devolvem só aptidão e genoma, a população fica FORA
 # do ramo condicional. Assim `Gen.pop(merge_gen(..))` reduz sem abrir o
 # `Bool` — é o que torna a Lei 13 demonstrável.
@@ -175,18 +168,23 @@ def first_gen(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
 # ----------------------------------------------------------------
 # SELEÇÃO POR TORNEIO (tournament_selection)
 # ----------------------------------------------------------------
-# Sortear um indivíduo é descer d níveis escolhendo o lado por um bit
-# aleatório — O(log N), sem índice. `go_right` é o bit do nível atual,
+# A população é uma árvore perfeita de N = 2^d folhas, então o indivíduo de
+# índice `i` é achado descendo d níveis, um bit de `i` por nível (do menos
+# significativo): O(log N), sem vetor. `go_right` é o bit do nível atual,
 # calculado no passo anterior (match não escrutina valor computado).
+#
+# Como no Rust, o torneio trabalha com ÍNDICES: sorteia k índices, lê só a
+# aptidão de cada um e guarda o índice e a aptidão do melhor como escalares.
+# O segundo pai é sorteado excluindo o índice do primeiro (random_range_except).
+# A exclusão por hash igual, que o Rust faz quando há diversity_check, não foi
+# portada.
 
 def is_odd(+x: U32) -> Bool:
   Bool.not(U32.is_even(x))
 
 def sample.go(-G: Data, t: T.PopTree<Ind<G>>, go_right: Bool, +bits: U32) -> Ind<G>:
   match t go_right:
-    case T.Leaf{ind} True{}:
-      ind
-    case T.Leaf{ind} False{}:
+    case T.Leaf{ind} _:
       ind
     case T.Node{left, right} True{}:
       +rest = U32.shrn(bits, 1n)
@@ -195,22 +193,27 @@ def sample.go(-G: Data, t: T.PopTree<Ind<G>>, go_right: Bool, +bits: U32) -> Ind
       +rest = U32.shrn(bits, 1n)
       sample.go(G, left, is_odd(rest), rest)
 
-def sample(-G: Data, t: T.PopTree<Ind<G>>, +bits: U32) -> Ind<G>:
-  +bits = R.mix(bits)
-  sample.go(G, t, is_odd(bits), bits)
+# O indivíduo de índice `idx`
+def sample_at(-G: Data, t: T.PopTree<Ind<G>>, +idx: U32) -> Ind<G>:
+  sample.go(G, t, is_odd(idx), idx)
 
-def tournament.go(-G: Data, k: Nat, +pop: T.PopTree<Ind<G>>,
-                  +best: Ind<G>, +seed: U32) -> Ind<G>:
+def tournament.go(-G: Data, k: Nat, +pop: T.PopTree<Ind<G>>, +n: U32, +except: U32,
+                  +best_i: U32, +best_f: U32, +seed: U32) -> U32:
   match k:
     case 0n:
-      best
+      best_i
     case 1n+p:
-      +s = R.step(seed)
-      tournament.go(G, p, pop, pick_better(G, best, sample(G, pop, s)), R.step(s))
+      +i = R.range_except(seed, n, except)
+      +f = Ind.fit(G, sample_at(G, pop, i))
+      +better = U32.is_gt(f, best_f)
+      tournament.go(G, p, pop, n, except, pick_fit(better, i, best_i), pick_fit(better, f, best_f), R.step(seed))
 
-# Melhor de `k` sorteios (k = 1 degenera em seleção aleatória)
-def tournament(-G: Data, k: Nat, +pop: T.PopTree<Ind<G>>, +seed: U32) -> Ind<G>:
-  tournament.go(G, (k - 1n : Nat), pop, sample(G, pop, seed), R.step(seed))
+# Índice do melhor de `k` sorteios entre os N indivíduos, sem sortear
+# `except` (use `except >= n` para não excluir ninguém). Empates ficam com o
+# primeiro sorteado, como no Rust (`fitness > best_fit`).
+def tournament(-G: Data, k: Nat, +pop: T.PopTree<Ind<G>>, +n: U32, +except: U32, +seed: U32) -> U32:
+  +i = R.range_except(seed, n, except)
+  tournament.go(G, (k - 1n : Nat), pop, n, except, i, Ind.fit(G, sample_at(G, pop, i)), R.step(seed))
 
 # ----------------------------------------------------------------
 # REPRODUÇÃO (run_generation)
@@ -218,10 +221,10 @@ def tournament(-G: Data, k: Nat, +pop: T.PopTree<Ind<G>>, +seed: U32) -> Ind<G>:
 
 # Taxas efetivas de UMA geração, já com os multiplicadores de estagnação
 type Eff is Data:
-  Eff{tsize: Nat, cross_rate: U32, mut_rate: U32, gene_rate: U32}
+  Eff{tsize: Nat, cross_rate: U32, mut_rate: U32, gene_rate: U32, npop: U32}
 
 def Eff.gene_rate(e: Eff) -> U32:
-  Eff{_, _, _, g} = e
+  Eff{_, _, _, g, _} = e
   g
 
 def cross_maybe(~P: Data, ~G: Data, ~cross: P -> G -> G -> U32 -> G,
@@ -251,10 +254,11 @@ def breed_leaf(~P: Data, ~G: Data, ~fit: P -> G -> U32,
     case True{}:
       Gen{T.Leaf{Ind{champ_g, champ_f}}, champ_f, champ_g}
     case False{}:
-      Eff{ts, cr, mr, gr} = eff
+      Eff{ts, cr, mr, gr, +np} = eff
       +ts = ts
-      p1 = Ind.gene(G, tournament(G, ts, pop, R.split.fst(seed)))
-      p2 = Ind.gene(G, tournament(G, ts, pop, R.split.snd(seed)))
+      +i1 = tournament(G, ts, pop, np, np, R.split.fst(seed))
+      p1 = Ind.gene(G, sample_at(G, pop, i1))
+      p2 = Ind.gene(G, sample_at(G, pop, tournament(G, ts, pop, np, i1, R.split.snd(seed))))
       +s4 = R.split.fth(seed)
       +child = mutate_maybe(~P, ~G, ~mutate, R.hit(R.split.trd(seed), mr), ctx,
                  cross_maybe(~P, ~G, ~cross, R.hit(seed, cr), ctx, p1, p2, s4),
@@ -384,6 +388,30 @@ def diversify(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~mutate: P -> G -> U32 ->
       rebuild(G, d, dedup(~P, ~G, ~fit, ~mutate, ~hash, flatten(G, pop), ctx, rate, seed), Ind{bg, bf})
 
 # ----------------------------------------------------------------
+# INJEÇÃO (reintrodução do melhor e migração)
+# ----------------------------------------------------------------
+
+def replace_at.go(-G: Data, t: T.PopTree<Ind<G>>, go_right: Bool, +bits: U32, ind: Ind<G>) -> T.PopTree<Ind<G>>:
+  match t go_right:
+    case T.Leaf{_} _:
+      T.Leaf{ind}
+    case T.Node{left, right} True{}:
+      +rest = U32.shrn(bits, 1n)
+      T.Node{left, replace_at.go(G, right, is_odd(rest), rest, ind)}
+    case T.Node{left, right} False{}:
+      +rest = U32.shrn(bits, 1n)
+      T.Node{replace_at.go(G, left, is_odd(rest), rest, ind), right}
+
+# Põe `m` na folha de índice `idx`; se ele for melhor, também vira o campeão
+# (e portanto o elite da próxima geração)
+def inject(-G: Data, gen: Gen<G>, +m: Ind<G>, +idx: U32) -> Gen<G>:
+  match gen:
+    case Gen{p, +cf, cg}:
+      Ind{mg, +mf} = m
+      +better = U32.is_gt(mf, cf)
+      Gen{replace_at.go(G, p, is_odd(idx), idx, Ind{mg, mf}), pick_fit(better, mf, cf), pick_gene(G, better, mg, cg)}
+
+# ----------------------------------------------------------------
 # ILHA COM CONTROLE DE ESTAGNAÇÃO (o laço `run` do Rust)
 # ----------------------------------------------------------------
 # Estado de uma população entre gerações:
@@ -420,35 +448,31 @@ def Island.pop(-G: Data, isl: Island<G>) -> T.PopTree<Ind<G>>:
   Gen.pop(G, gen)
 
 # Multiplica uma taxa (limiar) por `m`, saturando em 2^32 - 1
-def scale(+rate: U32, +m: F32) -> U32:
-  F32.to_u32(F32.min((U32.to_f32(rate) * m : F32), {4294967040.0 : F32}))
-
 # Controle de estagnação adaptativo, como no Rust: depois de max_stag/2
 # gerações sem melhora, a mutação cresce até 2x (e além) e o torneio encolhe
 # até 2, para tentar escapar do platô.
 def effective(+cfg: Config, +stagnated: U32) -> Eff:
-  Config{cr, mr, gr, ts, ms, _, _, _} = cfg
+  Config{cr, mr, gr, ts, ms, _, pd, _} = cfg
   +half = U32.max(U32.div(ms, 2), 1)
   +excess = Bool.pick(U32, Bool.or(U32.is_zero(ms), U32.is_le(stagnated, half)), 0, (stagnated - half : U32))
   +ratio = (U32.to_f32(excess) / U32.to_f32(half) : F32)
   +mult = ({1.0 : F32} + ratio : F32)
   +tmult = ({1.0 : F32} - F32.min(ratio, {1.0 : F32}) : F32)
   +tsize = U32.max(F32.to_u32((U32.to_f32(ts) * tmult : F32)), 2)
-  Eff{U32.to_nat(tsize), cr, scale(mr, mult), scale(gr, mult)}
+  Eff{U32.to_nat(tsize), cr, R.scale(mr, mult), R.scale(gr, mult), U32.shln(1, U32.to_nat(pd))}
 
 # Depois de uma geração sem melhora. `reset` = passou de max_stag gerações:
 # reinicia a população (o melhor já encontrado continua guardado);
-# `reintro` = exatamente max_stag/2: reintroduz o melhor na população.
+# `reintro` = exatamente max_stag/2: reintroduz o melhor numa posição
+# aleatória da população, como no Rust.
 def stagnate(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
              reset: Bool, reintro: Bool, gen: Gen<G>, +ctx: P, +cfg: Config,
              +bf: U32, +bg: G, +ss: U32, +sf: U32, +g: U32, +seed: U32) -> Island<G>:
   match reset reintro:
-    case True{} True{}:
-      Island{first_gen(~P, ~G, ~init, ~fit, Config.pop_d(cfg), ctx, seed), bf, bg, g, 0, U32.inc(g)}
-    case True{} False{}:
+    case True{} _:
       Island{first_gen(~P, ~G, ~init, ~fit, Config.pop_d(cfg), ctx, seed), bf, bg, g, 0, U32.inc(g)}
     case False{} True{}:
-      Island{Gen.with_champ(G, gen, bf, bg), bf, bg, ss, sf, U32.inc(g)}
+      Island{inject(G, gen, Ind{bg, bf}, R.mix(seed)), bf, bg, ss, sf, U32.inc(g)}
     case False{} False{}:
       Island{gen, bf, bg, ss, sf, U32.inc(g)}
 
@@ -476,7 +500,7 @@ def island_step(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~
       +eff = effective(cfg, (g - ss : U32))
       +gen1 = next_gen(~P, ~G, ~fit, ~cross, ~mutate, gen, ctx, eff, seed)
       +gen2 = diversify(~P, ~G, ~fit, ~mutate, ~hash, Config.diversity(cfg), gen1, Config.pop_d(cfg),
-                        ctx, scale(Eff.gene_rate(eff), {4.0 : F32}), R.split.fth(seed))
+                        ctx, R.scale(Eff.gene_rate(eff), {4.0 : F32}), R.split.fth(seed))
       +cur = Gen.bfit(G, gen2)
       +better = U32.is_gt(cur, bf)
       after_gen(~P, ~G, ~init, ~fit, U32.is_gt(cur, sf), gen2, ctx, cfg, cur,
@@ -492,11 +516,9 @@ def island_loop(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~
                 ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
                 k: Nat, isl: Island<G>, done: Bool, +ctx: P, +cfg: Config, +seed: U32) -> Island<G>:
   match k done:
-    case 0n True{}:
+    case _ True{}:
       isl
     case 0n False{}:
-      isl
-    case 1n+p True{}:
       isl
     case 1n+p False{}:
       +isl2 = island_step(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, isl, ctx, cfg, seed)
@@ -589,21 +611,6 @@ def nth_ind(-G: Data, l: List<&2, Ind<G>>, k: Nat, dflt: Ind<G>) -> Ind<G>:
     case Con{h, t} 1n+p:
       nth_ind(G, t, p, dflt)
 
-def replace_last(-G: Data, t: T.PopTree<Ind<G>>, ind: Ind<G>) -> T.PopTree<Ind<G>>:
-  match t:
-    case T.Leaf{_}:
-      T.Leaf{ind}
-    case T.Node{left, right}:
-      T.Node{left, replace_last(G, right, ind)}
-
-# Põe o migrante na população; se ele for melhor, também vira o campeão
-def inject(-G: Data, gen: Gen<G>, +m: Ind<G>) -> Gen<G>:
-  match gen:
-    case Gen{p, +cf, cg}:
-      Ind{mg, +mf} = m
-      +better = U32.is_gt(mf, cf)
-      Gen{replace_last(G, p, Ind{mg, mf}), pick_fit(better, mf, cf), pick_gene(G, better, mg, cg)}
-
 def migrate_ring(-G: Data, arch: ArchTree<G>, +bests: List<&2, Ind<G>>,
                  +k: U32, +i: U32, +size: U32) -> ArchTree<G>:
   match arch:
@@ -611,7 +618,7 @@ def migrate_ring(-G: Data, arch: ArchTree<G>, +bests: List<&2, Ind<G>>,
       Island{gen, +bf, +bg, ss, sf, g} = isl
       +m = nth_ind(G, bests, U32.to_nat(U32.mod((i + k - 1 : U32), k)), Ind{bg, bf})
       +better = U32.is_gt(Ind.fit(G, m), bf)
-      SingleIsland{Island{inject(G, gen, m), pick_fit(better, Ind.fit(G, m), bf),
+      SingleIsland{Island{inject(G, gen, m, R.MAX()), pick_fit(better, Ind.fit(G, m), bf),
                           pick_gene(G, better, Ind.gene(G, m), bg), ss, sf, g}}
     case ArchBranch{left, right}:
       +half = U32.shrn(size, 1n)
@@ -631,11 +638,9 @@ def run_archipelago.go(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G ->
                        epochs: Nat, arch: ArchTree<G>, done: Bool, +e: Nat, +ctx: P, +cfg: Config,
                        +seed: U32) -> ArchTree<G>:
   match epochs done:
-    case 0n True{}:
+    case _ True{}:
       arch
     case 0n False{}:
-      arch
-    case 1n+p True{}:
       arch
     case 1n+p False{}:
       +evolved = evolve_archipelago(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, arch, e, ctx, cfg, seed)
