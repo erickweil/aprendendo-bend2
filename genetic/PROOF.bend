@@ -85,9 +85,9 @@ def Laws.branch_mut_false_selects_second(g, seed):
 # PROVA DA LEI 12: Conservação de Ilhas na Migração (Indução Estrutural)
 def Laws.arch_migration_preserves_islands(arch, champ):
   match arch:
-    case GA.SingleIsland{gen}:
-      match gen champ:
-        case GA.Gen{pop, bf, bg} GA.Ind{cg, cf}:
+    case GA.SingleIsland{isl}:
+      match isl champ:
+        case GA.Island{gen, bf, bg, ss, sf, g} GA.Ind{cg, cf}:
           {==}
     case GA.ArchBranch{left, right}:
       %Laws.arch_migration_preserves_islands(left, champ) : {Nat.add(GA.arch_island_count(U32, GA.migrate_champion(U32, left, champ)), GA.arch_island_count(U32, GA.migrate_champion(U32, right, champ))) == Nat.add(_, GA.arch_island_count(U32, right)) : Nat}
