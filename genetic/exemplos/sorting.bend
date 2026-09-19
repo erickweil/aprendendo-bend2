@@ -98,8 +98,13 @@ def fitness(ctx: Sort, gene: List<&2, U32>) -> U32:
 def key(g: U32) -> U32:
   g
 
+def hash(ctx: Sort, g: List<&2, U32>) -> U32:
+  V.hash_list(~U32, ~key, g, 7)
+
 def cross(ctx: Sort, a: List<&2, U32>, b: List<&2, U32>, seed: U32) -> List<&2, U32>:
-  Op.cross_ox1(~U32, ~key, a, b, Sort.n(ctx), seed)
+  +ctx = ctx
+  +n = Sort.n(ctx)
+  Op.cross_ox1(~U32, ~key, a, b, n, n, seed)
 
 # Troca aleatória seguida de troca de vizinhos, com a taxa por gene do motor
 def mutate(ctx: Sort, g: List<&2, U32>, rate: U32, seed: U32) -> List<&2, U32>:
@@ -131,10 +136,10 @@ def run(args: List<String>) -> IO(Unit):
   +maxf = max_fitness(n)
   # 90% cruzamento, 90% mutação, 1/N por gene, torneio de 4, reinício após
   # 200 gerações sem melhora; 64 indivíduos; para ao ordenar
-  +cfg = GA.config(R.per(9, 10), R.per(9, 10), R.per(1, n), 4, 200, maxf, 6)
+  +cfg = GA.config(R.per(9, 10), R.per(9, 10), R.per(1, n), 4, 200, maxf, 6, 0)
   +isl = GA.new_island(~Sort, ~List<&2, U32>, ~init_gene, ~fitness, ctx, cfg, s0)
   +f0 = GA.Island.best_f(List<&2, U32>, isl)
-  +fin = GA.run_island(~Sort, ~List<&2, U32>, ~init_gene, ~fitness, ~cross, ~mutate, 5000n, isl, ctx, cfg, R.step(s0))
+  +fin = GA.run_island(~Sort, ~List<&2, U32>, ~init_gene, ~fitness, ~hash, ~cross, ~mutate, 5000n, isl, ctx, cfg, R.step(s0))
   +best = GA.Island.best(List<&2, U32>, fin)
   +ff = GA.Ind.fit(List<&2, U32>, best)
   +gene = GA.Ind.gene(List<&2, U32>, best)

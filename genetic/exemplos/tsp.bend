@@ -117,8 +117,13 @@ def fit_to_dist(+f: U32) -> U32:
 def key(g: U32) -> U32:
   g
 
+def hash(ctx: Cities, g: List<&2, U32>) -> U32:
+  V.hash_list(~U32, ~key, g, 7)
+
 def cross(ctx: Cities, a: List<&2, U32>, b: List<&2, U32>, seed: U32) -> List<&2, U32>:
-  Op.cross_ox1(~U32, ~key, a, b, Cities.n(ctx), seed)
+  +ctx = ctx
+  +n = Cities.n(ctx)
+  Op.cross_ox1(~U32, ~key, a, b, n, n, seed)
 
 # mutation_combine do Rust: cada operador recebe metade da taxa por gene
 def mutate(ctx: Cities, g: List<&2, U32>, rate: U32, seed: U32) -> List<&2, U32>:
@@ -167,7 +172,7 @@ def report(k: Nat, arch: GA.ArchTree<List<&2, U32>>, done: Bool, +gens: U32,
     case 1n+p True{}:
       finish(ctx, arch, gens)
     case 1n+p False{}:
-      +next = GA.run_archipelago(~Cities, ~List<&2, U32>, ~init_gene, ~fitness, ~cross, ~mutate, 1n, arch, 10n, ctx, cfg, seed)
+      +next = GA.run_archipelago(~Cities, ~List<&2, U32>, ~init_gene, ~fitness, ~hash, ~cross, ~mutate, 1n, arch, 10n, ctx, cfg, seed)
       +now = (gens + 10 : U32)
       IO.bind(Unit, Unit,
         IO.print("  geração " ++ U32.show(now) ++ ": distância " ++ U32.show(dist_of(next))),
@@ -184,7 +189,7 @@ def run(args: List<String>) -> IO(Unit):
   +opt = Cities.optimal(ctx)
   # para ao atingir o ótimo (se conhecido); 4 ilhas x 32 indivíduos
   +max_fit = Bool.pick(U32, U32.is_zero(opt), 0, (BASE() - (opt * 10 : U32) : U32))
-  +cfg = GA.config(R.per(9, 10), R.per(9, 10), R.per(1, n), 5, 300, max_fit, 5)
+  +cfg = GA.config(R.per(9, 10), R.per(9, 10), R.per(1, n), 5, 300, max_fit, 5, 0)
   +a0 = GA.gen_archipelago(~Cities, ~List<&2, U32>, ~init_gene, ~fitness, 2n, ctx, cfg, s0)
   IO.bind(Unit, Unit,
     IO.print(

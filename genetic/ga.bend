@@ -2,6 +2,7 @@ import Base
 import ./../utils/random.bend as R
 import ./utils/poptree.bend as T
 import ./stats.bend as S
+import ./utils/genes.bend as V
 
 # ================================================================
 # BEND 2 GENERIC GENETIC ALGORITHM ENGINE (ga.bend)
@@ -25,8 +26,8 @@ import ./stats.bend as S
 # adaptativo e parada ao atingir a aptidão máxima.
 #
 # A população é uma árvore binária de 2^d indivíduos (fork-join) e o
-# paralelismo vem do ARQUIPÉLAGO: ilhas independentes evoluem em paralelo e o
-# campeão global migra entre elas a cada época. Torneio sobre uma população
+# paralelismo vem do ARQUIPÉLAGO: ilhas independentes evoluem em paralelo e,
+# a cada época, o melhor de cada ilha migra para a vizinha (anel). Torneio sobre uma população
 # compartilhada entre tarefas não escala na HVM (veja o README).
 #
 # Parâmetros template `~` vêm SEMPRE antes dos demais, com os tipos primeiro:
@@ -71,25 +72,30 @@ def population_stats(-G: Data, +tree: T.PopTree<Ind<G>>) -> S.PopStats:
 #   max_stag   : gerações sem melhora antes de reiniciar (0 = sem controle)
 #   max_fit    : aptidão que encerra a busca (0 = nenhuma)
 #   pop_d      : profundidade da população de cada ilha (2^pop_d indivíduos)
+#   diversity  : 1 = diversity_check (sem indivíduos idênticos na ilha)
 type Config is Data:
   Config{cross_rate: U32, mut_rate: U32, gene_rate: U32, tsize: U32,
-         max_stag: U32, max_fit: U32, pop_d: U32}
+         max_stag: U32, max_fit: U32, pop_d: U32, diversity: U32}
 
 def config(+cross_rate: U32, +mut_rate: U32, +gene_rate: U32, +tsize: U32,
-           +max_stag: U32, +max_fit: U32, +pop_d: U32) -> Config:
-  Config{cross_rate, mut_rate, gene_rate, tsize, max_stag, max_fit, pop_d}
+           +max_stag: U32, +max_fit: U32, +pop_d: U32, +diversity: U32) -> Config:
+  Config{cross_rate, mut_rate, gene_rate, tsize, max_stag, max_fit, pop_d, diversity}
 
 def Config.pop_d(c: Config) -> Nat:
-  Config{_, _, _, _, _, _, d} = c
+  Config{_, _, _, _, _, _, d, _} = c
   U32.to_nat(d)
 
 def Config.max_stag(c: Config) -> U32:
-  Config{_, _, _, _, m, _, _} = c
+  Config{_, _, _, _, m, _, _, _} = c
   m
 
 def Config.max_fit(c: Config) -> U32:
-  Config{_, _, _, _, _, m, _} = c
+  Config{_, _, _, _, _, m, _, _} = c
   m
+
+def Config.diversity(c: Config) -> Bool:
+  Config{_, _, _, _, _, _, _, d} = c
+  Bool.not(U32.is_zero(d))
 
 # ----------------------------------------------------------------
 # GERAÇÃO: população + campeão descoberto na mesma travessia
@@ -214,6 +220,10 @@ def tournament(-G: Data, k: Nat, +pop: T.PopTree<Ind<G>>, +seed: U32) -> Ind<G>:
 type Eff is Data:
   Eff{tsize: Nat, cross_rate: U32, mut_rate: U32, gene_rate: U32}
 
+def Eff.gene_rate(e: Eff) -> U32:
+  Eff{_, _, _, g} = e
+  g
+
 def cross_maybe(~P: Data, ~G: Data, ~cross: P -> G -> G -> U32 -> G,
                 hit: Bool, +ctx: P, p1: G, p2: G, +seed: U32) -> G:
   match hit:
@@ -273,6 +283,107 @@ def next_gen(~P: Data, ~G: Data, ~fit: P -> G -> U32,
       breed(~P, ~G, ~fit, ~cross, ~mutate, tree, True{}, ctx, seed, cf, cg, tree, eff)
 
 # ----------------------------------------------------------------
+# DIVERSIDADE (diversity_check)
+# ----------------------------------------------------------------
+# No Rust, ao criar um filho cujo hash já existe na nova geração, o motor
+# tenta outros pais (até 3 vezes) e, se ainda repetir, muta de novo. Lá há um
+# `HashSet` compartilhado sendo escrito durante a reprodução — o que tarefas
+# paralelas não podem ter.
+#
+# Aqui a verificação é uma passada DEPOIS da reprodução, sequencial dentro da
+# ilha (as ilhas continuam em paralelo): a população é percorrida na ordem das
+# folhas, cada hash é marcado num conjunto de bits num `Array` local, e quem
+# repetir um hash já visto é mutado de novo (com 4x a taxa por gene, para
+# compensar a falta das novas tentativas com outros pais). O elite é o
+# primeiro da ordem, então nunca é tocado.
+#
+# O conjunto tem 2^16 bits: uma colisão entre hashes diferentes (chance
+# ~N/65536) só causa uma mutação a mais — inofensiva.
+
+def flatten(-G: Data, t: T.PopTree<Ind<G>>) -> List<&2, Ind<G>>:
+  match t:
+    case T.Leaf{ind}:
+      Con{ind, Nil{}}
+    case T.Node{left, right}:
+      l r = flatten(G, left) flatten(G, right)
+      List.append(&2, Ind<G>, l, r)
+
+def first_ind(-G: Data, l: List<&2, Ind<G>>, dflt: Ind<G>) -> Ind<G>:
+  match l:
+    case Nil{}:
+      dflt
+    case Con{h, t}:
+      h
+
+def leaf_of(-G: Data, ind: Ind<G>) -> Gen<G>:
+  Ind{+g, +f} = ind
+  Gen{T.Leaf{Ind{g, f}}, f, g}
+
+# Reconstrói uma geração de 2^d indivíduos a partir da lista em ordem,
+# recalculando o campeão
+def rebuild(-G: Data, d: Nat, +l: List<&2, Ind<G>>, +dflt: Ind<G>) -> Gen<G>:
+  match d:
+    case 0n:
+      leaf_of(G, first_ind(G, l, dflt))
+    case 1n+ +p:
+      +half = U32.shln(1, p)
+      gl gr = rebuild(G, p, V.take(Ind<G>, l, half), dflt) rebuild(G, p, V.drop(Ind<G>, l, half), dflt)
+      merge_gen(G, gl, gr)
+
+def word_of(+h: U32) -> U32:
+  U32.shrn(U32.and(h, 65535), 5n)
+
+def bit_in(+h: U32) -> U32:
+  U32.shln(1, U32.to_nat(U32.and(h, 31)))
+
+def remutate(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~mutate: P -> G -> U32 -> U32 -> G,
+             dup: Bool, ind: Ind<G>, +ctx: P, +rate: U32, +seed: U32) -> Ind<G>:
+  match dup:
+    case True{}:
+      +g = mutate(ctx, Ind.gene(G, ind), rate, seed)
+      Ind{g, fit(ctx, g)}
+    case False{}:
+      ind
+
+# `r` traz o conjunto e a palavra onde mora o bit de `prev` (lida ANTES de
+# marcá-lo); a decisão sobre `prev` sai neste passo, e a leitura para o
+# próximo indivíduo é feita já com `prev` marcado.
+def dedup.go(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~mutate: P -> G -> U32 -> U32 -> G,
+             ~hash: P -> G -> U32,
+             inds: List<&2, Ind<G>>, r: Array<U32> & U32, prev: Ind<G>, +ph: U32,
+             +ctx: P, +rate: U32, +seed: U32) -> List<&2, Ind<G>>:
+  match inds:
+    case Nil{}:
+      (a, w) = r
+      Con{remutate(~P, ~G, ~fit, ~mutate, Bool.not(U32.is_zero(U32.and(w, bit_in(ph)))), prev, ctx, rate, seed), Nil{}}
+    case Con{+x, t}:
+      (a, w) = r
+      +w = w
+      a2 = Array.set(U32, a, word_of(ph), U32.or(w, bit_in(ph)))
+      +xh = R.mix(hash(ctx, Ind.gene(G, x)))
+      Con{remutate(~P, ~G, ~fit, ~mutate, Bool.not(U32.is_zero(U32.and(w, bit_in(ph)))), prev, ctx, rate, seed),
+          dedup.go(~P, ~G, ~fit, ~mutate, ~hash, t, Array.get(U32, a2, word_of(xh)), x, xh, ctx, rate, R.step(seed))}
+
+def dedup(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~mutate: P -> G -> U32 -> U32 -> G,
+          ~hash: P -> G -> U32, inds: List<&2, Ind<G>>, +ctx: P, +rate: U32, +seed: U32) -> List<&2, Ind<G>>:
+  match inds:
+    case Nil{}:
+      Nil{}
+    case Con{+x, t}:
+      +xh = R.mix(hash(ctx, Ind.gene(G, x)))
+      dedup.go(~P, ~G, ~fit, ~mutate, ~hash, t, Array.get(U32, Array.new(U32, 11n, 0), word_of(xh)), x, xh, ctx, rate, seed)
+
+def diversify(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~mutate: P -> G -> U32 -> U32 -> G,
+              ~hash: P -> G -> U32, on: Bool, gen: Gen<G>, +d: Nat,
+              +ctx: P, +rate: U32, +seed: U32) -> Gen<G>:
+  match on:
+    case False{}:
+      gen
+    case True{}:
+      Gen{pop, bf, bg} = gen
+      rebuild(G, d, dedup(~P, ~G, ~fit, ~mutate, ~hash, flatten(G, pop), ctx, rate, seed), Ind{bg, bf})
+
+# ----------------------------------------------------------------
 # ILHA COM CONTROLE DE ESTAGNAÇÃO (o laço `run` do Rust)
 # ----------------------------------------------------------------
 # Estado de uma população entre gerações:
@@ -316,7 +427,7 @@ def scale(+rate: U32, +m: F32) -> U32:
 # gerações sem melhora, a mutação cresce até 2x (e além) e o torneio encolhe
 # até 2, para tentar escapar do platô.
 def effective(+cfg: Config, +stagnated: U32) -> Eff:
-  Config{cr, mr, gr, ts, ms, _, _} = cfg
+  Config{cr, mr, gr, ts, ms, _, _, _} = cfg
   +half = U32.max(U32.div(ms, 2), 1)
   +excess = Bool.pick(U32, Bool.or(U32.is_zero(ms), U32.is_le(stagnated, half)), 0, (stagnated - half : U32))
   +ratio = (U32.to_f32(excess) / U32.to_f32(half) : F32)
@@ -357,12 +468,15 @@ def after_gen(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
                gen, ctx, cfg, bf, bg, ss, sf, g, seed)
 
 # Uma geração completa: reprodução, registro do melhor e estagnação
-def island_step(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
+def island_step(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
                 ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
                 isl: Island<G>, +ctx: P, +cfg: Config, +seed: U32) -> Island<G>:
   match isl:
     case Island{gen, +bf, bg, +ss, +sf, +g}:
-      +gen2 = next_gen(~P, ~G, ~fit, ~cross, ~mutate, gen, ctx, effective(cfg, (g - ss : U32)), seed)
+      +eff = effective(cfg, (g - ss : U32))
+      +gen1 = next_gen(~P, ~G, ~fit, ~cross, ~mutate, gen, ctx, eff, seed)
+      +gen2 = diversify(~P, ~G, ~fit, ~mutate, ~hash, Config.diversity(cfg), gen1, Config.pop_d(cfg),
+                        ctx, scale(Eff.gene_rate(eff), {4.0 : F32}), R.split.fth(seed))
       +cur = Gen.bfit(G, gen2)
       +better = U32.is_gt(cur, bf)
       after_gen(~P, ~G, ~init, ~fit, U32.is_gt(cur, sf), gen2, ctx, cfg, cur,
@@ -374,7 +488,7 @@ def is_done(-G: Data, +cfg: Config, +isl: Island<G>) -> Bool:
   +mf = Config.max_fit(cfg)
   Bool.and(Bool.not(U32.is_zero(mf)), U32.is_ge(Island.best_f(G, isl), mf))
 
-def island_loop(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
+def island_loop(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
                 ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
                 k: Nat, isl: Island<G>, done: Bool, +ctx: P, +cfg: Config, +seed: U32) -> Island<G>:
   match k done:
@@ -385,8 +499,8 @@ def island_loop(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
     case 1n+p True{}:
       isl
     case 1n+p False{}:
-      +isl2 = island_step(~P, ~G, ~init, ~fit, ~cross, ~mutate, isl, ctx, cfg, seed)
-      island_loop(~P, ~G, ~init, ~fit, ~cross, ~mutate, p, isl2, is_done(G, cfg, isl2), ctx, cfg, R.split.fth(seed))
+      +isl2 = island_step(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, isl, ctx, cfg, seed)
+      island_loop(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, p, isl2, is_done(G, cfg, isl2), ctx, cfg, R.split.fth(seed))
 
 # Uma população nova, aleatória
 def new_island(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
@@ -394,10 +508,10 @@ def new_island(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
   island(G, first_gen(~P, ~G, ~init, ~fit, Config.pop_d(cfg), ctx, seed))
 
 # Evolui uma população isolada por até `k` gerações
-def run_island(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
+def run_island(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
                ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
                k: Nat, +isl: Island<G>, +ctx: P, +cfg: Config, +seed: U32) -> Island<G>:
-  island_loop(~P, ~G, ~init, ~fit, ~cross, ~mutate, k, isl, is_done(G, cfg, isl), ctx, cfg, seed)
+  island_loop(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, k, isl, is_done(G, cfg, isl), ctx, cfg, seed)
 
 # ----------------------------------------------------------------
 # ARQUIPÉLAGO (paralelismo entre ilhas)
@@ -435,32 +549,84 @@ def arch_island_count(-G: Data, arch: ArchTree<G>) -> Nat:
       Nat.add(arch_island_count(G, left), arch_island_count(G, right))
 
 # Todas as ilhas evoluem `e` gerações em paralelo
-def evolve_archipelago(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
+def evolve_archipelago(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
                        ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
                        arch: ArchTree<G>, +e: Nat, +ctx: P, +cfg: Config, +seed: U32) -> ArchTree<G>:
   match arch:
     case SingleIsland{isl}:
-      SingleIsland{run_island(~P, ~G, ~init, ~fit, ~cross, ~mutate, e, isl, ctx, cfg, seed)}
+      SingleIsland{run_island(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, e, isl, ctx, cfg, seed)}
     case ArchBranch{left, right}:
-      l r = evolve_archipelago(~P, ~G, ~init, ~fit, ~cross, ~mutate, left, e, ctx, cfg, R.split.fst(seed)) evolve_archipelago(~P, ~G, ~init, ~fit, ~cross, ~mutate, right, e, ctx, cfg, R.split.snd(seed))
+      l r = evolve_archipelago(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, left, e, ctx, cfg, R.split.fst(seed)) evolve_archipelago(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, right, e, ctx, cfg, R.split.snd(seed))
       ArchBranch{l, r}
 
-# O campeão global vira o campeão (e portanto o elite) de todas as ilhas
-def migrate_champion(-G: Data, arch: ArchTree<G>, +champ: Ind<G>) -> ArchTree<G>:
+# ----------------------------------------------------------------
+# MIGRAÇÃO EM ANEL
+# ----------------------------------------------------------------
+# Cada ilha recebe o melhor da ilha ANTERIOR no anel (a ilha 0 recebe o da
+# última). O migrante é INJETADO num indivíduo comum (a última folha da
+# população), sem tomar o slot de elite: a ilha mantém sua própria linhagem.
+# Uma boa solução percorre o anel em k épocas em vez de ocupar todas as ilhas
+# de uma vez — que era o que fazia as ilhas convergirem para o mesmo mínimo
+# local.
+
+# Os melhores de cada ilha, na ordem das folhas
+def island_bests(-G: Data, arch: ArchTree<G>) -> List<&2, Ind<G>>:
   match arch:
     case SingleIsland{isl}:
-      Island{gen, _, _, ss, sf, g} = isl
-      Ind{cg, cf} = champ
-      SingleIsland{Island{Gen.with_champ(G, gen, cf, cg), cf, cg, ss, sf, g}}
+      Con{Island.best(G, isl), Nil{}}
     case ArchBranch{left, right}:
-      l r = migrate_champion(G, left, champ) migrate_champion(G, right, champ)
+      l r = island_bests(G, left) island_bests(G, right)
+      List.append(&2, Ind<G>, l, r)
+
+def nth_ind(-G: Data, l: List<&2, Ind<G>>, k: Nat, dflt: Ind<G>) -> Ind<G>:
+  match l k:
+    case Nil{} 0n:
+      dflt
+    case Nil{} 1n+p:
+      dflt
+    case Con{h, t} 0n:
+      h
+    case Con{h, t} 1n+p:
+      nth_ind(G, t, p, dflt)
+
+def replace_last(-G: Data, t: T.PopTree<Ind<G>>, ind: Ind<G>) -> T.PopTree<Ind<G>>:
+  match t:
+    case T.Leaf{_}:
+      T.Leaf{ind}
+    case T.Node{left, right}:
+      T.Node{left, replace_last(G, right, ind)}
+
+# Põe o migrante na população; se ele for melhor, também vira o campeão
+def inject(-G: Data, gen: Gen<G>, +m: Ind<G>) -> Gen<G>:
+  match gen:
+    case Gen{p, +cf, cg}:
+      Ind{mg, +mf} = m
+      +better = U32.is_gt(mf, cf)
+      Gen{replace_last(G, p, Ind{mg, mf}), pick_fit(better, mf, cf), pick_gene(G, better, mg, cg)}
+
+def migrate_ring(-G: Data, arch: ArchTree<G>, +bests: List<&2, Ind<G>>,
+                 +k: U32, +i: U32, +size: U32) -> ArchTree<G>:
+  match arch:
+    case SingleIsland{isl}:
+      Island{gen, +bf, +bg, ss, sf, g} = isl
+      +m = nth_ind(G, bests, U32.to_nat(U32.mod((i + k - 1 : U32), k)), Ind{bg, bf})
+      +better = U32.is_gt(Ind.fit(G, m), bf)
+      SingleIsland{Island{inject(G, gen, m), pick_fit(better, Ind.fit(G, m), bf),
+                          pick_gene(G, better, Ind.gene(G, m), bg), ss, sf, g}}
+    case ArchBranch{left, right}:
+      +half = U32.shrn(size, 1n)
+      l r = migrate_ring(G, left, bests, k, i, half) migrate_ring(G, right, bests, k, (i + half : U32), half)
       ArchBranch{l, r}
+
+def migrate(-G: Data, +arch: ArchTree<G>) -> ArchTree<G>:
+  +k = U32.from_nat(arch_island_count(G, arch))
+  migrate_ring(G, arch, island_bests(G, arch), k, 0, k)
 
 def arch_done(-G: Data, +cfg: Config, +arch: ArchTree<G>) -> Bool:
   +mf = Config.max_fit(cfg)
   Bool.and(Bool.not(U32.is_zero(mf)), U32.is_ge(Ind.fit(G, best_archipelago(G, arch)), mf))
 
-def run_archipelago.go(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
+def run_archipelago.go(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
                        ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
                        epochs: Nat, arch: ArchTree<G>, done: Bool, +e: Nat, +ctx: P, +cfg: Config,
                        +seed: U32) -> ArchTree<G>:
@@ -472,14 +638,14 @@ def run_archipelago.go(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G ->
     case 1n+p True{}:
       arch
     case 1n+p False{}:
-      +evolved = evolve_archipelago(~P, ~G, ~init, ~fit, ~cross, ~mutate, arch, e, ctx, cfg, seed)
-      +migrated = migrate_champion(G, evolved, best_archipelago(G, evolved))
-      run_archipelago.go(~P, ~G, ~init, ~fit, ~cross, ~mutate, p, migrated, arch_done(G, cfg, migrated), e, ctx, cfg, R.split.trd(seed))
+      +evolved = evolve_archipelago(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, arch, e, ctx, cfg, seed)
+      +migrated = migrate(G, evolved)
+      run_archipelago.go(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, p, migrated, arch_done(G, cfg, migrated), e, ctx, cfg, R.split.trd(seed))
 
-# `epochs` épocas de `e` gerações por ilha, com migração do campeão global
-# entre épocas; para cedo se atingir a aptidão máxima
-def run_archipelago(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
+# `epochs` épocas de `e` gerações por ilha, com migração em anel entre
+# épocas; para cedo se atingir a aptidão máxima
+def run_archipelago(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
                     ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
                     epochs: Nat, +arch: ArchTree<G>, +e: Nat, +ctx: P, +cfg: Config,
                     +seed: U32) -> ArchTree<G>:
-  run_archipelago.go(~P, ~G, ~init, ~fit, ~cross, ~mutate, epochs, arch, arch_done(G, cfg, arch), e, ctx, cfg, seed)
+  run_archipelago.go(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, epochs, arch, arch_done(G, cfg, arch), e, ctx, cfg, seed)

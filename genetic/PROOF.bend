@@ -82,16 +82,16 @@ def Laws.branch_mut_false_selects_second(g, seed):
 # PROVAS DA PARTE 3: MOTOR REAL (ga.bend)
 # ----------------------------------------------------------------
 
-# PROVA DA LEI 12: Conservação de Ilhas na Migração (Indução Estrutural)
-def Laws.arch_migration_preserves_islands(arch, champ):
+# PROVA DA LEI 12: Conservação de Ilhas na Migração em Anel (Indução Estrutural)
+def Laws.arch_migration_preserves_islands(arch, bests, k, i, size):
   match arch:
     case GA.SingleIsland{isl}:
-      match isl champ:
-        case GA.Island{gen, bf, bg, ss, sf, g} GA.Ind{cg, cf}:
+      match isl:
+        case GA.Island{gen, bf, bg, ss, sf, g}:
           {==}
     case GA.ArchBranch{left, right}:
-      %Laws.arch_migration_preserves_islands(left, champ) : {Nat.add(GA.arch_island_count(U32, GA.migrate_champion(U32, left, champ)), GA.arch_island_count(U32, GA.migrate_champion(U32, right, champ))) == Nat.add(_, GA.arch_island_count(U32, right)) : Nat}
-      %Laws.arch_migration_preserves_islands(right, champ) : {Nat.add(GA.arch_island_count(U32, GA.migrate_champion(U32, left, champ)), GA.arch_island_count(U32, GA.migrate_champion(U32, right, champ))) == Nat.add(GA.arch_island_count(U32, GA.migrate_champion(U32, left, champ)), _) : Nat}
+      %Laws.arch_migration_preserves_islands(left, bests, k, i, U32.shrn(size, 1n)) : {Nat.add(GA.arch_island_count(U32, GA.migrate_ring(U32, left, bests, k, i, U32.shrn(size, 1n))), GA.arch_island_count(U32, GA.migrate_ring(U32, right, bests, k, (i + U32.shrn(size, 1n) : U32), U32.shrn(size, 1n)))) == Nat.add(_, GA.arch_island_count(U32, right)) : Nat}
+      %Laws.arch_migration_preserves_islands(right, bests, k, (i + U32.shrn(size, 1n) : U32), U32.shrn(size, 1n)) : {Nat.add(GA.arch_island_count(U32, GA.migrate_ring(U32, left, bests, k, i, U32.shrn(size, 1n))), GA.arch_island_count(U32, GA.migrate_ring(U32, right, bests, k, (i + U32.shrn(size, 1n) : U32), U32.shrn(size, 1n)))) == Nat.add(GA.arch_island_count(U32, GA.migrate_ring(U32, left, bests, k, i, U32.shrn(size, 1n))), _) : Nat}
       {==}
 
 # PROVA DA LEI 13: abrir os dois `Gen` basta — `Gen.pop` projeta o nó sem

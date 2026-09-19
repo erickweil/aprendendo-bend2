@@ -101,7 +101,9 @@ def cross_uniform(-G: Data, a: List<&2, G>, b: List<&2, G>, +seed: U32) -> List<
 # a volta.
 #
 # Como no Rust, o chamador fornece `~key: G -> U32`, que dá a cada gene um
-# índice único em [0, n). As marcas de "já copiado" ficam num `Array<U32>`
+# índice único em [0, keys) — `keys` é o `possible_gene_values` do
+# `CrossoverOX1::new`. Pode ser maior que o comprimento `n`: numa linha de
+# sudoku com 5 células livres as chaves são os dígitos 1..9 (keys = 10). As marcas de "já copiado" ficam num `Array<U32>`
 # local — O(1) por consulta no nativo, e sem limite de tamanho (o Rust usa um
 # vetor de marcas com epoch; aqui o array é novo a cada cruzamento, então nem
 # o epoch é necessário).
@@ -144,14 +146,14 @@ def unmarked(~G: Data, ~key: G -> U32, l: List<&2, G>, a: Array<U32>) -> List<&2
       unmarked.go(~G, ~key, t, Array.get(U32, a, key(h)), h)
 
 def cross_ox1(~G: Data, ~key: G -> U32, a: List<&2, G>, b: List<&2, G>,
-              +n: U32, +seed: U32) -> List<&2, G>:
+              +n: U32, +keys: U32, +seed: U32) -> List<&2, G>:
   +c1 = U32.mod(seed, n)
   +c2 = U32.mod(R.step(seed), n)
   +p1 = U32.min(c1, c2)
   +p2 = U32.max(c1, c2)
   +seg = V.take(G, V.drop(G, a, p1), ((p2 - p1 : U32) + 1 : U32))
   +start = U32.mod((p2 + 1 : U32), n)
-  marks = mark(~G, ~key, seg, Array.new(U32, V.depth_for(n), 0))
+  marks = mark(~G, ~key, seg, Array.new(U32, V.depth_for(keys), 0))
   rest = unmarked(~G, ~key, V.rotate(G, b, start), marks)
   V.rotate(G, V.append(G, rest, seg), U32.mod((n - start : U32), n))
 

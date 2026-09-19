@@ -8,7 +8,8 @@ qualquer `G`; só os operadores sabem que ele é um vetor de genes — aqui,
 
 ```
 genetic/
-├── ga.bend              # o motor: população, elitismo, torneio, arquipélago
+├── ga.bend              # o motor: GAConfig, torneio, elitismo, estagnação,
+│                        # diversity_check, ilhas com migração em anel
 ├── operators.bend       # cruzamentos: 1 ponto, 2 pontos, uniforme, OX1
 ├── mutations.bend       # mutações: substituição, troca, troca de vizinhos
 ├── stats.bend           # estatísticas agregadas da população em O(log N)
@@ -21,7 +22,8 @@ genetic/
 └── exemplos/
     ├── onemax.bend      # genes Bool, qualquer N (100, 1K, 1M)
     ├── sorting.bend     # genoma-permutação: ordenar uma lista
-    └── tsp.bend         # genoma-permutação: caixeiro viajante
+    ├── tsp.bend         # genoma-permutação: caixeiro viajante
+    └── sudoku.bend      # genoma lista de linhas; 3 puzzles
 ```
 
 ## Como rodar
@@ -37,16 +39,55 @@ bend genetic/exemplos/onemax.bend -o bin/onemax
 ./bin/onemax 100000 20 --threads 8    # opções do runtime depois dos argumentos
 
 bend genetic/exemplos/sorting.bend -o bin/sorting && ./bin/sorting 42
-bend genetic/exemplos/tsp.bend -o bin/tsp && ./bin/tsp 42
+bend genetic/exemplos/tsp.bend -o bin/tsp && ./bin/tsp 42       # SEMENTE [N cidades]
+bend genetic/exemplos/sudoku.bend -o bin/sudoku && ./bin/sudoku 42 1   # SEMENTE PUZZLE ...
 
 bend genetic/PROOF.bend               # verifica as 14 leis
-for t in genetic/utils/genes_test genetic/operators_test genetic/mutations_test; do
+for t in genetic/utils/genes_test genetic/operators_test genetic/mutations_test genetic/ga_test; do
   bend $t.bend -o bin/t && ./bin/t
 done
 ```
 
 > `bend genetic/LAWS.bend` sozinho reporta TODOs: é só o enunciado, as provas
 > moram em `PROOF.bend`. Pelo mesmo motivo, `--checkup` falha nesse par.
+
+## O motor
+
+Como o `GAProblem` do Rust, o problema fornece quatro templates, e todos
+recebem o **contexto** `P` — o `&self` do Rust (as cidades, as dicas do sudoku,
+o tamanho N). Sem ele, um template não teria como ler dado de runtime.
+
+```
+~init   : P -> U32 -> G               random_genes
+~fit    : P -> G -> U32               fitness (maior é melhor)
+~hash   : P -> G -> U32               hash (para o diversity_check)
+~cross  : P -> G -> G -> U32 -> G     crossover
+~mutate : P -> G -> U32 -> U32 -> G   mutate(ctx, genes, taxa por gene, semente)
+```
+
+O motor faz o resto, com uma `Config` que espelha o `GAConfig`:
+`cross_rate`, `mut_rate`, `gene_rate`, `tsize`, `max_stag`, `max_fit`,
+`pop_d` (2^pop_d indivíduos por ilha) e `diversity`.
+
+- **Seleção por torneio** e **elitismo estrito** (o `offspring[0]` do Rust).
+- **Controle de estagnação adaptativo**, como no Rust: após `max_stag/2`
+  gerações sem melhora a taxa de mutação cresce e o torneio encolhe; em
+  exatamente `max_stag/2` o melhor já encontrado é reintroduzido; acima de
+  `max_stag` a população é reiniciada (o melhor continua guardado).
+- **Parada** ao atingir `max_fit`.
+- **`diversity_check`**: no Rust há um `HashSet` escrito durante a reprodução,
+  o que tarefas paralelas não podem ter. Aqui é uma passada depois da
+  reprodução, sequencial dentro da ilha: os hashes são marcados num conjunto de
+  bits num `Array` local, e quem repetir é mutado de novo (com 4x a taxa, para
+  compensar a falta das novas tentativas com outros pais). O elite nunca é
+  tocado. Foi o que fez o sudoku funcionar: com torneio de 10 e sem ele, 0 de 6
+  sementes resolviam o puzzle fácil; com ele, 6 de 6.
+- **Arquipélago com migração em anel**: cada ilha recebe o melhor da vizinha,
+  injetado num indivíduo comum (não no elite). Uma primeira versão copiava o
+  campeão global para o elite de todas as ilhas a cada época, e as ilhas
+  convergiam todas para o mesmo mínimo local.
+
+`run_island` evolui uma população; `run_archipelago`, várias em paralelo.
 
 ## O vetor de genes
 
@@ -79,7 +120,7 @@ Todos genéricos sobre `G`, todos para qualquer tamanho, todos testados com
 | `crossover_1_point` | `Op.cross_1point` | copia o prefixo, compartilha a cauda |
 | `crossover_2_point` | `Op.cross_2point` | dois *splices*, cauda compartilhada |
 | `crossover_uniform` | `Op.cross_uniform` | |
-| `CrossoverOX1` | `Op.cross_ox1(~G, ~key, …)` | `~key: G -> U32` como o `get_index` do Rust; marcas num `Array` |
+| `CrossoverOX1` | `Op.cross_ox1(~G, ~key, a, b, n, keys, seed)` | `~key` e `keys` são o `get_index` e o `possible_gene_values` do Rust; marcas num `Array` |
 | `mutation_replace` | `M.mut_replace(~G, ~gen, …)` | |
 | `mutation_random_swap` | `M.mut_swap(~G, …)` | via `Array`, O(n) |
 | `mutation_neighbor_swap` | `M.mut_neighbor` | |
@@ -94,24 +135,30 @@ cairia depois do fim, devolvem o resto da lista compartilhado.
 **Taxas** são limiares sobre 2^32 (`R.per(num, den)`, `R.hit(seed, limiar)`),
 porque o `R.chance` de 1% não expressa uma taxa por gene de 1/N com N = 1 milhão.
 
-## Seleção e paralelismo
+## Paralelismo
 
 No Bend 2 o paralelismo só existe onde se escreve a chamada paralela
 `a b = f(x) g(y)`, e o escalonador é fork-join binário sem roubo de trabalho.
-Isso decide o desenho da seleção. Medido no nativo (12 threads num i5-1245U,
-2 núcleos P + 8 E; o `pow2` do GUIDE escala 3,2× nesta máquina):
+Medido no nativo:
 
 | seleção | 1 → 12 threads |
 |---|---|
-| todos cruzam com o campeão (`run_gen_loop`) | 1,9× |
-| torneio sobre a população inteira (`run_gen_loop_tourney`) | **1,4×** |
-| torneio dentro de cada ilha (`run_archipelago_tourney`) | **2,8×** |
+| torneio sobre a população inteira (versão antiga) | **1,4×** |
+| torneio dentro de cada ilha | **2,8×** |
 
-O torneio global faz toda tarefa segurar uma cópia `+pop` da geração anterior;
-ela só é liberada quando a última tarefa termina, e por uma thread só. No
-arquipélago as ilhas não compartilham nada durante uma época — o campeão global
-migra para o slot de elite de todas as ilhas entre épocas. É o que o
-`onemax.bend` usa.
+O torneio global fazia toda tarefa segurar uma cópia `+pop` da geração
+anterior, liberada só no fim e por uma thread. Por isso o motor paraleliza no
+nível das ilhas.
+
+**Qual é o teto desta máquina?** O i5-1245U (15 W, 2 núcleos P com HT + 8 E)
+limita muito o trabalho contínuo de CPU: 8 tarefas **idênticas e totalmente
+independentes**, só contas, escalam no máximo **1,7×**; 64 tarefas, **2,6×**,
+e nada melhora além de 4 threads (limite de potência derruba o clock com todos
+os núcleos ocupados). O `pow2` do GUIDE, com tarefas minúsculas, chega a 3,2× e
+é uma referência otimista. Nessa régua, o sudoku (1,65–1,9×) e o OneMax
+(2,5–2,8×) estão perto do teto. A exceção real é o `diversity_check` numa
+ilha só: a passada de deduplicação é sequencial por construção (Amdahl), e uma
+ilha de 512 com ela ligada não ganha nada com threads — use várias ilhas.
 
 ### Escala (OneMax, nativo)
 
@@ -129,10 +176,7 @@ de alguns MB por genoma o limite passa a ser a banda de memória, não o motor.
 
 ## O que não foi portado
 
-- **Controle de estagnação adaptativo** (`max_stagnation`, multiplicadores,
-  reinício da população) — estado mutável entre gerações; cabe carregado no tipo.
-- **`diversity_check` por hash** — exigiria um conjunto compartilhado escrito
-  durante a reprodução, justamente o que as tarefas paralelas não podem ter.
+- **`CrossoverIPX`** (multiconjuntos, usado nos horários) — ainda não.
 - **Dois filhos por cruzamento** — cada folha da população produz um filho.
 - **`f64` como aptidão** — aqui é `U32`, comparada milhões de vezes na redução
   em árvore; métricas contínuas entram invertidas e escaladas (veja `tsp.bend`).
@@ -150,6 +194,26 @@ cruzamento de 1 ponto com 90%, mutação com 90% e taxa por gene 1/N, torneio de
 rota ótima de pontos num círculo é o polígono convexo, de comprimento conhecido
 (≈ 3106): o exemplo é verificável, e o GA a encontra em 8/8 sementes testadas.
 
+**`sudoku.bend`** — porte do `sudoku.ts`, com uma codificação melhor: cada
+linha guarda só os valores das células livres, como permutação dos dígitos que
+faltam. Linhas corretas e dicas intactas **por construção** (no TS as dicas
+eram mantidas por um bônus de +8 na aptidão e o OX1 podia movê-las). Aptidão
+= dígitos distintos por coluna + por caixa (162 = resolvido). Configuração do
+teste do TS: torneio 10, 90%/90%, 1/81 por gene, diversity_check.
+
+| puzzle | resolvidos (12 sementes, até 2000 gerações) |
+|---|---|
+| 0 — fácil (30 dicas) | 9/12, em 40–480 gerações |
+| 1 — médio (32 dicas) | 12/12, em 20–40 gerações |
+| 2 — "difícil" (23 dicas) | 0/12 (para em 158–160) |
+
+Uma ressalva honesta: os três puzzles, inclusive o "difícil", se resolvem
+inteiros só com propagação de restrições simples (candidato único e lugar
+único numa unidade). O "difícil" é difícil para o GA, não para um solucionador
+de sudoku. O próximo passo natural é usar os **candidatos** no GA — mutação
+que só troca valores que são candidatos válidos nas duas células — em vez de
+propagar tudo antes (o que resolveria o puzzle sem o GA).
+
 ## Leis formais
 
 `LAWS.bend` enuncia e `PROOF.bend` prova 14 invariantes:
@@ -158,8 +222,8 @@ rota ótima de pontos num círculo é o polígono convexo, de comprimento conhec
 2. **Leis 8–11** — os combinadores (`pipe`, `chain_mutations`, `branch_mut`)
    são **definicionalmente iguais** ao código escrito à mão, provadas por
    reflexividade: a abstração de ordem superior custa zero por construção.
-3. **Leis 12–13** — a migração não cria nem destrói ilhas, e a fusão de duas
-   meias-gerações soma exatamente as duas populações.
+3. **Leis 12–13** — a migração em anel não cria nem destrói ilhas, e a fusão
+   de duas meias-gerações soma exatamente as duas populações.
 4. **Lei 14** — `take(l, k) ++ drop(l, k) == l`, que sustenta o `rotate` e,
    por consequência, as permutações que o OX1 monta.
 

@@ -71,8 +71,8 @@ def check_pos(+n: U32, +s: U32) -> U32:
 def check_ox1(+n: U32, +s: U32) -> U32:
   +a = V.perm_random(n, s)
   +b = V.perm_random(n, R.step(s))
-  (ok(V.is_permutation(Op.cross_ox1(~U32, ~key_u32, a, b, n, s), n)) +
-   ok(eq(Op.cross_ox1(~U32, ~key_u32, a, a, n, s), a)) : U32)
+  (ok(V.is_permutation(Op.cross_ox1(~U32, ~key_u32, a, b, n, n, s), n)) +
+   ok(eq(Op.cross_ox1(~U32, ~key_u32, a, a, n, n, s), a)) : U32)
 
 def sweep_pos(k: Nat, +n: U32, +s: U32, +acc: U32) -> U32:
   match k:
@@ -108,7 +108,7 @@ def alphabet() -> List<&2, Char>:
 def check_char(+s: U32) -> U32:
   +a = V.shuffle(~Char, alphabet(), 26, s)
   +b = V.shuffle(~Char, alphabet(), 26, R.step(s))
-  ok(is_alphabet_perm(Op.cross_ox1(~Char, ~key_char, a, b, 26, s)))
+  ok(is_alphabet_perm(Op.cross_ox1(~Char, ~key_char, a, b, 26, 26, s)))
 
 def sweep_char(k: Nat, +s: U32, +acc: U32) -> U32:
   match k:
@@ -116,6 +116,28 @@ def sweep_char(k: Nat, +s: U32, +acc: U32) -> U32:
       acc
     case 1n+p:
       sweep_char(p, R.step(s), (acc + check_char(s) : U32))
+
+# --- OX1 com mais chaves que genes: linha parcial de sudoku ---
+# Os pais são embaralhamentos de {2, 4, 5, 7, 9} (n = 5) com chaves 0..9
+# (keys = 10). O filho tem de ser um embaralhamento do MESMO conjunto.
+def le(a: U32, b: U32) -> Bool:
+  U32.is_le(a, b)
+
+def partial_set() -> List<&2, U32>:
+  [2, 4, 5, 7, 9]
+
+def check_partial(+s: U32) -> U32:
+  +set = partial_set()
+  +a = V.shuffle(~U32, set, 5, s)
+  +b = V.shuffle(~U32, set, 5, R.step(s))
+  ok(eq(List.sort(~U32, ~le, Op.cross_ox1(~U32, ~key_u32, a, b, 5, 10, s)), set))
+
+def sweep_partial(k: Nat, +s: U32, +acc: U32) -> U32:
+  match k:
+    case 0n:
+      acc
+    case 1n+p:
+      sweep_partial(p, R.step(s), (acc + check_partial(s) : U32))
 
 def verdict(+name: String, +got: U32, +want: U32) -> String:
   "  " ++ Bool.pick(String, U32.is_eq(got, want), "[OK]     ", "[FALHOU] ") ++
@@ -138,6 +160,7 @@ def main() -> IO(Unit):
     verdict("OX1, n = 12, 2000 sementes x (valido + identidade)", sweep_ox1(2000n, 12, 86427531, 0), 4000) ++
     verdict("OX1, n = 1000, 200 sementes x 2", sweep_ox1(200n, 1000, 111, 0), 400) ++
     verdict("OX1, n = 100000, 5 sementes x 2", sweep_ox1(5n, 100000, 222, 0), 10) ++
-    verdict("OX1 com genes Char (chave = letra), 500 sementes", sweep_char(500n, 333, 0), 500)
+    verdict("OX1 com genes Char (chave = letra), 500 sementes", sweep_char(500n, 333, 0), 500) ++
+    verdict("OX1 com keys > n (conjunto {2,4,5,7,9}, keys = 10), 1000 sementes", sweep_partial(1000n, 444, 0), 1000)
   )
 

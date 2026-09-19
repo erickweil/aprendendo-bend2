@@ -237,3 +237,15 @@ def is_permutation(+l: List<&2, U32>, +n: U32) -> Bool:
       Bool.and(U32.is_eq(len(U32, l), n),
       Bool.and(all_below(l, n),
                U32.is_eq(fresh.go(t, Array.swap(U32, Array.new(U32, depth_for(n), 0), h, 1), 0), n)))
+
+# ----------------------------------------------------------------
+# HASH (para o diversity_check do motor)
+# ----------------------------------------------------------------
+
+# Hash polinomial (h*31 + gene) sobre a lista; `~h` dá o valor de cada gene
+def hash_list(~G: Data, ~h: G -> U32, l: List<&2, G>, +acc: U32) -> U32:
+  match l:
+    case Nil{}:
+      acc
+    case Con{x, t}:
+      hash_list(~G, ~h, t, U32.add(U32.mul(acc, 31), h(x)))

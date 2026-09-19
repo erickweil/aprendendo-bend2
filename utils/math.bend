@@ -48,3 +48,14 @@ def rnd_unit_coarse(+seed: U32) -> F32:
 def rnd_range_f32(+seed: U32, +lo: F32, +hi: F32) -> F32:
   +norm = (U32.to_f32(U32.mod(seed, 10000)) / {10000.0 : F32} : F32)
   (lo + ((hi - lo) * norm) : F32)
+
+# ----------------------------------------------------------------
+# BITS
+# ----------------------------------------------------------------
+
+# Quantidade de bits ligados (SWAR, O(1) sem laço)
+def popcount(+x: U32) -> U32:
+  +a = U32.sub(x, U32.and(U32.shrn(x, 1n), 1431655765))
+  +b = U32.add(U32.and(a, 858993459), U32.and(U32.shrn(a, 2n), 858993459))
+  +c = U32.and(U32.add(b, U32.shrn(b, 4n)), 252645135)
+  U32.shrn(U32.mul(c, 16843009), 24n)

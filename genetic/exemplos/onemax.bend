@@ -2,6 +2,7 @@ import Base
 import ./../../utils/random.bend as R
 import ./../../utils/io.bend as IOHelper
 import ./../ga.bend as GA
+import ./../utils/genes.bend as V
 import ./../operators.bend as Op
 import ./../mutations.bend as M
 
@@ -50,6 +51,12 @@ def fitness(n: U32, gene: List<&2, Bool>) -> U32:
 def cross(n: U32, a: List<&2, Bool>, b: List<&2, Bool>, seed: U32) -> List<&2, Bool>:
   Op.cross_1point(Bool, a, b, n, seed)
 
+def b2u(b: Bool) -> U32:
+  Bool.to_u32(b)
+
+def hash(n: U32, g: List<&2, Bool>) -> U32:
+  V.hash_list(~Bool, ~b2u, g, 7)
+
 def flip(b: Bool, s: U32) -> Bool:
   Bool.not(b)
 
@@ -76,7 +83,7 @@ def report(k: Nat, arch: GA.ArchTree<List<&2, Bool>>, +e: Nat, +done: U32,
         "Final (até a geração " ++ U32.show(done) ++ "): " ++ U32.show(b) ++ " / " ++ U32.show(n) ++ "\n" ++
         "Solução ótima atingida? " ++ Bool.show(U32.is_eq(b, n)))
     case 1n+p:
-      +next = GA.run_archipelago(~U32, ~List<&2, Bool>, ~init_gene, ~fitness, ~cross, ~mutate, 1n, arch, e, n, cfg, seed)
+      +next = GA.run_archipelago(~U32, ~List<&2, Bool>, ~init_gene, ~fitness, ~hash, ~cross, ~mutate, 1n, arch, e, n, cfg, seed)
       +now = (done + U32.from_nat(e) : U32)
       IO.bind(Unit, Unit,
         IO.print("  geração " ++ U32.show(now) ++ ": " ++ U32.show(best(next))),
@@ -90,7 +97,7 @@ def run(args: List<String>) -> IO(Unit):
   +pop = IOHelper.num_at(nums, 3n, 3)
   +s0 = IOHelper.num_at(nums, 4n, 12345678)
   # Mesma configuração do teste do Rust: 90% / 90% / 1/N, torneio de 5
-  +cfg = GA.config(R.per(9, 10), R.per(9, 10), R.per(1, n), 5, 0, n, pop)
+  +cfg = GA.config(R.per(9, 10), R.per(9, 10), R.per(1, n), 5, 0, n, pop, 0)
   +a0 = GA.gen_archipelago(~U32, ~List<&2, Bool>, ~init_gene, ~fitness, U32.to_nat(isl), n, cfg, s0)
   IO.bind(Unit, Unit,
     IO.print(

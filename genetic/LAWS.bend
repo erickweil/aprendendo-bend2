@@ -124,13 +124,17 @@ law branch_mut_false_selects_second:
 # Leis sobre o arquipélago e a fusão de gerações que o motor realmente
 # executa (o `ArchTree` e o `merge_gen` de ga.bend).
 
-# LEI 12: Conservação de Ilhas na Migração (arquipélago REAL do motor)
-# A migração do campeão global não cria nem destrói ilhas:
-# arch_island_count(migrate_champion(arch, champ)) == arch_island_count(arch)
+# LEI 12: Conservação de Ilhas na Migração em Anel (arquipélago real do motor)
+# Trocar os melhores entre ilhas vizinhas não cria nem destrói ilhas, para
+# qualquer lista de migrantes, qualquer posição inicial e qualquer tamanho:
+# arch_island_count(migrate_ring(arch, ...)) == arch_island_count(arch)
 law arch_migration_preserves_islands:
   for +arch: GA.ArchTree<U32>
-  for +champ: GA.Ind<U32>
-  {GA.arch_island_count(U32, GA.migrate_champion(U32, arch, champ))
+  for +bests: List<&2, GA.Ind<U32>>
+  for +k: U32
+  for +i: U32
+  for +size: U32
+  {GA.arch_island_count(U32, GA.migrate_ring(U32, arch, bests, k, i, size))
    == GA.arch_island_count(U32, arch) : Nat}
 
 # LEI 13: a fusão de duas meias-gerações soma exatamente as duas populações
