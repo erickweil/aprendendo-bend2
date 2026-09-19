@@ -99,6 +99,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
   Medido no motor genético: com as duas linhas, 12 threads rodavam na mesma velocidade que 1.
 * **Tarefas que compartilham uma estrutura grande não escalam.** Seleção por torneio sobre a população inteira faz toda tarefa segurar uma cópia `+pop` da geração anterior; ela só é liberada quando a última tarefa termina, e por uma thread só. Medido: 1,0× com 12 threads. O mesmo torneio **dentro de ilhas** independentes (`run_archipelago_tourney`) escala 2,8× — perto do teto da máquina.
 * **Um valor `+` lido por todas as tarefas custa um atômico por leitura** (GUIDE, desde o 2.0.16). Contexto, configuração e população compartilhados entre tarefas pagam isso. O `bend guide shaders` recomenda passar constantes como argumento template `~` (uma def como `Tela.w()`), não como parâmetro: "um parâmetro viaja em toda tarefa".
+* **Descer uma árvore compartilhada é caro mesmo com tudo na cache.** Abrir um nó `+` com `match` entrega os campos como `+` (contagem de referência). Medido: ~25 ns por nível, ~170 ns para achar uma folha entre 64, contra ~3 ns para ler um `Array` local. Para MUITAS leituras aleatórias da mesma estrutura, copie o que precisa para um `Array` local numa travessia só e leia dali: foi o que tirou o torneio do GA da árvore (−11% a −30% no sudoku, conforme o tamanho do torneio).
 * **Balanceie.** O fork-join não rouba trabalho: se um lado termina antes, aquele núcleo fica ocioso. Numa CPU híbrida (núcleos P + E) a tarefa mais lenta dita o tempo. E nunca haverá mais tarefas pesadas simultâneas do que folhas na árvore de chamadas paralelas (8 ilhas ⇒ platô em 8 threads).
 * **Passadas sequenciais contam (Amdahl).** O `diversity_check` do motor é uma passada sequencial por ilha: com uma ilha só, 12 threads não ganham nada. Com várias ilhas, cada passada roda na tarefa da sua ilha.
 * **Volume de dados limita.** O mesmo GA, mesma forma, mesmo trabalho total: 3,16× com genomas de 10 mil genes (cabem em cache), 1,45× com 1 milhão (500 MB, limitado por banda de memória).
@@ -232,6 +233,16 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 > **Conceito:** `match a b:` escrutina vários valores de uma vez, mas é rígido.
 
 * **O coringa é um `_` por escrutinado:** `case _ _:` (dois escrutinados), `case Nil{} _ _:` etc. Um único nome para todos (`case outro:`) é rejeitado com `expected: N patterns (one per scrutinee)` — versões anteriores deste guia concluíram errado, a partir dessa forma, que não havia coringa. Use-o para cortar os casos degenerados de um `match` múltiplo.
+* **Dentro de um `match` múltiplo, desestruturar um parâmetro que NÃO é escrutinado falha só no nativo.** `match k flag:` com `(a, v) = r` num caso passa no verificador (e no `--checkup`), mas `-o` recusa com "a match on a parameter or field (this name is a def or a consumed binder)". Nem pôr o par como escrutinado funciona. A saída: `match` simples no argumento que encolhe, desestruture o par, e só então um `match` aninhado sobre as flags (com `(a, +v) = r` se o valor for usado mais de uma vez):
+  ```bend
+  match k:
+    case 0n: ...
+    case 1n+p:
+      (a, +v) = r
+      match on_fit stop:
+        case _ True{}: ...
+        case True{} False{}: ...
+  ```
 * **Não se aninha `match` sobre um campo ligado por um `match` múltiplo:**
   ```bend
   match l hit:

@@ -76,11 +76,17 @@ O motor faz o resto, com uma `Config` que espelha o `GAConfig`:
   ímpar do Rust.
 - **Seleção por torneio** e **elitismo estrito** (o `offspring[0]` do Rust).
   O segundo pai exclui o índice do primeiro e, com `diversity`, também todo
-  candidato com o mesmo hash (o `exclude_hash` do Rust).
+  candidato com o mesmo hash (o `exclude_hash` do Rust). Os torneios rodam
+  numa passada sequencial por ilha, ANTES da reprodução, sobre um retrato da
+  população num `Array` local (aptidão e hash de cada índice): descer a árvore
+  compartilhada custava ~170 ns por sorteio, ler o `Array` custa ~3 ns. A
+  reprodução paralela só desce a árvore para buscar os dois genomas de cada
+  par. Medido no sudoku: −11% com torneio de 10, −30% com torneio de 40.
 - **Hash guardado no indivíduo** (`Ind{gene, fit, hash}`, 0 = desconhecido,
-  como o `Option` do Rust): calculado uma vez, na passada de diversidade, só
-  para quem ainda não tem — os filhos novos. O elite leva o seu adiante, e o
-  torneio exclui por hash lendo um campo, sem tocar no genoma.
+  como o `Option` do Rust): com `diversity`, calculado quando o filho nasce,
+  como no Rust — dentro da reprodução, que é paralela, e não na passada de
+  diversidade, que é sequencial por ilha. O elite leva o seu adiante, e o
+  torneio exclui por hash lendo o retrato.
 - **Controle de estagnação adaptativo**, como no Rust: após `max_stag/2`
   gerações sem melhora a taxa de mutação cresce e o torneio encolhe; em
   exatamente `max_stag/2` o melhor já encontrado é reintroduzido; acima de
@@ -91,8 +97,12 @@ O motor faz o resto, com uma `Config` que espelha o `GAConfig`:
   reprodução, sequencial dentro da ilha: os hashes são marcados num conjunto de
   bits num `Array` local, e quem repetir é mutado de novo (com 4x a taxa, para
   compensar a falta das novas tentativas com outros pais), re-hasheado, e o
-  hash novo é marcado. O elite nunca é tocado. Foi o que fez o sudoku funcionar: com torneio de 10 e sem ele, 0 de 6
-  sementes resolviam o puzzle fácil; com ele, 6 de 6.
+  hash novo é marcado. O elite nunca é tocado. Os hashes já chegam prontos da
+  reprodução; o que sobra de sequencial é marcar o conjunto e remutar os
+  repetidos. Medido no sudoku (1 thread): a checagem custa ~30% da geração,
+  metade hash e conjunto, metade remutação. Foi o que fez o sudoku funcionar:
+  com torneio de 10 e sem ele, 0 de 6 sementes resolviam o puzzle fácil; com
+  ele, 6 de 6.
 - **Arquipélago com migração em anel**: cada ilha recebe o melhor da vizinha,
   injetado num indivíduo comum (não no elite). Uma primeira versão copiava o
   campeão global para o elite de todas as ilhas a cada época, e as ilhas
@@ -192,9 +202,10 @@ independentes**, só contas, escalam no máximo **1,7×**; 64 tarefas, **2,6×**
 e nada melhora além de 4 threads (limite de potência derruba o clock com todos
 os núcleos ocupados). O `pow2` do GUIDE, com tarefas minúsculas, chega a 3,2× e
 é uma referência otimista. Nessa régua, o sudoku (1,65–1,9×) e o OneMax
-(2,5–2,8×) estão perto do teto. A exceção real é o `diversity_check` numa
-ilha só: a passada de deduplicação é sequencial por construção (Amdahl), e uma
-ilha de 512 com ela ligada não ganha nada com threads — use várias ilhas.
+(2,5–2,8×) estão perto do teto. A exceção é uma ilha só: a seleção e a
+passada de deduplicação são sequenciais por ilha (Amdahl), e uma ilha de 512
+ganha pouco com threads (sudoku: 0,72 s com 1 thread, 0,63 s com 4) — use
+várias ilhas.
 
 ### Escala (OneMax, nativo)
 

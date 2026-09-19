@@ -160,16 +160,44 @@ def rehashed() -> U32:
   distinct(genes_of(GA.flatten(U32, GA.Gen.pop(U32,
     GA.diversify(~U32, ~U32, ~fit, ~plus1, ~hash, True{}, GA.rebuild(U32, 2n, l, GA.Ind{0, 0, 0}), 2n, 0, 1, 7)))))
 
-# Torneio com exclusão por hash: as três primeiras folhas têm hash 9
-# (aptidões 50, 40, 30), a última tem hash 8 e aptidão 1. O índice desce a
-# árvore pelo bit MENOS significativo primeiro, então as folhas em ordem são
-# os índices 0, 2, 1, 3. Excluindo o índice 0 e o hash 9, só o 3 pode vencer;
-# sem excluir por hash vence o 2 (aptidão 40, o melhor fora o índice 0).
-def tpop(h3: U32) -> GA.Gen<U32>:
-  GA.rebuild(U32, 2n, Con{GA.Ind{0, 50, 9}, Con{GA.Ind{1, 40, 9}, Con{GA.Ind{2, 30, 9}, Con{GA.Ind{3, 1, h3}, Nil{}}}}}, GA.Ind{0, 0, 0})
+# Seleção (torneios sobre o retrato da população): as três primeiras folhas
+# têm hash h (aptidões 50, 40, 30), a última tem hash h3 e aptidão 1. O índice
+# desce a árvore pelo bit MENOS significativo primeiro, então as folhas em
+# ordem são os índices 0, 2, 1, 3. Com torneios de 20 entre 4, o primeiro pai
+# de cada par é na prática o índice 0.
+def tpop(h: U32, h3: U32) -> GA.Gen<U32>:
+  +h = h
+  GA.rebuild(U32, 2n, Con{GA.Ind{0, 50, h}, Con{GA.Ind{1, 40, h}, Con{GA.Ind{2, 30, h}, Con{GA.Ind{3, 1, h3}, Nil{}}}}}, GA.Ind{0, 0, 0})
 
-def tourney(+h3: U32, +xh: U32, +seed: U32) -> U32:
-  GA.tournament(U32, 20n, GA.Gen.pop(U32, tpop(h3)), 4, 0, xh, seed)
+# Os índices dos pais de 2 pares: [a0, b0, a1, b1]
+def picks(+h: U32, +h3: U32, +seed: U32) -> List<&2, U32>:
+  GA.select(U32, GA.Gen.pop(U32, tpop(h, h3)), 2n, 2, 20, seed)
+
+def at(+l: List<&2, U32>, +i: U32) -> U32:
+  V.nth(U32, l, i, 99)
+
+# Em quantos pares o segundo pai é `want` / difere do primeiro
+def second_is(+l: List<&2, U32>, +want: U32) -> U32:
+  (ok(U32.is_eq(at(l, 1), want)) + ok(U32.is_eq(at(l, 3), want)) : U32)
+
+def distinct_pair(+l: List<&2, U32>) -> U32:
+  (ok(U32.is_ne(at(l, 0), at(l, 1))) + ok(U32.is_ne(at(l, 2), at(l, 3))) : U32)
+
+# Hash vindo da reprodução: depois de 3 gerações com diversity_check, todo
+# indivíduo da população tem o hash do próprio genoma; sem ele, nenhum tem
+# hash (0 = desconhecido)
+def cfg_div(+div: U32) -> GA.Config:
+  GA.config(R.per(9, 10), R.per(9, 10), R.per(1, 10), 3, 0, 0, 4, div)
+
+def pop_after(+div: U32) -> List<&2, GA.Ind<U32>>:
+  GA.flatten(U32, GA.Island.pop(U32, run(3n, 0, cfg_div(div), 17)))
+
+def zero_hashes(l: List<&2, GA.Ind<U32>>) -> U32:
+  match l:
+    case Nil{}:
+      0
+    case Con{i, t}:
+      (ok(U32.is_zero(GA.Ind.hash(U32, i))) + zero_hashes(t) : U32)
 
 def main() -> IO(Unit):
   +c75 = GA.config(7, 2000, 1000, 10, 100, 0, 4, 0)
@@ -194,11 +222,17 @@ def main() -> IO(Unit):
     verdict("diversidade: todo hash guardado é o do próprio genoma (16 clones)", hash_ok(div_inds(clones(16n), 4n)), 16) ++
     verdict("diversidade: hash já guardado não é recalculado", kept_fake(div_inds(fake(16n), 4n), 16), 16) ++
     verdict("diversidade: o hash do remutado é marcado", rehashed(), 4) ++
-    verdict("torneio: exclui o hash do primeiro pai",
-      (ok(U32.is_eq(tourney(8, 9, 1), 3)) + ok(U32.is_eq(tourney(8, 9, 2), 3)) + ok(U32.is_eq(tourney(8, 9, 3), 3)) : U32), 3) ++
-    verdict("torneio: sem hash (0) exclui só o índice", tourney(8, 0, 1), 2) ++
-    verdict("torneio: todos com o hash excluído caem no sorteio sem o índice",
-      ok(U32.is_ne(tourney(9, 9, 1), 0)), 1) ++
+    verdict("reprodução com diversidade: 16 filhos saem com o hash do genoma", hash_ok(pop_after(1)), 16) ++
+    verdict("reprodução sem diversidade: nenhum hash calculado", zero_hashes(pop_after(0)), 16) ++
+    verdict("seleção: 2 pares dão 4 índices", U32.from_nat(List.length(&2, U32, picks(9, 8, 1))), 4) ++
+    verdict("seleção: o primeiro pai é o melhor (índice 0)",
+      (ok(U32.is_eq(at(picks(9, 8, 1), 0), 0)) + ok(U32.is_eq(at(picks(9, 8, 2), 2), 0)) : U32), 2) ++
+    verdict("seleção: o segundo pai exclui o hash do primeiro (só o 3 serve)",
+      (second_is(picks(9, 8, 1), 3) + second_is(picks(9, 8, 2), 3) + second_is(picks(9, 8, 3), 3) : U32), 6) ++
+    verdict("seleção: sem hash (0) exclui só o índice (vence o 2)",
+      (second_is(picks(0, 0, 1), 2) + second_is(picks(0, 0, 2), 2) : U32), 4) ++
+    verdict("seleção: todos com o hash excluído caem no sorteio sem o índice",
+      (distinct_pair(picks(9, 9, 1)) + distinct_pair(picks(9, 9, 2)) + distinct_pair(picks(9, 9, 3)) : U32), 6) ++
     verdict("... e o melhor de fato atinge max_fit",
       ok(U32.is_ge(GA.Island.best_f(U32, run(10000n, 0, cfg(0, 900), 7)), 900)), 1)
   )

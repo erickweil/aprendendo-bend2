@@ -181,24 +181,33 @@ def first_gen(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
 # ----------------------------------------------------------------
 # SELEÇÃO POR TORNEIO (tournament_selection)
 # ----------------------------------------------------------------
-# A população é uma árvore perfeita de N = 2^d folhas, então o indivíduo de
-# índice `i` é achado descendo d níveis, um bit de `i` por nível (do menos
-# significativo): O(log N), sem vetor. `go_right` é o bit do nível atual,
-# calculado no passo anterior (match não escrutina valor computado).
+# Como no Rust, o torneio trabalha com ÍNDICES: sorteia `ts` índices, lê a
+# aptidão de cada um e fica com o melhor (empates com o primeiro sorteado,
+# `fitness > best_fit`). O segundo pai exclui o índice do primeiro
+# (random_range_except) e, quando os hashes são conhecidos (diversity_check),
+# todo candidato com o MESMO hash do primeiro: um clone dele daria um
+# cruzamento inútil. O candidato excluído não conta (o `continue` do Rust); se
+# todos forem excluídos, o pai sai de um sorteio que só exclui o índice (o
+# Rust varre a população atrás de um hash diferente; com diversity_check a
+# população quase não tem repetidos e o caso é raro).
 #
-# Como no Rust, o torneio trabalha com ÍNDICES: sorteia k índices, lê só a
-# aptidão de cada um e guarda o índice e a aptidão do melhor como escalares.
-# O segundo pai é sorteado excluindo o índice do primeiro (random_range_except)
-# e, quando os hashes são conhecidos (diversity_check), também todo candidato
-# com o MESMO hash do primeiro: um clone dele daria um cruzamento inútil. O
-# candidato excluído não conta (o `continue` do Rust); se todos forem
-# excluídos, o pai sai de um sorteio que só exclui o índice — o Rust varre a
-# população atrás de um hash diferente, mas com diversity_check a população
-# quase não tem repetidos e o caso é raro.
+# ONDE os torneios leem a população importa muito. A população é um valor
+# `+` compartilhado pelas tarefas da reprodução, e abrir um nó compartilhado
+# mexe nas contagens de referência dos campos: medido no nativo, descer a
+# árvore custa ~25 ns por nível, ~170 ns por sorteio numa ilha de 64 — mesmo
+# com tudo na cache. Por isso a seleção é uma passada SEQUENCIAL por ilha,
+# antes da reprodução: um retrato da população (aptidão e hash de cada
+# índice) vai para um `Array` local, onde um sorteio custa ~3 ns, e sai dali a
+# lista dos índices dos pais, dois por par. A reprodução paralela desce a
+# árvore só para buscar os DOIS genomas de cada par.
 
 def is_odd(+x: U32) -> Bool:
   Bool.not(U32.is_even(x))
 
+# A população é uma árvore perfeita de N = 2^d folhas: o indivíduo de índice
+# `i` é achado descendo d níveis, um bit de `i` por nível (do menos
+# significativo). `go_right` é o bit do nível atual, calculado no passo
+# anterior (match não escrutina valor computado).
 def sample.go(-G: Data, t: T.PopTree<Ind<G>>, go_right: Bool, +bits: U32) -> Ind<G>:
   match t go_right:
     case T.Leaf{ind} _:
@@ -214,26 +223,87 @@ def sample.go(-G: Data, t: T.PopTree<Ind<G>>, go_right: Bool, +bits: U32) -> Ind
 def sample_at(-G: Data, t: T.PopTree<Ind<G>>, +idx: U32) -> Ind<G>:
   sample.go(G, t, is_odd(idx), idx)
 
-# `best_i = n` significa "nenhum candidato ainda" (o `None` do Rust)
-def tournament.go(-G: Data, k: Nat, +pop: T.PopTree<Ind<G>>, +n: U32, +except: U32,
-                  +xh: U32, +best_i: U32, +best_f: U32, +seed: U32) -> U32:
+# Retrato da população: a aptidão do índice i na posição 2i do Array, o hash
+# em 2i+1. O índice de uma folha é o caminho até ela lido a partir do bit
+# menos significativo (o mesmo de `sample_at`): descer à direita no nível de
+# passo `step` soma `step`.
+def snapshot.go(-G: Data, t: T.PopTree<Ind<G>>, a: Array<U32>, +idx: U32, +step: U32) -> Array<U32>:
+  match t:
+    case T.Leaf{ind}:
+      Ind{_, f, h} = ind
+      +at = U32.shln(idx, 1n)
+      Array.set(U32, Array.set(U32, a, at, f), U32.inc(at), h)
+    case T.Node{left, right}:
+      +s2 = U32.shln(step, 1n)
+      snapshot.go(G, right, snapshot.go(G, left, a, idx, s2), (idx + step : U32), s2)
+
+# Todos os torneios de uma geração num laço só. O Array é afim e o retorno de
+# uma chamada não pode ser desestruturado, então não dá para ter uma função
+# "torneio" que devolva o índice E o Array: cada passo lê UM valor e as
+# decisões descem como parâmetros.
+#   r          o Array e o valor pedido no passo anterior: a aptidão do
+#              candidato `c` (fase `on_fit`) ou o seu hash
+#   fin, w     um torneio terminou no passo anterior: emitir o vencedor `w`
+#              (`emit`, aplicado ao resultado da recursão)
+#   stop       não há mais torneios (emitir `w` e parar)
+#   left       candidatos que faltam no torneio atual
+#   bi bf bh   o melhor até agora (bi >= n: nenhum, o `None` do Rust)
+#   ex xh      índice e hash excluídos (ex >= n e xh = 0: nenhum)
+#   second     o torneio atual é o do segundo pai
+#   pairs      pares que faltam, contando o atual
+def emit(fin: Bool, +w: U32, rest: List<&2, U32>) -> List<&2, U32>:
+  match fin:
+    case True{}:
+      Con{w, rest}
+    case False{}:
+      rest
+
+def select.go(k: Nat, r: Array<U32> & U32, on_fit: Bool, stop: Bool, +fin: Bool,
+              +w: U32, +c: U32, +cf: U32, +left: U32, +bi: U32, +bf: U32, +bh: U32,
+              +ex: U32, +xh: U32, +second: Bool, +pairs: U32, +n: U32, +ts: U32,
+              +seed: U32) -> List<&2, U32>:
   match k:
     case 0n:
-      Bool.pick(U32, U32.is_ge(best_i, n), R.range_except(seed, n, except), best_i)
+      Nil{}
     case 1n+p:
-      +i = R.range_except(seed, n, except)
-      +c = sample_at(G, pop, i)
-      +f = Ind.fit(G, c)
-      +skip = Bool.and(Bool.not(U32.is_zero(xh)), U32.is_eq(Ind.hash(G, c), xh))
-      +better = Bool.and(Bool.not(skip), Bool.or(U32.is_ge(best_i, n), U32.is_gt(f, best_f)))
-      tournament.go(G, p, pop, n, except, xh, pick_fit(better, i, best_i), pick_fit(better, f, best_f), R.step(seed))
+      (a, +v) = r
+      match on_fit stop:
+        case _ True{}:
+          emit(fin, w, Nil{})
+        case True{} False{}:
+          emit(fin, w, select.go(p, Array.get(U32, a, U32.inc(U32.shln(c, 1n))), False{}, False{}, False{},
+                                 w, c, v, left, bi, bf, bh, ex, xh, second, pairs, n, ts, seed))
+        case False{} False{}:
+          # o candidato `c`, de aptidão `cf` e hash `v`
+          +skip = Bool.and(Bool.not(U32.is_zero(xh)), U32.is_eq(v, xh))
+          +better = Bool.and(Bool.not(skip), Bool.or(U32.is_ge(bi, n), U32.is_gt(cf, bf)))
+          +bi2 = pick_fit(better, c, bi)
+          +bh2 = pick_fit(better, v, bh)
+          +left2 = (left - 1 : U32)
+          +done = U32.is_zero(left2)
+          # se o torneio acabou: o vencedor, e o próximo torneio — o do segundo
+          # pai (exclui o vencedor e o seu hash) ou o primeiro do próximo par
+          +w2 = Bool.pick(U32, U32.is_ge(bi2, n), R.range_except(R.split.fst(seed), n, ex), bi2)
+          +pairs2 = Bool.pick(U32, second, (pairs - 1 : U32), pairs)
+          +nex = Bool.pick(U32, done, Bool.pick(U32, second, n, w2), ex)
+          +nxh = Bool.pick(U32, done, Bool.pick(U32, second, 0, bh2), xh)
+          +nc = R.range_except(seed, n, nex)
+          select.go(p, Array.get(U32, a, U32.shln(nc, 1n)), True{},
+                    Bool.and(done, Bool.and(second, U32.is_zero(pairs2))), done,
+                    Bool.pick(U32, done, w2, w), nc, 0, Bool.pick(U32, done, ts, left2),
+                    Bool.pick(U32, done, n, bi2), Bool.pick(U32, done, 0, pick_fit(better, cf, bf)),
+                    Bool.pick(U32, done, 0, bh2), nex, nxh,
+                    Bool.pick(Bool, done, Bool.not(second), second), Bool.pick(U32, done, pairs2, pairs),
+                    n, ts, R.step(seed))
 
-# Índice do melhor de `k` sorteios entre os N indivíduos, sem sortear o
-# índice `except` (use `except >= n` para não excluir ninguém) nem um
-# indivíduo de hash `xh` (0 = não excluir por hash). Empates ficam com o
-# primeiro sorteado, como no Rust (`fitness > best_fit`).
-def tournament(-G: Data, k: Nat, +pop: T.PopTree<Ind<G>>, +n: U32, +except: U32, +xh: U32, +seed: U32) -> U32:
-  tournament.go(G, k, pop, n, except, xh, n, 0, seed)
+# Os índices dos pais de `pairs` pares, em ordem: [a0, b0, a1, b1, ...], com
+# torneios de `ts` sorteios entre os N = 2^d indivíduos de `pop`
+def select(-G: Data, +pop: T.PopTree<Ind<G>>, +d: Nat, +pairs: U32, +ts: U32, +seed: U32) -> List<&2, U32>:
+  +n = U32.shln(1, d)
+  +c = R.range_except(seed, n, n)
+  select.go(U32.to_nat((U32.shln((pairs * ts : U32), 2n) + 4 : U32)),
+            Array.get(U32, snapshot.go(G, pop, Array.new(U32, Nat.add(d, 1n), 0), 0, 1), U32.shln(c, 1n)),
+            True{}, False{}, False{}, 0, c, 0, ts, n, 0, 0, n, 0, False{}, pairs, n, ts, R.step(seed))
 
 # ----------------------------------------------------------------
 # REPRODUÇÃO (run_generation)
@@ -242,6 +312,10 @@ def tournament(-G: Data, k: Nat, +pop: T.PopTree<Ind<G>>, +n: U32, +except: U32,
 # Taxas efetivas de UMA geração, já com os multiplicadores de estagnação
 type Eff is Data:
   Eff{tsize: Nat, cross_rate: U32, mut_rate: U32, gene_rate: U32, npop: U32}
+
+def Eff.tsize(e: Eff) -> U32:
+  Eff{t, _, _, _, _} = e
+  U32.from_nat(t)
 
 def Eff.gene_rate(e: Eff) -> U32:
   Eff{_, _, _, g, _} = e
@@ -265,78 +339,96 @@ def mutate_maybe(~P: Data, ~G: Data, ~mutate: P -> G -> U32 -> U32 -> G,
     case False{}:
       g
 
+# O hash guardado de um genoma: nunca 0
+def hash_of(~P: Data, ~G: Data, ~hash: P -> G -> U32, +ctx: P, g: G) -> U32:
+  U32.max(R.mix(hash(ctx, g)), 1)
+
+# O hash de um filho recém-criado, se há diversity_check (0 = desconhecido)
+def hash_maybe(~P: Data, ~G: Data, ~hash: P -> G -> U32, on: Bool, +ctx: P, g: G) -> U32:
+  match on:
+    case True{}:
+      hash_of(~P, ~G, ~hash, ctx, g)
+    case False{}:
+      0
+
 # Um filho pronto: mutado com a chance `mr` (cada filho tem o seu sorteio,
-# como no Rust), avaliado, numa folha. `m` é a semente deste filho: o sorteio
-# usa `m` e a mutação um fluxo derivado dele (sem sobrepor o do cruzamento).
-def child_leaf(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~mutate: P -> G -> U32 -> U32 -> G,
-               +ctx: P, g: G, +mr: U32, +gr: U32, +m: U32) -> Gen<G>:
+# como no Rust), avaliado e, com diversity_check (`hon`), hasheado — como o
+# Rust, que calcula o hash ao criar o filho. Aqui isso também tira o hash da
+# passada `dedup`, que é sequencial por ilha, e o põe na reprodução, que é
+# paralela. `m` é a semente deste filho: o sorteio usa `m` e a mutação um
+# fluxo derivado dele (sem sobrepor o do cruzamento).
+def child_leaf(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
+               ~mutate: P -> G -> U32 -> U32 -> G,
+               +ctx: P, +hon: Bool, g: G, +mr: U32, +gr: U32, +m: U32) -> Gen<G>:
   +c = mutate_maybe(~P, ~G, ~mutate, R.hit(m, mr), ctx, g, gr, R.split.fst(m))
-  leaf_gen(G, c, fit(ctx, c), 0)
+  leaf_gen(G, c, fit(ctx, c), hash_maybe(~P, ~G, ~hash, hon, ctx, c))
 
 # Os dois filhos de um cruzamento viram duas folhas vizinhas. O par chega
 # como PARÂMETRO: desestruturar o retorno de uma chamada é proibido.
-def pair_leaves(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~mutate: P -> G -> U32 -> U32 -> G,
-                kids: G & G, +ctx: P, +mr: U32, +gr: U32, +m: U32) -> Gen<G>:
+def pair_leaves(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
+                ~mutate: P -> G -> U32 -> U32 -> G,
+                kids: G & G, +ctx: P, +hon: Bool, +mr: U32, +gr: U32, +m: U32) -> Gen<G>:
   (ka, kb) = kids
-  merge_gen(G, child_leaf(~P, ~G, ~fit, ~mutate, ctx, ka, mr, gr, R.split.snd(m)),
-               child_leaf(~P, ~G, ~fit, ~mutate, ctx, kb, mr, gr, R.split.trd(m)))
+  merge_gen(G, child_leaf(~P, ~G, ~fit, ~hash, ~mutate, ctx, hon, ka, mr, gr, R.split.snd(m)),
+               child_leaf(~P, ~G, ~fit, ~hash, ~mutate, ctx, hon, kb, mr, gr, R.split.trd(m)))
 
-# Um par de folhas da nova geração, a partir de dois pais escolhidos por
-# torneio na geração anterior. O par mais à esquerda (`on_elite`) é o
+# Um par de folhas da nova geração. `sel` traz os índices dos dois pais,
+# escolhidos por torneio (`select`). O par mais à esquerda (`on_elite`) é o
 # `offspring[0]` e o resto ímpar do Rust: o campeão intacto (elitismo
 # estrito) e um filho de um pai só, clonado e talvez mutado.
-def breed_pair(~P: Data, ~G: Data, ~fit: P -> G -> U32,
+def breed_pair(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
                ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
-               on_elite: Bool, +ctx: P, +seed: U32, +champ_f: U32, +champ_g: G, +champ_h: U32,
-               +pop: T.PopTree<Ind<G>>, +eff: Eff) -> Gen<G>:
+               on_elite: Bool, +sel: List<&2, U32>, +ctx: P, +hon: Bool, +seed: U32,
+               +champ_f: U32, +champ_g: G, +champ_h: U32, +pop: T.PopTree<Ind<G>>, +eff: Eff) -> Gen<G>:
   match on_elite:
     case True{}:
-      Eff{ts, _, mr, gr, +np} = eff
-      p1 = Ind.gene(G, sample_at(G, pop, tournament(G, ts, pop, np, np, 0, R.split.fst(seed))))
+      Eff{_, _, mr, gr, _} = eff
+      p1 = Ind.gene(G, sample_at(G, pop, V.nth(U32, sel, 0, 0)))
       merge_gen(G, leaf_gen(G, champ_g, champ_f, champ_h),
-                   child_leaf(~P, ~G, ~fit, ~mutate, ctx, p1, mr, gr, R.split.trd(seed)))
+                   child_leaf(~P, ~G, ~fit, ~hash, ~mutate, ctx, hon, p1, mr, gr, R.split.trd(seed)))
     case False{}:
-      Eff{ts, cr, mr, gr, +np} = eff
-      +ts = ts
-      +i1 = tournament(G, ts, pop, np, np, 0, R.split.fst(seed))
-      +a = sample_at(G, pop, i1)
-      p1 = Ind.gene(G, a)
-      p2 = Ind.gene(G, sample_at(G, pop, tournament(G, ts, pop, np, i1, Ind.hash(G, a), R.split.snd(seed))))
-      pair_leaves(~P, ~G, ~fit, ~mutate,
+      Eff{_, cr, mr, gr, _} = eff
+      p1 = Ind.gene(G, sample_at(G, pop, V.nth(U32, sel, 0, 0)))
+      p2 = Ind.gene(G, sample_at(G, pop, V.nth(U32, sel, 1, 0)))
+      pair_leaves(~P, ~G, ~fit, ~hash, ~mutate,
                   cross_maybe(~P, ~G, ~cross, R.hit(seed, cr), ctx, p1, p2, R.split.fth(seed)),
-                  ctx, mr, gr, R.split.trd(seed))
+                  ctx, hon, mr, gr, R.split.trd(seed))
 
 # Gera a próxima população, de 2^(k+1) indivíduos: `k` níveis de árvore
-# acima dos pares. As duas metades são uma CHAMADA PARALELA: sem ela, tudo
-# roda num núcleo só.
-def breed(~P: Data, ~G: Data, ~fit: P -> G -> U32,
+# acima dos pares; `sel` tem os 2^(k+1) índices de pais, dois por par, e cada
+# metade leva a sua metade. As duas metades são uma CHAMADA PARALELA: sem
+# ela, tudo roda num núcleo só.
+def breed(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
           ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
-          k: Nat, on_elite: Bool, +ctx: P, +seed: U32,
+          k: Nat, on_elite: Bool, +sel: List<&2, U32>, +ctx: P, +hon: Bool, +seed: U32,
           +champ_f: U32, +champ_g: G, +champ_h: U32, +pop: T.PopTree<Ind<G>>, +eff: Eff) -> Gen<G>:
   match k:
     case 0n:
-      breed_pair(~P, ~G, ~fit, ~cross, ~mutate, on_elite, ctx, seed, champ_f, champ_g, champ_h, pop, eff)
+      breed_pair(~P, ~G, ~fit, ~hash, ~cross, ~mutate, on_elite, sel, ctx, hon, seed, champ_f, champ_g, champ_h, pop, eff)
     case 1n+ +p:
-      gl gr = breed(~P, ~G, ~fit, ~cross, ~mutate, p, on_elite, ctx, R.split.fst(seed), champ_f, champ_g, champ_h, pop, eff) breed(~P, ~G, ~fit, ~cross, ~mutate, p, False{}, ctx, R.split.snd(seed), champ_f, champ_g, champ_h, pop, eff)
+      +half = U32.shln(2, p)
+      gl gr = breed(~P, ~G, ~fit, ~hash, ~cross, ~mutate, p, on_elite, V.take(U32, sel, half), ctx, hon, R.split.fst(seed), champ_f, champ_g, champ_h, pop, eff) breed(~P, ~G, ~fit, ~hash, ~cross, ~mutate, p, False{}, V.drop(U32, sel, half), ctx, hon, R.split.snd(seed), champ_f, champ_g, champ_h, pop, eff)
       merge_gen(G, gl, gr)
 
-# Uma geração de 2^d indivíduos (com d = 0, só o campeão)
-def breed_top(~P: Data, ~G: Data, ~fit: P -> G -> U32,
+# Uma geração de 2^d indivíduos (com d = 0, só o campeão): primeiro a
+# seleção, sequencial, depois a reprodução, paralela
+def breed_top(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
               ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
-              d: Nat, +ctx: P, +seed: U32, +champ_f: U32, +champ_g: G, +champ_h: U32,
+              d: Nat, +ctx: P, +hon: Bool, +seed: U32, +champ_f: U32, +champ_g: G, +champ_h: U32,
               +pop: T.PopTree<Ind<G>>, +eff: Eff) -> Gen<G>:
   match d:
     case 0n:
       leaf_gen(G, champ_g, champ_f, champ_h)
-    case 1n+p:
-      breed(~P, ~G, ~fit, ~cross, ~mutate, p, True{}, ctx, seed, champ_f, champ_g, champ_h, pop, eff)
+    case 1n+ +p:
+      +sel = select(G, pop, Nat.add(p, 1n), U32.shln(1, p), Eff.tsize(eff), R.split.snd(seed))
+      breed(~P, ~G, ~fit, ~hash, ~cross, ~mutate, p, True{}, sel, ctx, hon, R.split.fst(seed), champ_f, champ_g, champ_h, pop, eff)
 
-def next_gen(~P: Data, ~G: Data, ~fit: P -> G -> U32,
+def next_gen(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
              ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
-             gen: Gen<G>, d: Nat, +ctx: P, +eff: Eff, +seed: U32) -> Gen<G>:
+             gen: Gen<G>, d: Nat, +ctx: P, +hon: Bool, +eff: Eff, +seed: U32) -> Gen<G>:
   match gen:
     case Gen{+tree, cf, cg, ch}:
-      breed_top(~P, ~G, ~fit, ~cross, ~mutate, d, ctx, seed, cf, cg, ch, tree, eff)
+      breed_top(~P, ~G, ~fit, ~hash, ~cross, ~mutate, d, ctx, hon, seed, cf, cg, ch, tree, eff)
 
 # ----------------------------------------------------------------
 # DIVERSIDADE (diversity_check)
@@ -354,9 +446,10 @@ def next_gen(~P: Data, ~G: Data, ~fit: P -> G -> U32,
 # o hash NOVO que é marcado, como no Rust. O elite é o primeiro da ordem,
 # então nunca é tocado.
 #
-# Só é calculado o hash de quem ainda não tem (hash 0): os filhos recém-
-# criados. O elite e os demais indivíduos já trazem o seu. Os hashes guardados
-# nunca são 0 (0 é "desconhecido").
+# Os filhos já chegam com o hash, calculado na reprodução paralela
+# (`child_leaf`), e o elite traz o seu: aqui só é calculado o de quem ainda
+# não tem (hash 0) — um migrante ou o melhor reintroduzido. Os hashes
+# guardados nunca são 0 (0 é "desconhecido").
 #
 # O conjunto tem 2^16 bits: uma colisão entre hashes diferentes (chance
 # ~N/65536) só causa uma mutação a mais — inofensiva.
@@ -396,10 +489,6 @@ def word_of(+h: U32) -> U32:
 
 def bit_in(+h: U32) -> U32:
   U32.shln(1, U32.to_nat(U32.and(h, 31)))
-
-# O hash guardado de um genoma: nunca 0
-def hash_of(~P: Data, ~G: Data, ~hash: P -> G -> U32, +ctx: P, g: G) -> U32:
-  U32.max(R.mix(hash(ctx, g)), 1)
 
 def fill_hash.go(~P: Data, ~G: Data, ~hash: P -> G -> U32,
                  missing: Bool, +ctx: P, +g: G, f: U32, h: U32) -> Ind<G>:
@@ -581,7 +670,7 @@ def island_step(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~
   match isl:
     case Island{gen, +bf, bg, +ss, +sf, +g}:
       +eff = effective(cfg, (g - ss : U32))
-      +gen1 = next_gen(~P, ~G, ~fit, ~cross, ~mutate, gen, Config.pop_d(cfg), ctx, eff, seed)
+      +gen1 = next_gen(~P, ~G, ~fit, ~hash, ~cross, ~mutate, gen, Config.pop_d(cfg), ctx, Config.diversity(cfg), eff, seed)
       +gen2 = diversify(~P, ~G, ~fit, ~mutate, ~hash, Config.diversity(cfg), gen1, Config.pop_d(cfg),
                         ctx, R.scale(Eff.gene_rate(eff), {4.0 : F32}), R.split.fth(seed))
       +cur = Gen.bfit(G, gen2)
