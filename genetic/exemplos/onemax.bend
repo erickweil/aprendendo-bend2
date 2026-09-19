@@ -31,16 +31,19 @@ def fitness(gene: U32) -> U32:
 def reproduce(parent: U32, champ: U32, seed: U32) -> U32:
   Op.pipe(~U32, ~Op.cross_bits_uniform, ~Op.mut_bit_flip32, parent, champ, seed)
 
-def main() -> IO(Unit):  
+def main() -> IO(Unit):
     +s0 = {12345678 : U32}
-    # População inicial: 32 indivíduos (árvore de profundidade 5)
-    +pop0 = GA.gen_population(~U32, ~init_gene, ~fitness, 5n, s0)
-    +best0 = GA.best_ind(U32, pop0)
-    +f0 = GA.Ind.fit(U32, best0)
+    # População inicial: 32 indivíduos (árvore de profundidade 5). `first_gen`
+    # já devolve o campeão junto, descoberto na própria construção da árvore.
+    +gen0 = GA.first_gen(~U32, ~init_gene, ~fitness, 5n, s0)
+    +gen0 = gen0
+    +f0 = GA.Gen.bfit(U32, gen0)
 
-    # Evolução por 25 gerações com elitismo no motor genérico ga.bend
-    +pop_fin = GA.run_generations(~U32, ~reproduce, ~fitness, 25n, pop0, R.step(s0))
-    +best_fin = GA.best_ind(U32, pop_fin)
+    # Evolução por 25 gerações com elitismo no motor genérico ga.bend.
+    # O campeão atravessa o laço dentro do `Gen`, então ler o resultado não
+    # percorre a árvore final de novo.
+    +gen_fin = GA.run_gen_loop(~U32, ~reproduce, ~fitness, 25n, gen0, R.step(s0))
+    +best_fin = GA.Gen.best(U32, gen_fin)
     +f_fin = GA.Ind.fit(U32, best_fin)
     +g_fin = GA.Ind.gene(U32, best_fin)
 

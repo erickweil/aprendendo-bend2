@@ -19,7 +19,7 @@ import ./utils/bits.bend as B
 # tempo de compilação): o operador escolhido NÃO vira uma closure
 # em runtime, é inlinado no ponto de chamada. Cada combinação
 # distinta gera sua própria cópia especializada — abstração de
-# custo zero, verificada pelas Leis 16-22 em LAWS.bend / PROOF.bend.
+# custo zero, verificada pelas Leis 8-11 em LAWS.bend / PROOF.bend.
 # ================================================================
 
 # ----------------------------------------------------------------

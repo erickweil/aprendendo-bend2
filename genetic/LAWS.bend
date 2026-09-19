@@ -9,10 +9,11 @@
 import Base
 import ./../utils/random.bend as R
 import ./utils/poptree.bend as Tree
-import ./utils/island.bend as Island
 import ./utils/bits.bend as Bits
 import ./stats.bend as Stats
 import ./operators.bend as Op
+import ./ga.bend as GA
+import ./utils/genes.bend as Genes
 
 # ----------------------------------------------------------------
 # PARTE 1: LEIS DE REDUÇÃO ESTATÍSTICA (PopStats)
@@ -64,79 +65,7 @@ law stats_leaf_sum:
   {Stats.PopStats.sum(Stats.leaf_stats(v)) == v : U32}
 
 # ----------------------------------------------------------------
-# PARTE 2: LEIS DA ÁRVORE POPULACIONAL (PopTree)
-# ----------------------------------------------------------------
-
-# LEI 8: Invariante Estrutural do Elitismo (Preservação do Tamanho da População)
-# Injetar um indivíduo de elite na população preserva exatamente o número de indivíduos da árvore:
-# tree_size(inject_elite(tree, elite)) == tree_size(tree)
-law elite_preserves_size:
-  for +tree: Tree.PopTree<U32>
-  for +elite: U32
-  {Tree.tree_size(U32, Tree.inject_elite(U32, tree, elite)) == Tree.tree_size(U32, tree) : Nat}
-
-# LEI 9: Dimensão da População em Árvore Balanceada
-# Uma população gerada a uma profundidade d contém exatamente 2^d indivíduos:
-# tree_size(gen_uniform(d, val)) == pow2(d)
-law gen_uniform_size:
-  for +d: Nat
-  for +val: U32
-  {Tree.tree_size(U32, Tree.gen_uniform(U32, d, val)) == Tree.pow2(d) : Nat}
-
-# LEI 10: Involução do Espelhamento da População (Involutive Reverse)
-# Espelhar uma árvore populacional duas vezes retorna à árvore original exata:
-# tree_reverse(tree_reverse(tree)) == tree
-law tree_reverse_involutive:
-  for +tree: Tree.PopTree<U32>
-  {Tree.tree_reverse(U32, Tree.tree_reverse(U32, tree)) == tree : Tree.PopTree<U32>}
-
-# LEI 11: Altura Balanceada da População Uniforme
-# Uma árvore uniforme de profundidade d possui exatamente profundidade d:
-# tree_depth(gen_uniform(d, val)) == d
-law tree_depth_uniform:
-  for +d: Nat
-  for +val: U32
-  {Tree.tree_depth(U32, Tree.gen_uniform(U32, d, val)) == d : Nat}
-
-# ----------------------------------------------------------------
-# PARTE 3: LEIS DO MOTOR GENÉTICO PARALELO (Island Model / PGA)
-# ----------------------------------------------------------------
-
-# LEI 12: Conservação de Ilhas na Migração do Campeão
-# A fase de migração distribui o campeão sem criar ou destruir ilhas ativas:
-# island_count(migrate(arch, champion)) == island_count(arch)
-law migration_preserves_islands:
-  for +arch: Island.Archipelago<U32>
-  for +champ: U32
-  {Island.island_count(U32, Island.migrate(U32, arch, champ)) == Island.island_count(U32, arch) : Nat}
-
-# LEI 13: Conservação da Capacidade Global na Migração
-# A difusão do campeão entre ilhas preserva exatamente o número total de indivíduos no arquipélago:
-# total_pop_size(migrate(arch, champion)) == total_pop_size(arch)
-law migration_preserves_total_pop:
-  for +arch: Island.Archipelago<U32>
-  for +champ: U32
-  {Island.total_pop_size(U32, Island.migrate(U32, arch, champ)) == Island.total_pop_size(U32, arch) : Nat}
-
-# LEI 14: Topologia Dimensional do Arquipélago
-# Um arquipélago bifurcado em profundidade d contém exatamente 2^d ilhas paralelas:
-# island_count(gen_archipelago(d, pop_depth, val)) == pow2(d)
-law archipelago_dimension:
-  for +d: Nat
-  for +pop_depth: Nat
-  for +val: U32
-  {Island.island_count(U32, Island.gen_archipelago(U32, d, pop_depth, val)) == Tree.pow2(d) : Nat}
-
-# LEI 15: Capacidade Populacional da Ilha Individual
-# Uma ilha individual gerada com profundidade pop_depth contém exatamente 2^pop_depth indivíduos:
-# total_pop_size(SingleIsland{gen_uniform(pop_depth, val)}) == pow2(pop_depth)
-law single_island_capacity:
-  for +pop_depth: Nat
-  for +val: U32
-  {Island.total_pop_size(U32, Island.SingleIsland{Tree.gen_uniform(U32, pop_depth, val)}) == Tree.pow2(pop_depth) : Nat}
-
-# ----------------------------------------------------------------
-# PARTE 4: LEIS DOS COMBINADORES DE OPERADORES (operators.bend)
+# PARTE 2: LEIS DOS COMBINADORES DE OPERADORES (operators.bend)
 # ----------------------------------------------------------------
 # Estas leis respondem formalmente à pergunta "os combinadores
 # higher-order custam alguma coisa?": elas afirmam que o pipeline
@@ -145,7 +74,7 @@ law single_island_capacity:
 # lados normalizam para o mesmo termo — a abstração desaparece
 # em tempo de compilação, e não apenas "roda igualmente rápido".
 
-# LEI 16: Pipeline de Reprodução Binário = Código Manual
+# LEI 8: Pipeline de Reprodução Binário = Código Manual
 # O `Op.pipe` sobre crossover uniforme + flip de bit é exatamente o
 # corpo original escrito à mão do Cenário 1 (One-Max):
 #   s1 = step(seed); s2 = step(s1)
@@ -157,7 +86,7 @@ law pipe_bits_is_manual_code:
   {Op.pipe(~U32, ~Op.cross_bits_uniform, ~Op.mut_bit_flip32, parent, champ, seed)
    == Bits.mutate_bit(Bits.crossover_uniform(parent, champ, R.step(seed)), R.step(R.step(seed))) : U32}
 
-# LEI 18: Encadeamento de Mutações = Composição das Duas Mutações
+# LEI 9: Encadeamento de Mutações = Composição das Duas Mutações
 # `chain_mutations` (equivalente do `mutation_combine` original) aplica
 # ambos os operadores em sequência com sementes bifurcadas.
 law chain_mutations_is_composition:
@@ -166,7 +95,7 @@ law chain_mutations_is_composition:
   {Op.chain_mutations(~U32, ~Op.mut_bit_flip32, ~Op.mut_bits_invert_block, g, seed)
    == Op.mut_bits_invert_block(Op.mut_bit_flip32(g, R.split.fst(seed)), R.split.snd(seed)) : U32}
 
-# LEI 19: Despacho Exclusivo de Mutação (ramo verdadeiro)
+# LEI 10: Despacho Exclusivo de Mutação (ramo verdadeiro)
 # Nenhum trabalho do operador descartado é realizado: o `match` sobre
 # Bool escolhe um único ramo, e o outro nunca é construído.
 law branch_mut_true_selects_first:
@@ -175,10 +104,61 @@ law branch_mut_true_selects_first:
   {Op.branch_mut(~U32, ~Op.mut_bit_flip32, ~Op.mut_bits_invert_block, True{}, g, seed)
    == Op.mut_bit_flip32(g, seed) : U32}
 
-# LEI 20: Despacho Exclusivo de Mutação (ramo falso)
+# LEI 11: Despacho Exclusivo de Mutação (ramo falso)
 law branch_mut_false_selects_second:
   for +g: U32
   for +seed: U32
   {Op.branch_mut(~U32, ~Op.mut_bit_flip32, ~Op.mut_bits_invert_block, False{}, g, seed)
    == Op.mut_bits_invert_block(g, seed) : U32}
 
+
+# ----------------------------------------------------------------
+# PARTE 3: LEIS DO MOTOR REAL (ga.bend)
+# ----------------------------------------------------------------
+# Leis sobre o arquipélago e a fusão de gerações que o motor realmente
+# executa (o `ArchTree` e o `merge_gen` de ga.bend).
+
+# LEI 12: Conservação de Ilhas na Migração (arquipélago REAL do motor)
+# A migração do campeão global não cria nem destrói ilhas:
+# arch_island_count(migrate_champion(arch, champ)) == arch_island_count(arch)
+law arch_migration_preserves_islands:
+  for +arch: GA.ArchTree<U32>
+  for +champ: GA.Ind<U32>
+  {GA.arch_island_count(U32, GA.migrate_champion(U32, arch, champ))
+   == GA.arch_island_count(U32, arch) : Nat}
+
+# LEI 13: a fusão de duas meias-gerações soma exatamente as duas populações
+law merge_gen_size:
+  for +gl: GA.Gen<U32>
+  for +gr: GA.Gen<U32>
+  {Nat.add(Tree.tree_size(GA.Ind<U32>, GA.Gen.pop(U32, gl)), Tree.tree_size(GA.Ind<U32>, GA.Gen.pop(U32, gr)))
+   == Tree.tree_size(GA.Ind<U32>, GA.Gen.pop(U32, GA.merge_gen(U32, gl, gr))) : Nat}
+
+# ----------------------------------------------------------------
+# PARTE 4: LEIS DO VETOR DE GENES (utils/genes.bend)
+# ----------------------------------------------------------------
+
+# LEI 14: `take` e `drop` particionam a lista exatamente
+# take(l, k) ++ drop(l, k) == l, para qualquer k.
+# É o invariante que sustenta `rotate` — e, por consequência, o OX1, que
+# monta o filho como uma rotação de `faltantes ++ segmento`. Se a partição
+# perdesse ou duplicasse um gene, o filho deixaria de ser uma permutação.
+#
+# Enunciada sobre os `.go`, que é onde a condição do passo é um parâmetro:
+# nas versões de entrada ela é calculada por dentro e o verificador não teria
+# como reduzir o termo.
+law take_drop_split:
+  for +l: List<&2, U32>
+  for  s: Bool
+  for +k: U32
+  {Genes.append(U32, Genes.take.go(U32, l, s, k), Genes.drop.go(U32, l, s, k)) == l : List<&2, U32>}
+
+# PENDENTE (LEI 15): "a reprodução preserva o tamanho da população".
+# O enunciado seria
+#   tree_size(Gen.pop(breed_tree(~repro, ~fit, tree, on_elite, seed, cf, cg)))
+#     == tree_size(tree)
+# e a indução estrutural é trivial no papel, mas as reescritas `%` encadeadas
+# no caso Node não convergiram: as duas hipóteses de indução precisam ser
+# aplicadas dentro de um `Nat.add` cujos dois lados mudam, e o motivo aceito
+# pelo verificador nessa posição não foi encontrado. A Lei 22 acima já cobre a
+# metade difícil (a fusão soma as duas populações); falta só fechar a indução.

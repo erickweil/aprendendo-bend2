@@ -25,9 +25,13 @@ def merge_stats(+a: PopStats, +b: PopStats) -> PopStats:
   +count = (ac + bc : U32)
   make_stats(best, worst, sum, count)
 
-def PopStats.mean(s: PopStats) -> U32:
-  PopStats{_, _, sum, +count} = s
+# Média protegida contra população vazia (count == 0)
+def mean_of(+sum: U32, +count: U32) -> U32:
   Bool.pick(U32, U32.is_eq(count, 0), 0, (sum / count : U32))
+
+def PopStats.mean(s: PopStats) -> U32:
+  PopStats{_, _, sum, count} = s
+  mean_of(sum, count)
 
 def PopStats.count(s: PopStats) -> U32:
   PopStats{_, _, _, c} = s
@@ -51,5 +55,5 @@ def PopStats.spread(s: PopStats) -> U32:
 
 def PopStats.show(s: PopStats) -> String:
   PopStats{best, worst, sum, +count} = s
-  +mean_val = Bool.pick(U32, U32.is_eq(count, 0), 0, (sum / count : U32))
+  +mean_val = mean_of(sum, count)
   "[Melhor: " ++ U32.show(best) ++ " | Pior: " ++ U32.show(worst) ++ " | Média: " ++ U32.show(mean_val) ++ " | N: " ++ U32.show(count) ++ "]"

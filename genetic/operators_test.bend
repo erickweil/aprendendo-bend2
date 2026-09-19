@@ -1,7 +1,7 @@
 import Base
 import ./../utils/random.bend as R
 import ./utils/bits.bend as B
-import operators.bend as Op
+import ./operators.bend as Op
 
 # ================================================================
 # TESTE EXAUSTIVO DA BIBLIOTECA DE OPERADORES (operators.bend)
