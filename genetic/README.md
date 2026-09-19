@@ -194,12 +194,11 @@ cruzamento de 1 ponto com 90%, mutação com 90% e taxa por gene 1/N, torneio de
 rota ótima de pontos num círculo é o polígono convexo, de comprimento conhecido
 (≈ 3106): o exemplo é verificável, e o GA a encontra em 8/8 sementes testadas.
 
-**`sudoku.bend`** — porte do `sudoku.ts`, com uma codificação melhor: cada
-linha guarda só os valores das células livres, como permutação dos dígitos que
-faltam. Linhas corretas e dicas intactas **por construção** (no TS as dicas
-eram mantidas por um bônus de +8 na aptidão e o OX1 podia movê-las). Aptidão
-= dígitos distintos por coluna + por caixa (162 = resolvido). Configuração do
-teste do TS: torneio 10, 90%/90%, 1/81 por gene, diversity_check.
+**`sudoku.bend`** — adaptação do `sudoku.ts`. Cada linha guarda só os valores
+das células livres, como permutação dos dígitos que faltam: linhas corretas e
+dicas intactas por construção. Aptidão = dígitos distintos por coluna + por
+caixa (162 = resolvido). Configuração do teste do TS: torneio 10, 90%/90%,
+1/81 por gene, diversity_check.
 
 | puzzle | resolvidos (12 sementes, até 2000 gerações) |
 |---|---|
@@ -207,12 +206,15 @@ teste do TS: torneio 10, 90%/90%, 1/81 por gene, diversity_check.
 | 1 — médio (32 dicas) | 12/12, em 20–40 gerações |
 | 2 — "difícil" (23 dicas) | 0/12 (para em 158–160) |
 
-Uma ressalva honesta: os três puzzles, inclusive o "difícil", se resolvem
-inteiros só com propagação de restrições simples (candidato único e lugar
-único numa unidade). O "difícil" é difícil para o GA, não para um solucionador
-de sudoku. O próximo passo natural é usar os **candidatos** no GA — mutação
-que só troca valores que são candidatos válidos nas duas células — em vez de
-propagar tudo antes (o que resolveria o puzzle sem o GA).
+**Esta codificação é um passo atrás em relação ao TS, não uma melhoria.**
+Travar as dicas elimina justamente os caminhos por estados inválidos que
+permitem sair do mínimo local: nos experimentos com a versão TS, deixar o OX1
+mover as dicas (mantidas só por um bônus na aptidão) foi essencial. Outras duas
+lições da versão TS que ainda faltam aqui: mutação baixa, que em média faz uma
+única alteração no quadro inteiro; e o fato de um quadro VAZIO ser ordens de
+grandeza mais fácil de completar pelo GA do que um parcialmente preenchido.
+Os três puzzles, aliás, se resolvem inteiros por propagação simples de
+restrições — o "difícil" é difícil para o GA, não para o sudoku.
 
 ## Leis formais
 

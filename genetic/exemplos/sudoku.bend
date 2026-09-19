@@ -10,16 +10,15 @@ import ./../ga.bend as GA
 # ================================================================
 # CENÁRIO 4: SUDOKU (sudoku.bend)
 # ================================================================
-# Porte do `src/lib/genetic/examples/sudoku.ts`, com uma diferença de
-# codificação que elimina uma classe inteira de soluções inválidas.
+# Adaptação do `src/lib/genetic/examples/sudoku.ts`.
 #
 # Genoma.....: 9 linhas; cada linha guarda APENAS os valores das células
-#              livres, como uma permutação dos dígitos que faltam nela.
-#              Consequências, por construção:
-#                - toda linha tem 1..9 exatamente uma vez;
-#                - as dicas nunca mudam.
-#              (No TS a linha inteira era o genoma, as dicas eram mantidas por
-#              um bônus de +8 na aptidão, e o OX1 podia movê-las.)
+#              livres, como uma permutação dos dígitos que faltam nela: toda
+#              linha tem 1..9 e as dicas nunca mudam.
+#              ATENÇÃO: isso é mais restritivo que o TS, onde a linha inteira é
+#              o genoma, as dicas valem um bônus de +8 e o OX1 pode movê-las —
+#              e poder alterar as dicas é o que ajuda a sair do mínimo local.
+#              Veja o README do motor.
 # Aptidão....: dígitos distintos em cada coluna + em cada caixa 3x3.
 #              Máximo 81 + 81 = 162 = resolvido.
 # Cruzamento.: por linha, como no TS: 50% OX1 entre as linhas dos pais,

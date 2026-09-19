@@ -1,5 +1,7 @@
 # AGENTS.md — Guia de Engenharia e Operação em Bend 2
 
+> Verificado contra o **bend 2.0.16**. Ao atualizar o bend, regenere o GUIDE.md e reverifique as armadilhas com sondas curtas compiladas para nativo.
+
 ## 1. Como Orquestrar a Execução do Bend 2 com Segurança
 
 O Bend 2 é construído sobre a HVM — High-order Virtual Machine, o runtime reduz redes de interação (*interaction combinators*) de forma preguiçosa e paralela. Se o código for mal projetado, ele pode entrar em ciclos de reescrita infinita ou expansão exponencial de nós de duplicação (`dup`), **consumindo 100% de CPU em todos os núcleos e gerando Out-Of-Memory (OOM)** que pode levar o kernel Linux a matar o processo.
@@ -79,7 +81,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 
 * **Alternativa mais simples:** quando o resultado é uma lista de mensagens ou um acumulador, dispense o branch — use um auxiliar **não recursivo** que devolve `Nil{}` ou um singleton e concatene com a recursão direta.
 
-*(Nota: `Bool.pick` entre números primitivos escalares `U32` é seguro e extremamente rápido, funcionando como um `cmov` em hardware).*
+*(Nota: `Bool.pick` entre escalares é seguro, mas o `bend guide shaders` do 2.0.16 avisa que o `Bool.pick` genérico **encaixota** as palavras, e sobre árvores faz o valor ser compartilhado (contagens de referência). Prefira seletores tipados escritos com `match`, como `def word(c: Bool, a: U32, b: U32) -> U32`. E ao testar a estritez, use uma condição de runtime: com `True{}` literal o compilador dobra o `Bool.pick` e o ramo pesado some.)*
 
 * **Closures só executam quando chamadas:** é possível desenvolver um 'or_else' do rust por passar closures `x => ...` para cada ramo, porém isso não é 0-cost, exige um custo de indireção, (lembrando que para poder passar closure assim que captura estado ela só pode ser chamada uma vez)
 
@@ -96,6 +98,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
   ```
   Medido no motor genético: com as duas linhas, 12 threads rodavam na mesma velocidade que 1.
 * **Tarefas que compartilham uma estrutura grande não escalam.** Seleção por torneio sobre a população inteira faz toda tarefa segurar uma cópia `+pop` da geração anterior; ela só é liberada quando a última tarefa termina, e por uma thread só. Medido: 1,0× com 12 threads. O mesmo torneio **dentro de ilhas** independentes (`run_archipelago_tourney`) escala 2,8× — perto do teto da máquina.
+* **Um valor `+` lido por todas as tarefas custa um atômico por leitura** (GUIDE, desde o 2.0.16). Contexto, configuração e população compartilhados entre tarefas pagam isso. O `bend guide shaders` recomenda passar constantes como argumento template `~` (uma def como `Tela.w()`), não como parâmetro: "um parâmetro viaja em toda tarefa".
 * **Balanceie.** O fork-join não rouba trabalho: se um lado termina antes, aquele núcleo fica ocioso. Numa CPU híbrida (núcleos P + E) a tarefa mais lenta dita o tempo. E nunca haverá mais tarefas pesadas simultâneas do que folhas na árvore de chamadas paralelas (8 ilhas ⇒ platô em 8 threads).
 * **Passadas sequenciais contam (Amdahl).** O `diversity_check` do motor é uma passada sequencial por ilha: com uma ilha só, 12 threads não ganham nada. Com várias ilhas, cada passada roda na tarefa da sua ilha.
 * **Volume de dados limita.** O mesmo GA, mesma forma, mesmo trabalho total: 3,16× com genomas de 10 mil genes (cabem em cache), 1,45× com 1 milhão (500 MB, limitado por banda de memória).
@@ -207,12 +210,14 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
   def cross.go(-A: Data, ~pred: U32 -> Bool, ...)   # ❌ quebra na chamada recursiva
   def cross.go(~pred: U32 -> Bool, -A: Data, ...)   # ✔️
   ```
-* **Um `~` não pode aninhar dentro de outro `~`.** Não existe forma de compor templates:
+* **Templates aninhados FUNCIONAM desde o 2.0.16** (no 2.0.9 falhavam com `expected: a term, observed: '~'`). Verificado no nativo:
   ```bend
-  breed_tree_eval(~G, ~(p => c => s => f(p, c, s)), ...)   # ❌ expected: a term
-  breed_tree_eval(~G, ~eval_child(~G, ~repro, ~fit), ...)  # ❌ expected: a term
+  ap(~(x => (x + 10 : U32)), 1)                          # ✔️ lambda como template
+  use(~U32, ~eval_child(~U32, ~rp, ~ft), 1, 2)            # ✔️ aplicação parcial de função com templates
+  def outer(~h: U32 -> U32, x: U32) -> U32: ap(~twice(~h), x)   # ✔️ capturando um template externo
   ```
-  Consequência prática: duas funções que só diferem no tipo de retorno do template (`G` vs `Ind<G>`) **não podem** ser unificadas numa só — têm de ser escritas em duplicata.
+  Isso permite compor operadores (ex.: um `mutation_combine` que monta uma mutação a partir de outras) sem duplicar código.
+* **Cada especialização de template conta como uma "unsafe annotation"** no 2.0.16: `ap(~inc, 1)` sozinho já faz o checker dizer `All terms check, with 1 unsafe annotation`. A cópia especializada não é reverificada (o corpo genérico já foi). Não confunda com `@unsafe` explícito — veja o checklist.
 * **O template exige a assinatura exata, inclusive quantidades.** Uma função com `+` nos parâmetros não serve para um template declarado sem `+`:
   ```bend
   def popcount(+x: U32) -> U32: ...
@@ -225,7 +230,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 ### 🔴 Armadilha 8: O que o `match` múltiplo não deixa fazer
 > **Conceito:** `match a b:` escrutina vários valores de uma vez, mas é rígido.
 
-* **Não existe caso coringa.** Todas as combinações têm de ser escritas — três listas viram oito casos. `case outro:` é rejeitado com `expected: N patterns (one per scrutinee)`.
+* **O coringa é um `_` por escrutinado:** `case _ _:` (dois escrutinados), `case Nil{} _ _:` etc. Um único nome para todos (`case outro:`) é rejeitado com `expected: N patterns (one per scrutinee)` — versões anteriores deste guia concluíram errado, a partir dessa forma, que não havia coringa. Use-o para cortar os casos degenerados de um `match` múltiplo.
 * **Não se aninha `match` sobre um campo ligado por um `match` múltiplo:**
   ```bend
   match l hit:
@@ -260,7 +265,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 ### 🔴 Armadilha 10: Ordem dos Parâmetros e dos Bindings
 * **O tipo de um template não pode citar um tipo declarado depois dele.** `def f(~key: G -> U32, -G: Data, ...)` passa no verificador mas falha no nativo com "expected: a defined name, observed: G". Declare o tipo primeiro, como template: `def f(~G: Data, ~key: G -> U32, ...)`.
 * **`match` depois de um `let` é rejeitado** ("this name is a def or a consumed binder"). Faça o `match` primeiro e os `let`s dentro de cada caso — inclusive `(a, v) = par`, que também é um `match`.
-* **Rebind com `+x = x` dentro de um caso de `match` pode falhar** pelo mesmo motivo; prefira o `+` direto no padrão: `case Con{+h, t}:`.
+* **`+x = x` dentro de um caso de `match` funciona** (verificado no 2.0.16). O que falha é um `let` seguido de um `match` ou de uma desestruturação `(a, v) = par` no mesmo bloco; nesse caso use o `+` direto no padrão: `case Con{+h, t}:`.
 * **`IO.args` é `List<&1, String>`, afim:** só pode ser percorrida uma vez e não aceita `+`. Converta de uma vez para uma lista `Data` (`utils/io.bend`: `numbers` + `num_at`).
 
 ---
@@ -291,7 +296,7 @@ aprendendo-bend2/
     ├── stats.bend             # Estatísticas de população
     ├── LAWS.bend / PROOF.bend # Leis formais e suas provas
     ├── utils/                 # poptree, genes (núcleo do vetor de genes)
-    └── exemplos/              # onemax, sorting, tsp
+    └── exemplos/              # onemax, sorting, tsp, sudoku
 ```
 
 
@@ -300,7 +305,9 @@ aprendendo-bend2/
 ## 4. Checklist de Verificação Antes de Enviar Commits
 
 ```bash
-# 1. Verificar provas formais (Não permita a utilização de @unsafe pois são ignorados pelo verificador)
+# 1. Verificar provas formais. Não permita `@unsafe` EXPLÍCITO (a terminação dessa def não é verificada).
+#    As "unsafe annotations" que o 2.0.16 conta por especialização de template (`~`) são outra coisa:
+#    contam as cópias especializadas, que não são reverificadas, e aparecem em qualquer código com templates.
 timeout 60s bend nome-do-arquivo.bend --checkup
 # ATENÇÃO ao par LAWS.bend / PROOF.bend: `LAWS.bend` sozinho SEMPRE reporta
 # TODOs (é só o enunciado), então `--checkup` falha nele — ele checa cada
