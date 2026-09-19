@@ -79,7 +79,7 @@ def clones(k: Nat) -> List<&2, GA.Ind<U32>>:
     case 0n:
       Nil{}
     case 1n+p:
-      Con{GA.Ind{777, 5}, clones(p)}
+      Con{GA.Ind{777, 5, 0}, clones(p)}
 
 def genes_of(l: List<&2, GA.Ind<U32>>) -> List<&2, U32>:
   match l:
@@ -110,9 +110,63 @@ def distinct(l: List<&2, U32>) -> U32:
   distinct.sorted(List.sort(~U32, ~le, l))
 
 def diversified(on: Bool) -> List<&2, U32>:
-  +g = GA.rebuild(U32, 4n, clones(16n), GA.Ind{0, 0})
+  +g = GA.rebuild(U32, 4n, clones(16n), GA.Ind{0, 0, 0})
   genes_of(GA.flatten(U32, GA.Gen.pop(U32,
     GA.diversify(~U32, ~U32, ~fit, ~mutate, ~hash, on, g, 4n, 0, R.per(1, 2), 99))))
+
+# Hash guardado: depois da passada, todo indivíduo tem o hash do SEU genoma
+# (aqui `hash` é a identidade, então o guardado é max(mix(g), 1))
+def hash_ok(l: List<&2, GA.Ind<U32>>) -> U32:
+  match l:
+    case Nil{}:
+      0
+    case Con{+i, t}:
+      (ok(U32.is_eq(GA.Ind.hash(U32, i), U32.max(R.mix(GA.Ind.gene(U32, i)), 1))) + hash_ok(t) : U32)
+
+def div_inds(+l: List<&2, GA.Ind<U32>>, +d: Nat) -> List<&2, GA.Ind<U32>>:
+  GA.flatten(U32, GA.Gen.pop(U32,
+    GA.diversify(~U32, ~U32, ~fit, ~mutate, ~hash, True{}, GA.rebuild(U32, d, l, GA.Ind{0, 0, 0}), d, 0, R.per(1, 2), 99)))
+
+# Hash já conhecido não é recalculado: genes distintos com hashes guardados
+# fictícios (k+1) saem com os mesmos hashes fictícios
+def fake(k: Nat) -> List<&2, GA.Ind<U32>>:
+  match k:
+    case 0n:
+      Nil{}
+    case 1n+ +p:
+      Con{GA.Ind{U32.from_nat(p), 5, U32.inc(U32.from_nat(p))}, fake(p)}
+
+def kept_fake(l: List<&2, GA.Ind<U32>>, +k: U32) -> U32:
+  match l:
+    case Nil{}:
+      0
+    case Con{i, t}:
+      (ok(U32.is_eq(GA.Ind.hash(U32, i), k)) + kept_fake(t, (k - 1 : U32)) : U32)
+
+# Re-hash depois de remutar: com a mutação g -> g+1, [777, 777, 778] vira
+# [777, 778, 779] — o terceiro repete o hash NOVO do segundo. Sem marcar o
+# hash novo ficaria [777, 778, 778].
+def plus1(ctx: U32, g: U32, rate: U32, seed: U32) -> U32:
+  U32.inc(g)
+
+def rh_list() -> List<&2, GA.Ind<U32>>:
+  Con{GA.Ind{777, 5, 0}, Con{GA.Ind{777, 5, 0}, Con{GA.Ind{778, 5, 0}, Con{GA.Ind{1, 5, 0}, Nil{}}}}}
+
+def rehashed() -> U32:
+  +l = rh_list()
+  distinct(genes_of(GA.flatten(U32, GA.Gen.pop(U32,
+    GA.diversify(~U32, ~U32, ~fit, ~plus1, ~hash, True{}, GA.rebuild(U32, 2n, l, GA.Ind{0, 0, 0}), 2n, 0, 1, 7)))))
+
+# Torneio com exclusão por hash: as três primeiras folhas têm hash 9
+# (aptidões 50, 40, 30), a última tem hash 8 e aptidão 1. O índice desce a
+# árvore pelo bit MENOS significativo primeiro, então as folhas em ordem são
+# os índices 0, 2, 1, 3. Excluindo o índice 0 e o hash 9, só o 3 pode vencer;
+# sem excluir por hash vence o 2 (aptidão 40, o melhor fora o índice 0).
+def tpop(h3: U32) -> GA.Gen<U32>:
+  GA.rebuild(U32, 2n, Con{GA.Ind{0, 50, 9}, Con{GA.Ind{1, 40, 9}, Con{GA.Ind{2, 30, 9}, Con{GA.Ind{3, 1, h3}, Nil{}}}}}, GA.Ind{0, 0, 0})
+
+def tourney(+h3: U32, +xh: U32, +seed: U32) -> U32:
+  GA.tournament(U32, 20n, GA.Gen.pop(U32, tpop(h3)), 4, 0, xh, seed)
 
 def main() -> IO(Unit):
   +c75 = GA.config(7, 2000, 1000, 10, 100, 0, 4, 0)
@@ -134,6 +188,14 @@ def main() -> IO(Unit):
     verdict("diversidade desligada: 16 clones continuam 1 valor distinto", distinct(diversified(False{})), 1) ++
     verdict("diversidade ligada: 16 clones viram 16 valores distintos", distinct(diversified(True{})), 16) ++
     verdict("diversidade ligada: o elite (primeiro) fica intacto", V.nth(U32, diversified(True{}), 0, 0), 777) ++
+    verdict("diversidade: todo hash guardado é o do próprio genoma (16 clones)", hash_ok(div_inds(clones(16n), 4n)), 16) ++
+    verdict("diversidade: hash já guardado não é recalculado", kept_fake(div_inds(fake(16n), 4n), 16), 16) ++
+    verdict("diversidade: o hash do remutado é marcado", rehashed(), 4) ++
+    verdict("torneio: exclui o hash do primeiro pai",
+      (ok(U32.is_eq(tourney(8, 9, 1), 3)) + ok(U32.is_eq(tourney(8, 9, 2), 3)) + ok(U32.is_eq(tourney(8, 9, 3), 3)) : U32), 3) ++
+    verdict("torneio: sem hash (0) exclui só o índice", tourney(8, 0, 1), 2) ++
+    verdict("torneio: todos com o hash excluído caem no sorteio sem o índice",
+      ok(U32.is_ne(tourney(9, 9, 1), 0)), 1) ++
     verdict("... e o melhor de fato atinge max_fit",
       ok(U32.is_ge(GA.Island.best_f(U32, run(10000n, 0, cfg(0, 900), 7)), 900)), 1)
   )

@@ -91,7 +91,7 @@ def Laws.arch_migration_preserves_islands(arch, bests, k, i, size):
 # depender da comparação de aptidões.
 def Laws.merge_gen_size(gl, gr):
   match gl gr:
-    case GA.Gen{lp, lf, lg} GA.Gen{rp, rf, rg}:
+    case GA.Gen{lp, lf, lg, lh} GA.Gen{rp, rf, rg, rh}:
       {==}
 
 # ----------------------------------------------------------------

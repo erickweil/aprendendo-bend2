@@ -70,6 +70,12 @@ O motor faz o resto, com uma `Config` que espelha o `GAConfig`:
 `pop_d` (2^pop_d indivíduos por ilha) e `diversity`.
 
 - **Seleção por torneio** e **elitismo estrito** (o `offspring[0]` do Rust).
+  O segundo pai exclui o índice do primeiro e, com `diversity`, também todo
+  candidato com o mesmo hash (o `exclude_hash` do Rust).
+- **Hash guardado no indivíduo** (`Ind{gene, fit, hash}`, 0 = desconhecido,
+  como o `Option` do Rust): calculado uma vez, na passada de diversidade, só
+  para quem ainda não tem — os filhos novos. O elite leva o seu adiante, e o
+  torneio exclui por hash lendo um campo, sem tocar no genoma.
 - **Controle de estagnação adaptativo**, como no Rust: após `max_stag/2`
   gerações sem melhora a taxa de mutação cresce e o torneio encolhe; em
   exatamente `max_stag/2` o melhor já encontrado é reintroduzido; acima de
@@ -79,8 +85,8 @@ O motor faz o resto, com uma `Config` que espelha o `GAConfig`:
   o que tarefas paralelas não podem ter. Aqui é uma passada depois da
   reprodução, sequencial dentro da ilha: os hashes são marcados num conjunto de
   bits num `Array` local, e quem repetir é mutado de novo (com 4x a taxa, para
-  compensar a falta das novas tentativas com outros pais). O elite nunca é
-  tocado. Foi o que fez o sudoku funcionar: com torneio de 10 e sem ele, 0 de 6
+  compensar a falta das novas tentativas com outros pais), re-hasheado, e o
+  hash novo é marcado. O elite nunca é tocado. Foi o que fez o sudoku funcionar: com torneio de 10 e sem ele, 0 de 6
   sementes resolviam o puzzle fácil; com ele, 6 de 6.
 - **Arquipélago com migração em anel**: cada ilha recebe o melhor da vizinha,
   injetado num indivíduo comum (não no elite). Uma primeira versão copiava o
@@ -195,8 +201,10 @@ de alguns MB por genoma o limite passa a ser a banda de memória, não o motor.
 
 - **`CrossoverIPX`** (multiconjuntos, usado nos horários) — ainda não.
 - **`mutationShiftSwapOperator`** (TS) — ainda não.
-- **Exclusão por hash no torneio** (o Rust pula candidatos com o mesmo hash do
-  primeiro pai quando há diversity_check) — só a exclusão por índice foi portada.
+- **Varredura quando o torneio exclui todos** — se todo candidato sorteado tem
+  o hash do primeiro pai, o Rust varre a população atrás de um hash diferente;
+  aqui o pai sai de um sorteio que exclui só o índice (com diversity_check a
+  população quase não tem repetidos).
 - **Dois filhos por cruzamento** — cada folha da população produz um filho.
 - **`f64` como aptidão** — aqui é `U32`, comparada milhões de vezes na redução
   em árvore; métricas contínuas entram invertidas e escaladas (veja `tsp.bend`).
