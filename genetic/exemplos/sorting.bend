@@ -1,6 +1,8 @@
 import Base
 import ./../../utils/random.bend as R
-import ./../utils/genes.bend as G
+import ./../utils/genes.bend as V
+import ./../operators.bend as Op
+import ./../mutations.bend as M
 import ./../ga.bend as GA
 import ./../../utils/io.bend as IOHelper
 
@@ -34,7 +36,7 @@ def vals() -> List<&2, U32>:
 
 # Genoma inicial: a identidade embaralhada por transposições aleatórias
 def init_gene(seed: U32) -> List<&2, U32>:
-  G.perm_shuffle(24n, G.perm_range(12n), N(), seed)
+  V.perm_random(N(), seed)
 
 # Aplica a permutação: lê `vals` na ordem que o genoma manda
 def apply_perm(perm: List<&2, U32>) -> List<&2, U32>:
@@ -42,7 +44,7 @@ def apply_perm(perm: List<&2, U32>) -> List<&2, U32>:
     case Nil{}:
       Nil{}
     case Con{i, t}:
-      Con{G.nth(U32, vals(), i, 0), apply_perm(t)}
+      Con{V.nth(U32, vals(), i, 0), apply_perm(t)}
 
 # Quantos elementos DEPOIS de `x` são maiores ou iguais a ele
 def count_ordered(l: List<&2, U32>, +x: U32, +acc: U32) -> U32:
@@ -72,12 +74,16 @@ def fitness(gene: List<&2, U32>) -> U32:
   ordered_pairs(apply_perm(gene))
 
 # Reprodução: OX1 seguido de duas mutações de troca com sementes independentes
+# Chave do OX1: o gene de uma permutação de [0, N) já é o próprio índice
+def key(g: U32) -> U32:
+  g
+
 def reproduce(p1: List<&2, U32>, p2: List<&2, U32>, seed: U32) -> List<&2, U32>:
   +seed = seed
   +s1 = R.split.fst(seed)
   +s2 = R.split.snd(seed)
-  +child = G.cross_ox1(p1, p2, N(), seed)
-  G.mut_neighbor(U32, G.mut_swap(U32, child, 60, N(), s1, 0), 10, s2)
+  +child = Op.cross_ox1(~U32, ~key, p1, p2, N(), seed)
+  M.mut_neighbor(U32, M.mut_swap(~U32, child, N(), R.per(1, 20), s1), N(), R.per(1, 10), s2)
 
 # ----------------------------------------------------------------
 # SAÍDA

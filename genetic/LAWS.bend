@@ -9,9 +9,9 @@
 import Base
 import ./../utils/random.bend as R
 import ./utils/poptree.bend as Tree
-import ./utils/bits.bend as Bits
 import ./stats.bend as Stats
 import ./operators.bend as Op
+import ./mutations.bend as M
 import ./ga.bend as GA
 import ./utils/genes.bend as Genes
 
@@ -65,52 +65,58 @@ law stats_leaf_sum:
   {Stats.PopStats.sum(Stats.leaf_stats(v)) == v : U32}
 
 # ----------------------------------------------------------------
-# PARTE 2: LEIS DOS COMBINADORES DE OPERADORES (operators.bend)
+# PARTE 2: LEIS DOS COMBINADORES (operators.bend / mutations.bend)
 # ----------------------------------------------------------------
-# Estas leis respondem formalmente à pergunta "os combinadores
-# higher-order custam alguma coisa?": elas afirmam que o pipeline
-# montado por combinadores é DEFINICIONALMENTE IGUAL ao código
-# escrito à mão. Se provadas por reflexividade ({==}), os dois
-# lados normalizam para o mesmo termo — a abstração desaparece
-# em tempo de compilação, e não apenas "roda igualmente rápido".
+# Estas leis respondem formalmente à pergunta "os combinadores de ordem
+# superior custam alguma coisa?": elas afirmam que o pipeline montado por
+# combinadores é DEFINICIONALMENTE IGUAL ao código escrito à mão. Provadas por
+# reflexividade ({==}), os dois lados normalizam para o mesmo termo — a
+# abstração desaparece em tempo de compilação.
+#
+# Operadores concretos sobre genoma `List<&2, U32>` de 8 genes, usados como
+# instância (as leis não quantificam sobre parâmetros `~`):
 
-# LEI 8: Pipeline de Reprodução Binário = Código Manual
-# O `Op.pipe` sobre crossover uniforme + flip de bit é exatamente o
-# corpo original escrito à mão do Cenário 1 (One-Max):
-#   s1 = step(seed); s2 = step(s1)
-#   mutate_bit(crossover_uniform(parent, champ, s1), s2)
-law pipe_bits_is_manual_code:
-  for +parent: U32
-  for +champ: U32
+def cross_u(a: List<&2, U32>, b: List<&2, U32>, s: U32) -> List<&2, U32>:
+  Op.cross_uniform(U32, a, b, s)
+
+def mut_n(g: List<&2, U32>, s: U32) -> List<&2, U32>:
+  M.mut_neighbor(U32, g, 8, R.per(1, 8), s)
+
+def bump(x: U32, s: U32) -> U32:
+  U32.inc(x)
+
+def mut_r(g: List<&2, U32>, s: U32) -> List<&2, U32>:
+  M.mut_replace(~U32, ~bump, g, 8, R.per(1, 8), s)
+
+# LEI 8: Pipeline de Reprodução = Código Manual
+# `Op.pipe` com cruzamento uniforme + troca de vizinhos é exatamente
+#   mut_n(cross_u(p, c, step(seed)), step(step(seed)))
+law pipe_is_manual_code:
+  for +p: List<&2, U32>
+  for +c: List<&2, U32>
   for +seed: U32
-  {Op.pipe(~U32, ~Op.cross_bits_uniform, ~Op.mut_bit_flip32, parent, champ, seed)
-   == Bits.mutate_bit(Bits.crossover_uniform(parent, champ, R.step(seed)), R.step(R.step(seed))) : U32}
+  {Op.pipe(~List<&2, U32>, ~cross_u, ~mut_n, p, c, seed)
+   == mut_n(cross_u(p, c, R.step(seed)), R.step(R.step(seed))) : List<&2, U32>}
 
 # LEI 9: Encadeamento de Mutações = Composição das Duas Mutações
-# `chain_mutations` (equivalente do `mutation_combine` original) aplica
-# ambos os operadores em sequência com sementes bifurcadas.
 law chain_mutations_is_composition:
-  for +g: U32
+  for +g: List<&2, U32>
   for +seed: U32
-  {Op.chain_mutations(~U32, ~Op.mut_bit_flip32, ~Op.mut_bits_invert_block, g, seed)
-   == Op.mut_bits_invert_block(Op.mut_bit_flip32(g, R.split.fst(seed)), R.split.snd(seed)) : U32}
+  {M.chain_mutations(~List<&2, U32>, ~mut_n, ~mut_r, g, seed)
+   == mut_r(mut_n(g, R.split.fst(seed)), R.split.snd(seed)) : List<&2, U32>}
 
 # LEI 10: Despacho Exclusivo de Mutação (ramo verdadeiro)
-# Nenhum trabalho do operador descartado é realizado: o `match` sobre
-# Bool escolhe um único ramo, e o outro nunca é construído.
+# O `match` sobre Bool escolhe um único ramo; o outro nunca é construído.
 law branch_mut_true_selects_first:
-  for +g: U32
+  for +g: List<&2, U32>
   for +seed: U32
-  {Op.branch_mut(~U32, ~Op.mut_bit_flip32, ~Op.mut_bits_invert_block, True{}, g, seed)
-   == Op.mut_bit_flip32(g, seed) : U32}
+  {M.branch_mut(~List<&2, U32>, ~mut_n, ~mut_r, True{}, g, seed) == mut_n(g, seed) : List<&2, U32>}
 
 # LEI 11: Despacho Exclusivo de Mutação (ramo falso)
 law branch_mut_false_selects_second:
-  for +g: U32
+  for +g: List<&2, U32>
   for +seed: U32
-  {Op.branch_mut(~U32, ~Op.mut_bit_flip32, ~Op.mut_bits_invert_block, False{}, g, seed)
-   == Op.mut_bits_invert_block(g, seed) : U32}
-
+  {M.branch_mut(~List<&2, U32>, ~mut_n, ~mut_r, False{}, g, seed) == mut_r(g, seed) : List<&2, U32>}
 
 # ----------------------------------------------------------------
 # PARTE 3: LEIS DO MOTOR REAL (ga.bend)

@@ -19,6 +19,8 @@ Para aprender sobre o BEND2, leia o GUIDE.md gerado pelo comando `bend guide > G
   timeout 60s ./bin/arquivo --threads 1     # Single core
   timeout 60s ./bin/arquivo --threads 4     # Multi core
   ```
+* **Performance só se mede no NATIVO.** O interpretador (`bend arquivo.bend`) não é um nativo mais lento: ele tem um comportamento fundamentalmente diferente (ex.: `Bool.pick` é preguiçoso nele e estrito no nativo). Nenhum argumento de performance vale se não vier de um binário `-o`. E há erros que **só o backend nativo acusa** (ex.: "an open Array element type") — compile também o que só foi checado.
+* **Ao medir código paralelo, varie as threads** (`--threads 1 2 4 8 12`) e compare com um teto conhecido da máquina (o `pow2` da seção Parallelism do GUIDE). Um platô antes do número de tarefas independentes indica parte sequencial ou desbalanceamento; um platô que piora conforme o volume de dados cresce indica limite de banda de memória.
 * **Compilação e Verificação Estática:**
   - Verificação de provas e teoremas: `timeout 60s bend PROOF.bend` (o `--checkup` falha nesse par, veja a seção 4).
   - Inspeção do código gerado: `timeout 60s bend <arquivo.bend> -o saida.c` (emite o fonte C sem compilar).
@@ -83,42 +85,51 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 
 ---
 
-### 🔴 Armadilha 3: Acesso Indexado em Laço Quente (e o que NÃO é problema)
-> **Conceito:** A HVM não possui coletor de lixo convencional baseado em tracing; ela opera por aniquilação e duplicação de nós em grafos de interação. Isso gera um medo justificado de estruturas encadeadas — mas o medo precisa mirar no alvo certo.
+### 🔴 Armadilha 3: Paralelismo Só Existe Onde Você Escreve
+> **Conceito:** O Bend não paraleliza sozinho. O único primitivo de paralelismo é a **chamada paralela** `a b = f(x) g(y)`, e o escalonador é fork-join binário: cada tarefa vai para um núcleo uma vez e nunca é movida.
 
-* **O que MEDIMOS que não é problema:** uma `List<&2, U32>` como genoma, duplicada a cada geração.
-  - 1024 indivíduos × 400 gerações × genoma de 64 genes (26 milhões de cruzamentos de gene): **1,3 s e 4,2 MB** de residente no binário nativo.
-  - A duplicação `+` de uma lista é preguiçosa: os nós `dup` só se dividem conforme são consumidos. Passar `+champ_g` para a população inteira, ou `+pop` para sortear pais por torneio, **não explode**.
-* **O que É problema:** `List.get(&2, T, list, U32.to_nat(idx))` dentro do laço de aptidão.
-  - `U32.to_nat(20)` aloca 20 nós de Peano para CADA leitura, e `List.get` ainda percorre a lista.
-  - 60 slots × 32 indivíduos × 400 gerações = dezenas de milhões de alocações que não deveriam existir.
-* **A Solução:**
-  - Escreva os operadores como **varreduras estruturais** dos genomas (é assim que crossover e mutação são definidos de qualquer forma), não como laços de índice.
-  - Quando precisar mesmo de índice, indexe com `U32` e recursão sobre a própria lista (veja `genetic/utils/genes.bend`): nenhum `Nat` é alocado.
-  - Reserve `Nat` para contadores de laço que o verificador de terminação exige, e prefira que eles venham como literal do problema (`12n`), não de `U32.to_nat`.
+* **O Erro:** escrever a recursão sobre uma árvore em duas linhas.
+  ```bend
+  gl = breed(left)           # ❌ sequencial: roda tudo num núcleo só
+  gr = breed(right)
+  gl gr = breed(left) breed(right)   # ✔️ duas tarefas independentes
+  ```
+  Medido no motor genético: com as duas linhas, 12 threads rodavam na mesma velocidade que 1.
+* **Tarefas que compartilham uma estrutura grande não escalam.** Seleção por torneio sobre a população inteira faz toda tarefa segurar uma cópia `+pop` da geração anterior; ela só é liberada quando a última tarefa termina, e por uma thread só. Medido: 1,0× com 12 threads. O mesmo torneio **dentro de ilhas** independentes (`run_archipelago_tourney`) escala 2,8× — perto do teto da máquina.
+* **Balanceie.** O fork-join não rouba trabalho: se um lado termina antes, aquele núcleo fica ocioso. Numa CPU híbrida (núcleos P + E) a tarefa mais lenta dita o tempo. E nunca haverá mais tarefas pesadas simultâneas do que folhas na árvore de chamadas paralelas (8 ilhas ⇒ platô em 8 threads).
+* **Volume de dados limita.** O mesmo GA, mesma forma, mesmo trabalho total: 3,16× com genomas de 10 mil genes (cabem em cache), 1,45× com 1 milhão (500 MB, limitado por banda de memória).
 
 ---
 
-### 🔴 Armadilha 3b: `Array<T>` é `Type`, não `Data`
-> **Conceito:** Bend 2 tem `Array<T>` com escrita in-place em O(1), mas ele é um `Type`: tem exatamente um dono a qualquer momento.
+### 🔴 Armadilha 3b: `Array<T>` é `Type`, não `Data` — mas é ótimo como rascunho local
+> **Conceito:** `Array<T>` tem exatamente um dono. No nativo é um buffer plano: 40 milhões de get/set aleatórios em 0,09 s.
 
-* **A consequência:** um `Array` **não pode** receber `+`, nem ser campo de um tipo `Data`, nem morar dentro de uma estrutura polimórfica sobre `Data`:
+* **Não pode ser duplicado:** não recebe `+`, não pode ser campo de tipo `Data`, nem morar numa estrutura polimórfica sobre `Data`:
   ```bend
-  type Box<-G: Data> is Data:
-    Box{g: G}
-
   b = {Box{[0 : U32*4n]} : Box<Array<U32>>}  # ❌ "expected: Data, observed: Type"
   ```
-* **Quando isso morde:** qualquer estado que precise ser clonado — genomas de um algoritmo genético, nós de uma busca com backtracking, snapshots. `Array.clone` existe, mas devolve duas arrays soltas, não resolve a restrição de kind.
-* **A Solução:** para dados duplicáveis use `List<&2, A>` ou uma árvore `Data` própria. Reserve `Array` para buffers de dono único dentro de uma função.
+  Logo, não serve como genoma de um GA (o campeão é duplicado para a população inteira).
+* **Serve muito bem como rascunho local de um operador**, onde tem um dono só do começo ao fim. O OX1 marca genes num `Array<U32>`; a troca aleatória converte a lista em `Array`, troca in-place e converte de volta (`genetic/utils/genes.bend`: `to_array`/`from_array`).
+* **Genéricos sobre o elemento precisam ser template.** Com `-G: Data` (apagado) o verificador aceita, mas o backend nativo recusa com **"an open Array element type"**: ele precisa do tipo concreto. Use `~G: Data`, que especializa em tempo de compilação.
+* **Ler um `Array` num laço:** `Array.get` devolve o par `(array, valor)`, e desestruturar o retorno de uma chamada é um `match` proibido; o auxiliar óbvio cairia em recursão mútua. A saída é fazer do par o **estado do laço** e desestruturá-lo como parâmetro, dentro de cada caso:
+  ```bend
+  def read(k: Nat, r: Array<U32> & U32, +acc: U32, +s: U32) -> U32:
+    match k:
+      case 0n:
+        (a, v) = r
+        (acc + v : U32)
+      case 1n+p:
+        (a, v) = r
+        read(p, Array.get(U32, a, s), (acc + v : U32), R.step(s))
+  ```
 
-### 🔴 Armadilha 4: O Custo Oculto de `Nat` e `U32.to_nat`
-> **Conceito:** Em Bend 2, `Nat` é um número de Peano indutivo (`0n`, `1n+p`).
+---
 
-* **O Erro:** Chamar `List.get(&2, T, list, U32.to_nat(idx))` repetidamente dentro de um loop quente de fitness.
-  - `U32.to_nat(20)` aloca 20 nós de Peano na memória para CADA leitura.
-  - Multiplicado por 60 slots $\times$ 32 indivíduos $\times$ 400 gerações = dezenas de milhões de alocações desnecessárias.
-* **A Solução:** Use vetores/tabelas planas com acesso bitwise $O(1)$ nativo em `U32`.
+### 🔴 Armadilha 4: `Nat` NÃO é caro no nativo (corrigido)
+> **Conceito:** `Nat` é Peano no nível dos tipos e das provas, mas no binário nativo é uma palavra de máquina (o próprio GUIDE diz: "a `Nat` is still a machine word at runtime").
+
+* **Medido:** 10 mil chamadas de `U32.to_nat(1000000)` custam 0,00 s no nativo. Versões anteriores deste guia afirmavam que `U32.to_nat(20)` alocava 20 nós — isso não vale para o binário.
+* **Consequência:** use `Nat` como combustível de laço sem medo (`U32.to_nat(n)` é O(1)). O que continua caro é **acesso indexado a lista** (`List.get`, `nth`) dentro de laço quente: é O(n) por leitura por causa da lista, não do `Nat`. Escreva os operadores como varreduras, ou use um `Array` local.
 
 ---
 
@@ -245,6 +256,23 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 
 ---
 
+### 🔴 Armadilha 10: Ordem dos Parâmetros e dos Bindings
+* **O tipo de um template não pode citar um tipo declarado depois dele.** `def f(~key: G -> U32, -G: Data, ...)` passa no verificador mas falha no nativo com "expected: a defined name, observed: G". Declare o tipo primeiro, como template: `def f(~G: Data, ~key: G -> U32, ...)`.
+* **`match` depois de um `let` é rejeitado** ("this name is a def or a consumed binder"). Faça o `match` primeiro e os `let`s dentro de cada caso — inclusive `(a, v) = par`, que também é um `match`.
+* **Rebind com `+x = x` dentro de um caso de `match` pode falhar** pelo mesmo motivo; prefira o `+` direto no padrão: `case Con{+h, t}:`.
+* **`IO.args` é `List<&1, String>`, afim:** só pode ser percorrida uma vez e não aceita `+`. Converta de uma vez para uma lista `Data` (`utils/io.bend`: `numbers` + `num_at`).
+
+---
+
+### 🔴 Armadilha 11: Semente Pequena Não É Aleatória
+> **Conceito:** O xorshift a partir de uma semente pequena produz números pequenos nos primeiros passos: `step(5) = 1351845`.
+
+* **O Erro:** usar a semente diretamente como número uniforme. `R.hit(seed, limiar)` com `seed = 5` acerta sempre; um salto geométrico calculado de `u = seed / 2^32` com `seed` pequeno pula quase a lista inteira. Medido: taxa de mutação 1/100000 saía em 62% do esperado.
+* **A Solução:** `R.mix(seed)` (multiplicação pela constante de Knuth, uma bijeção em U32) antes de transformar a semente em probabilidade. `R.hit` e o salto das mutações já fazem isso.
+* **E ao testar estatística,** não use `R.step(s)` para a semente da próxima execução se a execução atual também avança com `R.step` — as execuções reusam o mesmo fluxo deslocado em um passo e deixam de ser independentes (a Armadilha 9 de novo). Use `R.split.trd`.
+
+---
+
 ## 3. Estrutura do Código no Repositório
 
 ```text
@@ -256,11 +284,12 @@ aprendendo-bend2/
 ├── exemplos/                  # Exemplos de código em Bend 2 para aprendizado
 ├── utils/                     # Helpers gerais: random, math, vec4, io, json
 └── genetic/                   # Motor genético (veja genetic/README.md)
-    ├── ga.bend                # Motor polimórfico: população, elitismo, torneio
-    ├── operators.bend         # Operadores para genoma U32
+    ├── ga.bend                # Motor polimórfico: população, elitismo, torneio, ilhas
+    ├── operators.bend         # Cruzamentos (genéricos sobre G, qualquer N)
+    ├── mutations.bend         # Mutações (genéricas sobre G, qualquer N)
     ├── stats.bend             # Estatísticas de população
     ├── LAWS.bend / PROOF.bend # Leis formais e suas provas
-    ├── utils/                 # poptree, bits, genes
+    ├── utils/                 # poptree, genes (núcleo do vetor de genes)
     └── exemplos/              # onemax, sorting, tsp
 ```
 
@@ -279,8 +308,11 @@ timeout 60s bend nome-do-arquivo.bend --checkup
 # 2. Executar testes caso existam
 timeout 60s bend nome-do-arquivo_test.bend
 
-# 3. Verificar se a compilação nativa funciona sem erros
+# 3. Verificar se a compilação nativa funciona sem erros — e RODAR o binário:
+#    há erros que só o backend nativo acusa, e performance só vale medida nele
 timeout 60s bend nome-do-arquivo.bend -o ./bin/nome-do-arquivo
+timeout 60s ./bin/nome-do-arquivo --threads 1
+timeout 60s ./bin/nome-do-arquivo --threads 12
 
 # 4. Commit e Push imediato (na branch de feature, nunca na main e nunca faça merge)
 git commit -am "tipo(escopo): mensagem descritiva"

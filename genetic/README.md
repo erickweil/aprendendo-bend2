@@ -2,162 +2,166 @@
 
 Um motor de algoritmo genético **genérico e paralelo**, portado do motor em
 Rust de [erickweil/my-website](https://github.com/erickweil/my-website)
-(`rust-wasm/src/genetic`). O motor não sabe nada sobre o genoma: ele é
-polimórfico sobre um tipo `G: Data` qualquer. Quem conhece a representação são
-as bibliotecas de operadores e o problema.
+(`rust-wasm/src/genetic`). Como no Rust, o motor trata o gene como um tipo
+qualquer `G`; só os operadores sabem que ele é um vetor de genes — aqui,
+`List<&2, G>`, genérico sobre o tipo de cada gene e **sem limite de tamanho**.
 
 ```
 genetic/
 ├── ga.bend              # o motor: população, elitismo, torneio, arquipélago
-├── operators.bend       # operadores para genoma U32 (32 bits empacotados)
+├── operators.bend       # cruzamentos: 1 ponto, 2 pontos, uniforme, OX1
+├── mutations.bend       # mutações: substituição, troca, troca de vizinhos
 ├── stats.bend           # estatísticas agregadas da população em O(log N)
-├── LAWS.bend            # 14 leis formais do motor
+├── LAWS.bend            # 14 leis formais
 ├── PROOF.bend           # as 14 provas construtivas
+├── *_test.bend          # testes dos cruzamentos e das mutações
 ├── utils/
 │   ├── poptree.bend     # a árvore binária da população
-│   ├── bits.bend        # popcount, máscaras, crossover bit a bit
-│   └── genes.bend       # operadores para genoma "vetor de genes"
+│   └── genes.bend       # núcleo do vetor de genes + ponte com Array
 └── exemplos/
-    ├── onemax.bend      # genoma U32: maximizar bits ligados
+    ├── onemax.bend      # genes Bool, qualquer N (100, 1K, 1M)
     ├── sorting.bend     # genoma-permutação: ordenar uma lista
     └── tsp.bend         # genoma-permutação: caixeiro viajante
 ```
 
 ## Como rodar
 
-```bash
-timeout 60s bend genetic/exemplos/onemax.bend
-timeout 60s bend genetic/exemplos/sorting.bend        # aceita uma semente: ... 42
-timeout 60s bend genetic/exemplos/tsp.bend            # aceita uma semente: ... 42
+Sempre compilado para nativo — o interpretador tem comportamento e
+desempenho fundamentalmente diferentes, e há erros que só o backend nativo
+acusa.
 
-timeout 60s bend genetic/PROOF.bend                   # verifica as 14 leis
-timeout 60s bend genetic/operators_test.bend          # operadores de bits
-timeout 60s bend genetic/utils/genes_test.bend        # operadores de vetor
+```bash
+bend genetic/exemplos/onemax.bend -o bin/onemax
+./bin/onemax                          # 100 genes, 300 gerações, 8 ilhas x 8
+./bin/onemax 1000000 10 3 1 42        # N GERAÇÕES ILHAS POP SEMENTE
+./bin/onemax 100000 20 --threads 8    # opções do runtime depois dos argumentos
+
+bend genetic/exemplos/sorting.bend -o bin/sorting && ./bin/sorting 42
+bend genetic/exemplos/tsp.bend -o bin/tsp && ./bin/tsp 42
+
+bend genetic/PROOF.bend               # verifica as 14 leis
+for t in genetic/utils/genes_test genetic/operators_test genetic/mutations_test; do
+  bend $t.bend -o bin/t && ./bin/t
+done
 ```
 
 > `bend genetic/LAWS.bend` sozinho reporta TODOs: é só o enunciado, as provas
-> moram em `PROOF.bend`. É `PROOF.bend` que deve ser verificado. Pelo mesmo
-> motivo, `--checkup` falha nesse par — ele checa cada import isoladamente.
+> moram em `PROOF.bend`. Pelo mesmo motivo, `--checkup` falha nesse par.
 
-## A forma do genoma
+## O vetor de genes
 
-O motor em Rust trata o gene como um `G` qualquer e só os operadores exigem
-que seja um `&[G]`. Aqui é igual, com uma restrição que o Bend 2 impõe:
+**O genoma precisa ser `Data`**: o motor duplica o campeão para a população
+inteira a cada geração, e um parente escolhido por vários torneios é lido por
+vários filhos. Isso elimina `Array<T>`, que em Bend 2 é um `Type` — um único
+dono, sem `+`. Sobra a lista encadeada, que espelha o `&[G]` do Rust: todo
+cruzamento e mutação de lá já é uma varredura sequencial dos pais.
 
-**o genoma precisa ser `Data`.** O motor duplica o campeão para a população
-inteira a cada geração (`+champ_g: G`), e só valores `Data` podem ser
-duplicados. Isso elimina `Array<T>`, que em Bend 2 é um `Type`: tem
-exatamente um dono, não pode receber `+` nem morar dentro de `Ind<G>`.
+A lista ainda tem uma vantagem que o vetor não tem: **caudas compartilhadas**.
+Depois do corte, um filho do cruzamento de 1 ponto É a cauda do outro pai; depois
+da última mutação, o genoma mutado É o original. Os operadores devolvem essas
+caudas sem copiar.
 
-Sobram duas representações, e o repositório traz as duas:
+E onde acesso aleatório importa, o `Array` entra como **rascunho local**, de
+dono único, dentro do operador — no nativo ele é um buffer plano (40 milhões de
+acessos aleatórios em 0,09 s):
 
-| | `operators.bend` | `utils/genes.bend` |
+- o **OX1** marca os genes já copiados num `Array<U32>`;
+- a **troca aleatória** converte a lista em `Array`, troca in-place em O(1) e
+  converte de volta: O(n) para qualquer taxa, em vez de O(taxa · n²).
+
+### Operadores
+
+Todos genéricos sobre `G`, todos para qualquer tamanho, todos testados com
+100 mil genes.
+
+| Rust | Bend 2 | observação |
 |---|---|---|
-| genoma | `U32` (32 bits) | `List<&2, A>` |
-| tamanho | fixo em 32 | qualquer |
-| acesso | bitwise O(1) | varredura O(n) |
-| bom para | genomas binários | permutações, vetores, qualquer gene |
+| `crossover_1_point` | `Op.cross_1point` | copia o prefixo, compartilha a cauda |
+| `crossover_2_point` | `Op.cross_2point` | dois *splices*, cauda compartilhada |
+| `crossover_uniform` | `Op.cross_uniform` | |
+| `CrossoverOX1` | `Op.cross_ox1(~G, ~key, …)` | `~key: G -> U32` como o `get_index` do Rust; marcas num `Array` |
+| `mutation_replace` | `M.mut_replace(~G, ~gen, …)` | |
+| `mutation_random_swap` | `M.mut_swap(~G, …)` | via `Array`, O(n) |
+| `mutation_neighbor_swap` | `M.mut_neighbor` | |
+| `mutation_combine` | `M.chain_mutations` | |
+| `for_each_poisson` | `M.gap` | salto geométrico entre mutações |
+| `tournament_selection` | `GA.tournament` | sorteio descendo a árvore, O(log N) |
 
-A lista encadeada foi escolhida (em vez de uma árvore binária de genes) porque
-**todo operador do motor em Rust já é uma varredura sequencial dos pais** —
-`crossover_uniform`, `crossover_1_point`, `crossover_2_point` e o OX1 percorrem
-os dois pais do começo ao fim. Uma árvore daria acesso aleatório em O(log n),
-mas tornaria o OX1 — que precisa manter a ordem relativa dos genes — bem mais
-difícil, sem ganho nenhum nos tamanhos de genoma que os exemplos usam.
+As mutações portam o `for_each_poisson`: sorteiam a **distância até a próxima
+mutação** em vez de um número aleatório por gene, e quando a próxima mutação
+cairia depois do fim, devolvem o resto da lista compartilhado.
 
-O AGENTS.md avisava que uma `List` como genoma causaria explosão de nós `dup`
-e OOM. **Medido, não acontece**: 1024 indivíduos × 400 gerações com genoma de
-64 genes custa 1,3 s e 4,2 MB de residente no binário nativo. O que realmente
-custa é acesso indexado via `U32.to_nat` em laço quente — por isso `genes.bend`
-indexa tudo com `U32` e nunca aloca um `Nat` dentro da evolução.
+**Taxas** são limiares sobre 2^32 (`R.per(num, den)`, `R.hit(seed, limiar)`),
+porque o `R.chance` de 1% não expressa uma taxa por gene de 1/N com N = 1 milhão.
 
-## Seleção
+## Seleção e paralelismo
 
-O motor oferece duas estratégias, e os exemplos usam as duas:
+No Bend 2 o paralelismo só existe onde se escreve a chamada paralela
+`a b = f(x) g(y)`, e o escalonador é fork-join binário sem roubo de trabalho.
+Isso decide o desenho da seleção. Medido no nativo (12 threads num i5-1245U,
+2 núcleos P + 8 E; o `pow2` do GUIDE escala 3,2× nesta máquina):
 
-- **`run_gen_loop`** — todo indivíduo cruza com o campeão global. Pressão
-  seletiva máxima, diversidade mínima, uma travessia só. Converge muito rápido
-  em paisagens unimodais (é o que o `onemax.bend` usa), e estagna em
-  paisagens multimodais.
-- **`run_gen_loop_tourney`** — os dois pais saem de **torneios** na geração
-  anterior, como no motor em Rust. Como a população é uma árvore binária
-  perfeita, sortear um indivíduo é descer `d` níveis escolhendo o lado por um
-  bit aleatório: O(log N), sem índice nenhum. É o que `sorting.bend` e
-  `tsp.bend` usam — sem torneio, os dois estagnam.
+| seleção | 1 → 12 threads |
+|---|---|
+| todos cruzam com o campeão (`run_gen_loop`) | 1,9× |
+| torneio sobre a população inteira (`run_gen_loop_tourney`) | **1,4×** |
+| torneio dentro de cada ilha (`run_archipelago_tourney`) | **2,8×** |
 
-Ambas preservam o **elitismo estrito**: a folha mais à esquerda recebe o
-campeão intacto, e a descoberta do campeão da nova geração acontece na mesma
-travessia que gera os filhos (o tipo `Gen<G>`).
+O torneio global faz toda tarefa segurar uma cópia `+pop` da geração anterior;
+ela só é liberada quando a última tarefa termina, e por uma thread só. No
+arquipélago as ilhas não compartilham nada durante uma época — o campeão global
+migra para o slot de elite de todas as ilhas entre épocas. É o que o
+`onemax.bend` usa.
 
-## O que veio do motor em Rust
+### Escala (OneMax, nativo)
 
-| Rust | Bend 2 | onde |
-|---|---|---|
-| `tournament_selection` | `tournament` | `ga.bend` |
-| elitismo explícito em `offspring[0]` | folha de elite em `breed_tree` | `ga.bend` |
-| `crossover_uniform` | `cross_uniform` | `genes.bend` |
-| `crossover_1_point` | `cross_1point` | `genes.bend` |
-| `crossover_2_point` | `cross_2point` | `genes.bend` |
-| `CrossoverOX1` | `cross_ox1` | `genes.bend` |
-| `mutation_random_swap` | `mut_swap` | `genes.bend` |
-| `mutation_neighbor_swap` | `mut_neighbor` | `genes.bend` |
-| `mutation_replace` | `mut_replace` | `genes.bend` |
-| `mutation_combine` | `chain_mutations` | `operators.bend` |
-| `problem_tsp.rs` | `exemplos/tsp.bend` | — |
+| N genes | população | gerações | 1 thread | 12 threads | memória |
+|---|---|---|---|---|---|
+| 100 | 8 × 8 | 300 | 0,13 s | 0,19 s | 2 MB |
+| 1 000 | 8 × 8 | 300 | 1,36 s | 0,60 s | 4 MB |
+| 100 000 | 8 × 8 | 20 | 6,59 s | 2,61 s | 160 MB |
+| 1 000 000 | 4 × 4 | 10 | 7,33 s | 4,94 s | 420 MB |
 
-O `CrossoverOX1` do Rust guarda as marcas num vetor com *epoch* para testar
-pertencimento em O(1). Aqui, como o gene de uma permutação é um índice < 32, o
-conjunto inteiro de marcas cabe num único `U32` usado como conjunto de bits —
-mesma complexidade, sem alocar nada. É por isso que `cross_ox1` está limitado a
-32 genes.
+Com 8 ilhas o ganho satura em 8 threads (nunca há mais de 8 tarefas pesadas).
+E com a mesma forma e o mesmo trabalho total, o ganho cai conforme os genomas
+crescem — 3,16× com 10 mil genes, 2,62× com 100 mil, 1,45× com 1 milhão: acima
+de alguns MB por genoma o limite passa a ser a banda de memória, não o motor.
 
-**O que não foi portado**, e por quê:
+## O que não foi portado
 
-- **Controle de estagnação adaptativo** (`max_stagnation`, multiplicadores de
-  mutação, reinício da população). Depende de estado mutável entre gerações; o
-  laço aqui é uma recursão pura sobre `Gen<G>`. Cabe, mas exigiria carregar o
-  estado no tipo.
-- **`diversity_check` por hash.** Precisa de um conjunto compartilhado sendo
-  escrito durante a reprodução — é justamente o que a travessia fork-join não
-  tem (e não deveria ter, para continuar paralela).
-- **Dois filhos por cruzamento.** O motor em Rust cruza em pares e escreve
-  `child_a`/`child_b`; aqui cada folha produz um filho, o que mantém a
-  travessia da população como um simples `map` paralelo.
-- **`f64` como aptidão.** A aptidão aqui é `U32`, porque é comparada milhões de
-  vezes dentro da redução em árvore. Problemas contínuos entram com a métrica
-  invertida e escalada (veja `tsp.bend`: `BASE - distância*10`).
+- **Controle de estagnação adaptativo** (`max_stagnation`, multiplicadores,
+  reinício da população) — estado mutável entre gerações; cabe carregado no tipo.
+- **`diversity_check` por hash** — exigiria um conjunto compartilhado escrito
+  durante a reprodução, justamente o que as tarefas paralelas não podem ter.
+- **Dois filhos por cruzamento** — cada folha da população produz um filho.
+- **`f64` como aptidão** — aqui é `U32`, comparada milhões de vezes na redução
+  em árvore; métricas contínuas entram invertidas e escaladas (veja `tsp.bend`).
 
 ## Exemplos
 
-**`onemax.bend`** — genoma `U32`, aptidão = número de bits ligados. Converge
-para 32/32 em 25 gerações com 32 indivíduos.
+**`onemax.bend`** — porte direto do `problem_onemax.rs`: genes `Bool`,
+cruzamento de 1 ponto com 90%, mutação com 90% e taxa por gene 1/N, torneio de
+5. Com 100 genes chega a 100/100 por volta da geração 60.
 
-**`sorting.bend`** — genoma-permutação. Procura a ordem de leitura que ordena
-uma lista de 12 números. Aptidão = pares `(i, j)` com `i < j` já em ordem
-(máximo 66), que dá um gradiente muito melhor do que contar vizinhos em ordem.
-Converge para o ótimo em 8/8 sementes testadas.
+**`sorting.bend`** — genoma-permutação que ordena 12 números. Aptidão = pares
+`(i, j)` com `i < j` em ordem (máximo 66). Converge em 8/8 sementes testadas.
 
-**`tsp.bend`** — genoma-permutação. 12 cidades **sobre uma circunferência**,
-listadas fora de ordem. Isso torna o exemplo verificável: a rota ótima de
-pontos sobre um círculo é sempre o polígono convexo, de comprimento conhecido
-(≈ 3106). O GA encontra exatamente essa rota em 8/8 sementes testadas.
+**`tsp.bend`** — 12 cidades **sobre uma circunferência**, fora de ordem. A
+rota ótima de pontos num círculo é o polígono convexo, de comprimento conhecido
+(≈ 3106): o exemplo é verificável, e o GA a encontra em 8/8 sementes testadas.
 
 ## Leis formais
 
 `LAWS.bend` enuncia e `PROOF.bend` prova 14 invariantes:
 
-1. **Leis 1–7** — a redução de estatísticas em árvore conserva contagem, soma e
-   extremos.
-2. **Leis 8–11** — os combinadores de `operators.bend` são **definicionalmente
-   iguais** ao código escrito à mão (provadas por reflexividade pura): a
-   abstração de ordem superior custa zero por construção, não por otimização.
-3. **Leis 12–13** — a migração entre ilhas não cria nem destrói ilhas, e a fusão
-   de duas meias-gerações soma exatamente as duas populações.
-4. **Lei 14** — `take(l, k) ++ drop(l, k) == l`, o invariante que sustenta
-   `rotate` e, por consequência, a validade das permutações que o OX1 monta.
+1. **Leis 1–7** — a redução de estatísticas conserva contagem, soma e extremos.
+2. **Leis 8–11** — os combinadores (`pipe`, `chain_mutations`, `branch_mut`)
+   são **definicionalmente iguais** ao código escrito à mão, provadas por
+   reflexividade: a abstração de ordem superior custa zero por construção.
+3. **Leis 12–13** — a migração não cria nem destrói ilhas, e a fusão de duas
+   meias-gerações soma exatamente as duas populações.
+4. **Lei 14** — `take(l, k) ++ drop(l, k) == l`, que sustenta o `rotate` e,
+   por consequência, as permutações que o OX1 monta.
 
-Fica **pendente** a invariante central do elitismo — "a reprodução preserva o
-tamanho da população". A indução é trivial no papel, mas no caso `Node` as duas
-hipóteses precisam ser aplicadas dentro de um `Nat.add` cujos dois lados mudam,
-e o motivo de reescrita `%` aceito nessa posição não foi encontrado. A Lei 13 já
-cobre a metade difícil.
+Pendente: "a reprodução preserva o tamanho da população" — a indução não fechou
+com as reescritas `%` disponíveis; a Lei 13 cobre a metade difícil.

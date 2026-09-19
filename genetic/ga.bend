@@ -159,6 +159,20 @@ def first_gen(~G: Type, ~init: U32 -> G, ~fit: G -> U32,
       l r = first_gen(~G, ~init, ~fit, p, R.split.fst(seed)) first_gen(~G, ~init, ~fit, p, R.split.snd(seed))
       merge_gen(G, l, r)
 
+# Igual a `first_gen`, mas `~init` recebe também um parâmetro do problema
+# (ex.: o número de genes lido da linha de comando). Um template não captura
+# valor de runtime, então o parâmetro desce explícito pela árvore.
+def first_gen_with(~G: Type, ~init: U32 -> U32 -> G, ~fit: G -> U32,
+                   d: Nat, +param: U32, +seed: U32) -> Gen<G>:
+  match d:
+    case 0n:
+      +g = init(param, seed)
+      leaf_gen(G, g, fit(g))
+    case 1n+ +p:
+      +seed = seed
+      l r = first_gen_with(~G, ~init, ~fit, p, param, R.split.fst(seed)) first_gen_with(~G, ~init, ~fit, p, param, R.split.snd(seed))
+      merge_gen(G, l, r)
+
 # Só a árvore, para quem não quer o campeão
 def gen_population(~G: Type, ~init: U32 -> G, ~fit: G -> U32,
                    d: Nat, +seed: U32) -> T.PopTree<Ind<G>>:
@@ -195,8 +209,8 @@ def breed_tree(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
       breed_leaf(~G, ~repro, ~fit, ind, on_elite, seed, champ_f, champ_g)
     case T.Node{left, right}:
       +seed = seed; +champ_f = champ_f; +champ_g = champ_g
-      gl = breed_tree(~G, ~repro, ~fit, left, on_elite, R.split.fst(seed), champ_f, champ_g)
-      gr = breed_tree(~G, ~repro, ~fit, right, False{}, R.split.snd(seed), champ_f, champ_g)
+      # chamada paralela: as duas metades da população são tarefas independentes
+      gl gr = breed_tree(~G, ~repro, ~fit, left, on_elite, R.split.fst(seed), champ_f, champ_g) breed_tree(~G, ~repro, ~fit, right, False{}, R.split.snd(seed), champ_f, champ_g)
       merge_gen(G, gl, gr)
 
 def leaf_from_ind(-G: Data, ind: Ind<G>) -> Gen<G>:
@@ -224,8 +238,8 @@ def breed_tree_eval(~G: Type, ~repro: G -> G -> U32 -> Ind<G>,
       breed_leaf_eval(~G, ~repro, ind, on_elite, seed, champ_f, champ_g)
     case T.Node{left, right}:
       +seed = seed; +champ_f = champ_f; +champ_g = champ_g
-      gl = breed_tree_eval(~G, ~repro, left, on_elite, R.split.fst(seed), champ_f, champ_g)
-      gr = breed_tree_eval(~G, ~repro, right, False{}, R.split.snd(seed), champ_f, champ_g)
+      # chamada paralela: as duas metades da população são tarefas independentes
+      gl gr = breed_tree_eval(~G, ~repro, left, on_elite, R.split.fst(seed), champ_f, champ_g) breed_tree_eval(~G, ~repro, right, False{}, R.split.snd(seed), champ_f, champ_g)
       merge_gen(G, gl, gr)
 
 # ----------------------------------------------------------------
@@ -301,8 +315,8 @@ def breed_tourney(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
       breed_leaf_tourney(~G, ~repro, ~fit, on_elite, seed, champ_f, champ_g, pop, tsize)
     case T.Node{left, right}:
       +seed = seed; +champ_f = champ_f; +champ_g = champ_g
-      gl = breed_tourney(~G, ~repro, ~fit, left, on_elite, R.split.fst(seed), champ_f, champ_g, pop, tsize)
-      gr = breed_tourney(~G, ~repro, ~fit, right, False{}, R.split.snd(seed), champ_f, champ_g, pop, tsize)
+      # chamada paralela: as duas metades da população são tarefas independentes
+      gl gr = breed_tourney(~G, ~repro, ~fit, left, on_elite, R.split.fst(seed), champ_f, champ_g, pop, tsize) breed_tourney(~G, ~repro, ~fit, right, False{}, R.split.snd(seed), champ_f, champ_g, pop, tsize)
       merge_gen(G, gl, gr)
 
 def run_gen_loop_tourney(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
@@ -453,3 +467,44 @@ def run_archipelago_eval(~G: Type, ~repro: G -> G -> U32 -> Ind<G>,
       +champ = best_archipelago(G, evolved)
       +migrated = migrate_champion(G, evolved, champ)
       run_archipelago_eval(~G, ~repro, p, migrated, next_seed, e)
+
+# ----------------------------------------------------------------
+# ARQUIPÉLAGO COM TORNEIO (o desenho que o fork-join paraleliza)
+# ----------------------------------------------------------------
+# Torneio sobre a população INTEIRA obriga toda tarefa paralela a segurar uma
+# cópia `+pop` da população anterior: ela só é liberada quando a última tarefa
+# termina, e é liberada por uma única thread. Medido no nativo: o torneio
+# global não ganha nada com 12 threads.
+#
+# Aqui o torneio acontece DENTRO de cada ilha. Ilhas não compartilham nada
+# durante a época, então são tarefas independentes de verdade; a cada época o
+# campeão global migra para o slot de elite de todas as ilhas.
+
+def gen_archipelago_with(~G: Type, ~init: U32 -> U32 -> G, ~fit: G -> U32,
+                         d: Nat, +param: U32, +seed: U32, +pop_d: Nat) -> ArchTree<G>:
+  match d:
+    case 0n:
+      SingleIsland{first_gen_with(~G, ~init, ~fit, pop_d, param, seed)}
+    case 1n+ +p:
+      l r = gen_archipelago_with(~G, ~init, ~fit, p, param, R.split.fst(seed), pop_d) gen_archipelago_with(~G, ~init, ~fit, p, param, R.split.snd(seed), pop_d)
+      ArchBranch{l, r}
+
+def evolve_archipelago_tourney(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
+                               arch: ArchTree<G>, +seed: U32, +e: Nat, +tsize: Nat) -> ArchTree<G>:
+  match arch:
+    case SingleIsland{gen}:
+      SingleIsland{run_gen_loop_tourney(~G, ~repro, ~fit, e, gen, seed, tsize)}
+    case ArchBranch{left, right}:
+      l r = evolve_archipelago_tourney(~G, ~repro, ~fit, left, R.split.fst(seed), e, tsize) evolve_archipelago_tourney(~G, ~repro, ~fit, right, R.split.snd(seed), e, tsize)
+      ArchBranch{l, r}
+
+# `epochs` épocas de `e` gerações em cada ilha, com migração entre épocas
+def run_archipelago_tourney(~G: Type, ~repro: G -> G -> U32 -> G, ~fit: G -> U32,
+                            epochs: Nat, arch: ArchTree<G>, +seed: U32, +e: Nat, +tsize: Nat) -> ArchTree<G>:
+  match epochs:
+    case 0n:
+      arch
+    case 1n+p:
+      +evolved = evolve_archipelago_tourney(~G, ~repro, ~fit, arch, seed, e, tsize)
+      +champ = best_archipelago(G, evolved)
+      run_archipelago_tourney(~G, ~repro, ~fit, p, migrate_champion(G, evolved, champ), R.split.trd(seed), e, tsize)

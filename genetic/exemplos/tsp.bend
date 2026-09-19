@@ -1,7 +1,9 @@
 import Base
 import ./../../utils/random.bend as R
 import ./../../utils/io.bend as IOHelper
-import ./../utils/genes.bend as G
+import ./../utils/genes.bend as V
+import ./../operators.bend as Op
+import ./../mutations.bend as M
 import ./../ga.bend as GA
 
 # ================================================================
@@ -45,8 +47,8 @@ def cy() -> List<&2, U32>:
 # cidades é irrelevante, e evita guardar coordenadas dentro do genoma, que
 # tem de continuar sendo só a permutação.
 def dist(+i: U32, +j: U32) -> F32:
-  +dx = (U32.to_f32(G.nth(U32, cx(), i, 0)) - U32.to_f32(G.nth(U32, cx(), j, 0)) : F32)
-  +dy = (U32.to_f32(G.nth(U32, cy(), i, 0)) - U32.to_f32(G.nth(U32, cy(), j, 0)) : F32)
+  +dx = (U32.to_f32(V.nth(U32, cx(), i, 0)) - U32.to_f32(V.nth(U32, cx(), j, 0)) : F32)
+  +dy = (U32.to_f32(V.nth(U32, cy(), i, 0)) - U32.to_f32(V.nth(U32, cy(), j, 0)) : F32)
   F32.hypot(dx, dy)
 
 # `first` desce a recursão inteira só para fechar o ciclo no caso base
@@ -75,7 +77,7 @@ def route_u32(l: List<&2, U32>) -> U32:
 # ----------------------------------------------------------------
 
 def init_gene(seed: U32) -> List<&2, U32>:
-  G.perm_shuffle(24n, G.perm_range(12n), N(), seed)
+  V.perm_random(N(), seed)
 
 # O motor maximiza U32, então a distância entra subtraída de uma base grande
 # o suficiente para nunca dar estouro por baixo.
@@ -88,12 +90,16 @@ def fitness(gene: List<&2, U32>) -> U32:
 def fit_to_dist(+f: U32) -> U32:
   U32.div((BASE() - f : U32), 10)
 
+# Chave do OX1: o gene de uma permutação de [0, N) já é o próprio índice
+def key(g: U32) -> U32:
+  g
+
 def reproduce(p1: List<&2, U32>, p2: List<&2, U32>, seed: U32) -> List<&2, U32>:
   +seed = seed
   +s1 = R.split.fst(seed)
   +s2 = R.split.snd(seed)
-  +child = G.cross_ox1(p1, p2, N(), seed)
-  G.mut_neighbor(U32, G.mut_swap(U32, child, 60, N(), s1, 0), 10, s2)
+  +child = Op.cross_ox1(~U32, ~key, p1, p2, N(), seed)
+  M.mut_neighbor(U32, M.mut_swap(~U32, child, N(), R.per(1, 20), s1), N(), R.per(1, 10), s2)
 
 # ----------------------------------------------------------------
 # SAÍDA

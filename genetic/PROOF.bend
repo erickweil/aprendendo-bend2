@@ -9,9 +9,9 @@
 import Base
 import ./../utils/random.bend as R
 import ./utils/poptree.bend as Tree
-import ./utils/bits.bend as Bits
 import ./stats.bend as Stats
 import ./operators.bend as Op
+import ./mutations.bend as M
 import ./ga.bend as GA
 import ./utils/genes.bend as Genes
 import ./LAWS.bend as Laws
@@ -63,8 +63,8 @@ def Laws.stats_leaf_sum(v):
 # no código gerado — é uma abstração de custo zero por construção,
 # não por otimização do compilador.
 
-# PROVA DA LEI 8: Pipeline Binário = Código Manual
-def Laws.pipe_bits_is_manual_code(parent, champ, seed):
+# PROVA DA LEI 8: Pipeline = Código Manual
+def Laws.pipe_is_manual_code(p, c, seed):
   {==}
 
 # PROVA DA LEI 9: Encadeamento de Mutações = Composição
