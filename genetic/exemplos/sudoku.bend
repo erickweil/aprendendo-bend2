@@ -16,8 +16,8 @@ import ./../ga.bend as GA
 #              começa como uma permutação de 1..9 com as dicas no lugar.
 # Aptidão....: para cada linha, coluna e caixa, quantos dígitos aparecem
 #              EXATAMENTE uma vez (máximo 243), mais +8 por dica mantida.
-# Cruzamento.: por linha, 50% OX1 entre as linhas dos pais, senão a linha
-#              inteira de um dos pais. O OX1 PODE MOVER AS DICAS: elas são
+# Cruzamento.: dois pais, dois filhos. Por linha, 50% OX1 entre as linhas
+#              dos pais, senão cada filho recebe a linha inteira de um pai. O OX1 PODE MOVER AS DICAS: elas são
 #              mantidas só pelo bônus da aptidão. Isso é essencial — é o
 #              caminho por estados "inválidos" que tira a busca do mínimo
 #              local (uma versão anterior travava as dicas e empacava).
@@ -260,25 +260,33 @@ def fitness(ctx: Sudoku, gene: List<&2, List<&2, U32>>) -> U32:
 def key(g: U32) -> U32:
   g
 
-def row_pick(do_ox: Bool, take_a: Bool, ra: List<&2, U32>, rb: List<&2, U32>, +seed: U32) -> List<&2, U32>:
+# A linha do filho A: 50% OX1 entre as linhas dos pais, senão a linha
+# inteira de um deles
+def row_child(do_ox: Bool, take_a: Bool, ra: List<&2, U32>, rb: List<&2, U32>, +seed: U32) -> List<&2, U32>:
   match do_ox take_a:
     case True{} _:
-      Op.cross_ox1(~U32, ~key, ra, rb, 9, 10, seed)
+      Op.child_ox1(~U32, ~key, ra, rb, 9, 10, seed)
     case False{} True{}:
       ra
     case False{} False{}:
       rb
 
-def cross.go(a: List<&2, List<&2, U32>>, b: List<&2, List<&2, U32>>, +seed: U32) -> List<&2, List<&2, U32>>:
+def child.go(a: List<&2, List<&2, U32>>, b: List<&2, List<&2, U32>>, +seed: U32) -> List<&2, List<&2, U32>>:
   match a b:
     case Con{x, xs} Con{y, ys}:
       +s1 = R.step(seed)
-      Con{row_pick(R.bool(seed), R.bool(s1), x, y, R.step(s1)), cross.go(xs, ys, R.split.trd(seed))}
+      Con{row_child(R.bool(seed), R.bool(s1), x, y, R.step(s1)), child.go(xs, ys, R.split.trd(seed))}
     case _ _:
       Nil{}
 
-def cross(ctx: Sudoku, a: List<&2, List<&2, U32>>, b: List<&2, List<&2, U32>>, seed: U32) -> List<&2, List<&2, U32>>:
-  cross.go(a, b, seed)
+# Dois pais, dois filhos, como o `crossover(childA, childB, parentA, parentB)`
+# do TS: o filho B usa os mesmos sorteios com os pais trocados — nas linhas
+# com OX1, os mesmos cortes no outro sentido; nas outras, a linha do outro pai
+def cross(ctx: Sudoku, a: List<&2, List<&2, U32>>, b: List<&2, List<&2, U32>>, seed: U32) -> List<&2, List<&2, U32>> & List<&2, List<&2, U32>>:
+  +a = a
+  +b = b
+  +seed = seed
+  (child.go(a, b, seed), child.go(b, a, seed))
 
 # ----------------------------------------------------------------
 # MUTAÇÃO (mutate do TS, com a quantidade de Poisson)

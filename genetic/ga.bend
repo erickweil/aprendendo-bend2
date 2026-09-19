@@ -18,7 +18,7 @@ import ./utils/genes.bend as V
 # O problema fornece quatro templates, como os métodos do trait `GAProblem`:
 #   ~init   : P -> U32 -> G                (random_genes)
 #   ~fit    : P -> G -> U32                (fitness; maior é melhor)
-#   ~cross  : P -> G -> G -> U32 -> G      (crossover)
+#   ~cross  : P -> G -> G -> U32 -> G & G  (crossover: dois pais, dois filhos)
 #   ~mutate : P -> G -> U32 -> U32 -> G    (mutate: ctx, genes, taxa por gene, semente)
 #
 # O motor cuida do resto, como o `GeneticAlgorithm` do Rust: seleção por
@@ -247,13 +247,15 @@ def Eff.gene_rate(e: Eff) -> U32:
   Eff{_, _, _, g, _} = e
   g
 
-def cross_maybe(~P: Data, ~G: Data, ~cross: P -> G -> G -> U32 -> G,
-                hit: Bool, +ctx: P, p1: G, p2: G, +seed: U32) -> G:
+# Dois pais, dois filhos, como o `crossover(child_a, child_b, parent_a,
+# parent_b)` do Rust; sem cruzamento, os filhos são cópias dos dois pais
+def cross_maybe(~P: Data, ~G: Data, ~cross: P -> G -> G -> U32 -> G & G,
+                hit: Bool, +ctx: P, p1: G, p2: G, +seed: U32) -> G & G:
   match hit:
     case True{}:
       cross(ctx, p1, p2, seed)
     case False{}:
-      p1
+      (p1, p2)
 
 def mutate_maybe(~P: Data, ~G: Data, ~mutate: P -> G -> U32 -> U32 -> G,
                  hit: Bool, +ctx: P, g: G, +rate: U32, +seed: U32) -> G:
@@ -263,16 +265,36 @@ def mutate_maybe(~P: Data, ~G: Data, ~mutate: P -> G -> U32 -> U32 -> G,
     case False{}:
       g
 
-# Uma folha da nova geração. A folha mais à esquerda (`on_elite`) recebe o
-# campeão intacto (elitismo estrito, o `offspring[0]` do Rust); as demais
-# recebem um filho de dois pais escolhidos por torneio na geração anterior.
-def breed_leaf(~P: Data, ~G: Data, ~fit: P -> G -> U32,
-               ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
+# Um filho pronto: mutado com a chance `mr` (cada filho tem o seu sorteio,
+# como no Rust), avaliado, numa folha. `m` é a semente deste filho: o sorteio
+# usa `m` e a mutação um fluxo derivado dele (sem sobrepor o do cruzamento).
+def child_leaf(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~mutate: P -> G -> U32 -> U32 -> G,
+               +ctx: P, g: G, +mr: U32, +gr: U32, +m: U32) -> Gen<G>:
+  +c = mutate_maybe(~P, ~G, ~mutate, R.hit(m, mr), ctx, g, gr, R.split.fst(m))
+  leaf_gen(G, c, fit(ctx, c), 0)
+
+# Os dois filhos de um cruzamento viram duas folhas vizinhas. O par chega
+# como PARÂMETRO: desestruturar o retorno de uma chamada é proibido.
+def pair_leaves(~P: Data, ~G: Data, ~fit: P -> G -> U32, ~mutate: P -> G -> U32 -> U32 -> G,
+                kids: G & G, +ctx: P, +mr: U32, +gr: U32, +m: U32) -> Gen<G>:
+  (ka, kb) = kids
+  merge_gen(G, child_leaf(~P, ~G, ~fit, ~mutate, ctx, ka, mr, gr, R.split.snd(m)),
+               child_leaf(~P, ~G, ~fit, ~mutate, ctx, kb, mr, gr, R.split.trd(m)))
+
+# Um par de folhas da nova geração, a partir de dois pais escolhidos por
+# torneio na geração anterior. O par mais à esquerda (`on_elite`) é o
+# `offspring[0]` e o resto ímpar do Rust: o campeão intacto (elitismo
+# estrito) e um filho de um pai só, clonado e talvez mutado.
+def breed_pair(~P: Data, ~G: Data, ~fit: P -> G -> U32,
+               ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
                on_elite: Bool, +ctx: P, +seed: U32, +champ_f: U32, +champ_g: G, +champ_h: U32,
                +pop: T.PopTree<Ind<G>>, +eff: Eff) -> Gen<G>:
   match on_elite:
     case True{}:
-      leaf_gen(G, champ_g, champ_f, champ_h)
+      Eff{ts, _, mr, gr, +np} = eff
+      p1 = Ind.gene(G, sample_at(G, pop, tournament(G, ts, pop, np, np, 0, R.split.fst(seed))))
+      merge_gen(G, leaf_gen(G, champ_g, champ_f, champ_h),
+                   child_leaf(~P, ~G, ~fit, ~mutate, ctx, p1, mr, gr, R.split.trd(seed)))
     case False{}:
       Eff{ts, cr, mr, gr, +np} = eff
       +ts = ts
@@ -280,31 +302,41 @@ def breed_leaf(~P: Data, ~G: Data, ~fit: P -> G -> U32,
       +a = sample_at(G, pop, i1)
       p1 = Ind.gene(G, a)
       p2 = Ind.gene(G, sample_at(G, pop, tournament(G, ts, pop, np, i1, Ind.hash(G, a), R.split.snd(seed))))
-      +s4 = R.split.fth(seed)
-      +child = mutate_maybe(~P, ~G, ~mutate, R.hit(R.split.trd(seed), mr), ctx,
-                 cross_maybe(~P, ~G, ~cross, R.hit(seed, cr), ctx, p1, p2, s4),
-                 gr, R.step(s4))
-      leaf_gen(G, child, fit(ctx, child), 0)
+      pair_leaves(~P, ~G, ~fit, ~mutate,
+                  cross_maybe(~P, ~G, ~cross, R.hit(seed, cr), ctx, p1, p2, R.split.fth(seed)),
+                  ctx, mr, gr, R.split.trd(seed))
 
-# Gera a próxima população com a forma da anterior. As duas metades são uma
-# CHAMADA PARALELA: sem ela, tudo roda num núcleo só.
+# Gera a próxima população, de 2^(k+1) indivíduos: `k` níveis de árvore
+# acima dos pares. As duas metades são uma CHAMADA PARALELA: sem ela, tudo
+# roda num núcleo só.
 def breed(~P: Data, ~G: Data, ~fit: P -> G -> U32,
-          ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
-          shape: T.PopTree<Ind<G>>, on_elite: Bool, +ctx: P, +seed: U32,
+          ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
+          k: Nat, on_elite: Bool, +ctx: P, +seed: U32,
           +champ_f: U32, +champ_g: G, +champ_h: U32, +pop: T.PopTree<Ind<G>>, +eff: Eff) -> Gen<G>:
-  match shape:
-    case T.Leaf{ind}:
-      breed_leaf(~P, ~G, ~fit, ~cross, ~mutate, on_elite, ctx, seed, champ_f, champ_g, champ_h, pop, eff)
-    case T.Node{left, right}:
-      gl gr = breed(~P, ~G, ~fit, ~cross, ~mutate, left, on_elite, ctx, R.split.fst(seed), champ_f, champ_g, champ_h, pop, eff) breed(~P, ~G, ~fit, ~cross, ~mutate, right, False{}, ctx, R.split.snd(seed), champ_f, champ_g, champ_h, pop, eff)
+  match k:
+    case 0n:
+      breed_pair(~P, ~G, ~fit, ~cross, ~mutate, on_elite, ctx, seed, champ_f, champ_g, champ_h, pop, eff)
+    case 1n+ +p:
+      gl gr = breed(~P, ~G, ~fit, ~cross, ~mutate, p, on_elite, ctx, R.split.fst(seed), champ_f, champ_g, champ_h, pop, eff) breed(~P, ~G, ~fit, ~cross, ~mutate, p, False{}, ctx, R.split.snd(seed), champ_f, champ_g, champ_h, pop, eff)
       merge_gen(G, gl, gr)
 
+# Uma geração de 2^d indivíduos (com d = 0, só o campeão)
+def breed_top(~P: Data, ~G: Data, ~fit: P -> G -> U32,
+              ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
+              d: Nat, +ctx: P, +seed: U32, +champ_f: U32, +champ_g: G, +champ_h: U32,
+              +pop: T.PopTree<Ind<G>>, +eff: Eff) -> Gen<G>:
+  match d:
+    case 0n:
+      leaf_gen(G, champ_g, champ_f, champ_h)
+    case 1n+p:
+      breed(~P, ~G, ~fit, ~cross, ~mutate, p, True{}, ctx, seed, champ_f, champ_g, champ_h, pop, eff)
+
 def next_gen(~P: Data, ~G: Data, ~fit: P -> G -> U32,
-             ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
-             gen: Gen<G>, +ctx: P, +eff: Eff, +seed: U32) -> Gen<G>:
+             ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
+             gen: Gen<G>, d: Nat, +ctx: P, +eff: Eff, +seed: U32) -> Gen<G>:
   match gen:
     case Gen{+tree, cf, cg, ch}:
-      breed(~P, ~G, ~fit, ~cross, ~mutate, tree, True{}, ctx, seed, cf, cg, ch, tree, eff)
+      breed_top(~P, ~G, ~fit, ~cross, ~mutate, d, ctx, seed, cf, cg, ch, tree, eff)
 
 # ----------------------------------------------------------------
 # DIVERSIDADE (diversity_check)
@@ -544,12 +576,12 @@ def after_gen(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
 
 # Uma geração completa: reprodução, registro do melhor e estagnação
 def island_step(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
-                ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
+                ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
                 isl: Island<G>, +ctx: P, +cfg: Config, +seed: U32) -> Island<G>:
   match isl:
     case Island{gen, +bf, bg, +ss, +sf, +g}:
       +eff = effective(cfg, (g - ss : U32))
-      +gen1 = next_gen(~P, ~G, ~fit, ~cross, ~mutate, gen, ctx, eff, seed)
+      +gen1 = next_gen(~P, ~G, ~fit, ~cross, ~mutate, gen, Config.pop_d(cfg), ctx, eff, seed)
       +gen2 = diversify(~P, ~G, ~fit, ~mutate, ~hash, Config.diversity(cfg), gen1, Config.pop_d(cfg),
                         ctx, R.scale(Eff.gene_rate(eff), {4.0 : F32}), R.split.fth(seed))
       +cur = Gen.bfit(G, gen2)
@@ -564,7 +596,7 @@ def is_done(-G: Data, +cfg: Config, +isl: Island<G>) -> Bool:
   Bool.and(Bool.not(U32.is_zero(mf)), U32.is_ge(Island.best_f(G, isl), mf))
 
 def island_loop(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
-                ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
+                ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
                 k: Nat, isl: Island<G>, done: Bool, +ctx: P, +cfg: Config, +seed: U32) -> Island<G>:
   match k done:
     case _ True{}:
@@ -582,7 +614,7 @@ def new_island(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32,
 
 # Evolui uma população isolada por até `k` gerações
 def run_island(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
-               ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
+               ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
                k: Nat, +isl: Island<G>, +ctx: P, +cfg: Config, +seed: U32) -> Island<G>:
   island_loop(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, k, isl, is_done(G, cfg, isl), ctx, cfg, seed)
 
@@ -623,7 +655,7 @@ def arch_island_count(-G: Data, arch: ArchTree<G>) -> Nat:
 
 # Todas as ilhas evoluem `e` gerações em paralelo
 def evolve_archipelago(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
-                       ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
+                       ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
                        arch: ArchTree<G>, +e: Nat, +ctx: P, +cfg: Config, +seed: U32) -> ArchTree<G>:
   match arch:
     case SingleIsland{isl}:
@@ -685,7 +717,7 @@ def arch_done(-G: Data, +cfg: Config, +arch: ArchTree<G>) -> Bool:
   Bool.and(Bool.not(U32.is_zero(mf)), U32.is_ge(Ind.fit(G, best_archipelago(G, arch)), mf))
 
 def run_archipelago.go(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
-                       ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
+                       ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
                        epochs: Nat, arch: ArchTree<G>, done: Bool, +e: Nat, +ctx: P, +cfg: Config,
                        +seed: U32) -> ArchTree<G>:
   match epochs done:
@@ -701,7 +733,7 @@ def run_archipelago.go(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G ->
 # `epochs` épocas de `e` gerações por ilha, com migração em anel entre
 # épocas; para cedo se atingir a aptidão máxima
 def run_archipelago(~P: Data, ~G: Data, ~init: P -> U32 -> G, ~fit: P -> G -> U32, ~hash: P -> G -> U32,
-                    ~cross: P -> G -> G -> U32 -> G, ~mutate: P -> G -> U32 -> U32 -> G,
+                    ~cross: P -> G -> G -> U32 -> G & G, ~mutate: P -> G -> U32 -> U32 -> G,
                     epochs: Nat, +arch: ArchTree<G>, +e: Nat, +ctx: P, +cfg: Config,
                     +seed: U32) -> ArchTree<G>:
   run_archipelago.go(~P, ~G, ~init, ~fit, ~hash, ~cross, ~mutate, epochs, arch, arch_done(G, cfg, arch), e, ctx, cfg, seed)

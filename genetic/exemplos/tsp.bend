@@ -120,7 +120,7 @@ def key(g: U32) -> U32:
 def hash(ctx: Cities, g: List<&2, U32>) -> U32:
   V.hash_list(~U32, ~key, g, 7)
 
-def cross(ctx: Cities, a: List<&2, U32>, b: List<&2, U32>, seed: U32) -> List<&2, U32>:
+def cross(ctx: Cities, a: List<&2, U32>, b: List<&2, U32>, seed: U32) -> List<&2, U32> & List<&2, U32>:
   +ctx = ctx
   +n = Cities.n(ctx)
   Op.cross_ox1(~U32, ~key, a, b, n, n, seed)

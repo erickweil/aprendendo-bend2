@@ -61,7 +61,7 @@ o tamanho N). Sem ele, um template não teria como ler dado de runtime.
 ~init   : P -> U32 -> G               random_genes
 ~fit    : P -> G -> U32               fitness (maior é melhor)
 ~hash   : P -> G -> U32               hash (para o diversity_check)
-~cross  : P -> G -> G -> U32 -> G     crossover
+~cross  : P -> G -> G -> U32 -> G & G crossover: dois pais, dois filhos
 ~mutate : P -> G -> U32 -> U32 -> G   mutate(ctx, genes, taxa por gene, semente)
 ```
 
@@ -69,6 +69,11 @@ O motor faz o resto, com uma `Config` que espelha o `GAConfig`:
 `cross_rate`, `mut_rate`, `gene_rate`, `tsize`, `max_stag`, `max_fit`,
 `pop_d` (2^pop_d indivíduos por ilha) e `diversity`.
 
+- **Dois pais, dois filhos**, como no Rust: a reprodução desce a árvore até
+  pares de folhas, e cada par é um cruzamento (ou, sem o sorteio, uma cópia dos
+  dois pais) com a mutação sorteada para cada filho. O par mais à esquerda é o
+  campeão intacto mais um filho de um pai só — o `offspring[0]` e o resto
+  ímpar do Rust.
 - **Seleção por torneio** e **elitismo estrito** (o `offspring[0]` do Rust).
   O segundo pai exclui o índice do primeiro e, com `diversity`, também todo
   candidato com o mesmo hash (o `exclude_hash` do Rust).
@@ -119,14 +124,22 @@ acessos aleatórios em 0,09 s):
 ### Operadores
 
 Todos genéricos sobre `G`, todos para qualquer tamanho, todos testados com
-100 mil genes.
+100 mil genes. Mutação: um genoma produz um genoma. Cruzamento: dois pais
+produzem dois filhos. Em todos os operadores do Rust o filho B é o filho A com
+os papéis dos pais trocados e os mesmos sorteios; aqui cada operador tem as
+duas formas, `child_*` (o filho A, para compor cruzamentos próprios, como o do
+sudoku por linha) e `cross_*` (o par `(child(a, b, s), child(b, a, s))`).
+
+Montar os dois filhos numa varredura só, devolvendo o par a cada gene, foi
+medido e descartado: num microbenchmark parecia 2× mais rápido, mas dentro do
+GA deixou o motor 1,6× a 3,4× mais lento (veja o AGENTS.md, Armadilha 8).
 
 | Rust | Bend 2 | observação |
 |---|---|---|
-| `crossover_1_point` | `Op.cross_1point` | corte em [0, n); copia o prefixo, compartilha a cauda |
-| `crossover_2_point` | `Op.cross_2point` | cortes distintos; dois *splices*, cauda compartilhada |
-| `crossover_uniform` | `Op.cross_uniform` | |
-| `CrossoverOX1` | `Op.cross_ox1(~G, ~key, a, b, n, keys, seed)` | `~key` e `keys` são o `get_index` e o `possible_gene_values` do Rust; marcas num `Array` |
+| `crossover_1_point` | `Op.cross_1point` | corte em [0, n); copia os prefixos, compartilha as caudas |
+| `crossover_2_point` | `Op.cross_2point` | cortes distintos; dois *splices* por filho, caudas compartilhadas |
+| `crossover_uniform` | `Op.cross_uniform` | uma moeda por posição para os dois filhos |
+| `CrossoverOX1` | `Op.cross_ox1(~G, ~key, a, b, n, keys, seed)` | `~key` e `keys` são o `get_index` e o `possible_gene_values` do Rust; mesmos cortes nos dois filhos; marcas num `Array` |
 | `mutation_replace` | `M.mut_replace(~G, ~gen, …)` | |
 | `mutation_random_swap` | `M.mut_swap(~G, …)` | via `Array`, O(n) |
 | `mutation_neighbor_swap` | `M.mut_neighbor` | vizinha da esquerda ou direita, com volta, via `Array` |
@@ -205,7 +218,6 @@ de alguns MB por genoma o limite passa a ser a banda de memória, não o motor.
   o hash do primeiro pai, o Rust varre a população atrás de um hash diferente;
   aqui o pai sai de um sorteio que exclui só o índice (com diversity_check a
   população quase não tem repetidos).
-- **Dois filhos por cruzamento** — cada folha da população produz um filho.
 - **`f64` como aptidão** — aqui é `U32`, comparada milhões de vezes na redução
   em árvore; métricas contínuas entram invertidas e escaladas (veja `tsp.bend`).
 
@@ -226,7 +238,8 @@ rota ótima de pontos num círculo é o polígono convexo, de comprimento conhec
 quadro inteiro (9 linhas de 9), cada linha começa como permutação de 1–9 com as
 dicas no lugar, e a aptidão conta os dígitos que aparecem exatamente uma vez em
 cada linha, coluna e caixa (243) mais +8 por dica mantida. O cruzamento faz, por
-linha, OX1 (50%) ou copia a linha de um dos pais — **e o OX1 pode mover as
+linha, OX1 (50%) nos dois sentidos, ou dá a cada filho a linha de um dos pais,
+como o TS — **e o OX1 pode mover as
 dicas**, que ficam presas só pelo bônus: é o caminho por estados inválidos que
 tira a busca do mínimo local. A mutação troca duas células livres da mesma
 linha; a quantidade de trocas é `R.poisson(81 × taxa)`, uma por quadro em média

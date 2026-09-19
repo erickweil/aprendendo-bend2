@@ -11,10 +11,23 @@ import ./utils/genes.bend as V
 # Todos operam sobre `List<&2, G>` e são genéricos sobre o tipo do gene `G`.
 # Nenhum tem limite de tamanho: funcionam igual para 10 genes ou 1 milhão.
 #
-# As combinações de operadores usam parâmetros template `~`, substituídos em
-# tempo de compilação: o operador escolhido NÃO vira uma closure em runtime,
-# é inlinado no ponto de chamada. As Leis 8-11 (LAWS.bend) provam isso por
-# reflexividade.
+# Como no Rust, DOIS PAIS PRODUZEM DOIS FILHOS. Em todos os operadores do
+# Rust o filho B é o filho A com os papéis dos pais trocados e os MESMOS
+# sorteios (mesmos cortes, mesmas moedas). Então cada operador tem duas
+# formas:
+#   child_*(a, b, ..., seed) -> G        o filho A (para compor, ex.: sudoku)
+#   cross_*(a, b, ..., seed) -> G & G    o par (child(a, b, s), child(b, a, s))
+#
+# Por que duas varreduras e não uma que monta os dois filhos juntos,
+# devolvendo o par a cada gene? Medido no motor, no nativo: a varredura
+# fundida deixou o GA 1,6x (1 ponto) a 3,4x (uniforme) mais LENTO, apesar de
+# um microbenchmark isolado (filhos somados e descartados na hora) a mostrar
+# 2x mais rápida. Os filhos de um GA vivem gerações e são percorridos de
+# novo; montados por pares, saem mais caros de percorrer.
+#
+# O problema escolhe o operador passando-o como template `~cross` ao motor:
+# substituído em tempo de compilação, não vira uma closure em runtime. As
+# Leis 9-10 (LAWS.bend) provam isso por reflexividade.
 # ================================================================
 
 # ----------------------------------------------------------------
@@ -43,22 +56,33 @@ def splice(-G: Data, a: List<&2, G>, b: List<&2, G>, +k: U32) -> List<&2, G>:
 
 # Prefixo de A até um corte em [0, n) (random_range(0, len) do Rust; com corte
 # 0 o filho é B inteiro), sufixo de B
-def cross_1point(-G: Data, a: List<&2, G>, b: List<&2, G>, +n: U32, +seed: U32) -> List<&2, G>:
+def child_1point(-G: Data, a: List<&2, G>, b: List<&2, G>, +n: U32, +seed: U32) -> List<&2, G>:
   splice(G, a, b, R.range(seed, n))
 
-# Dois cortes DISTINTOS e ordenados (como no Rust): A[0, lo) ++ B[lo, hi) ++
-# A[hi, n). Montado como dois splices: primeiro B[0, hi) ++ A[hi, n), depois o
-# prefixo A[0, lo) sobre isso. A cauda A[hi, n) é compartilhada com o pai.
-def cross_2point(-G: Data, +a: List<&2, G>, b: List<&2, G>, +n: U32, +seed: U32) -> List<&2, G>:
+# (a[0, k) ++ b[k, n),  b[0, k) ++ a[k, n))
+def cross_1point(-G: Data, +a: List<&2, G>, +b: List<&2, G>, +n: U32, +seed: U32) -> List<&2, G> & List<&2, G>:
+  (child_1point(G, a, b, n, seed), child_1point(G, b, a, n, seed))
+
+# Dois cortes DISTINTOS e ordenados lo < hi (como no Rust): A[0, lo) ++
+# B[lo, hi) ++ A[hi, n). Montado como dois splices: primeiro B[0, hi) ++
+# A[hi, n), depois o prefixo A[0, lo) sobre isso. A cauda A[hi, n) é
+# compartilhada com o pai.
+def child_2point(-G: Data, +a: List<&2, G>, b: List<&2, G>, +n: U32, +seed: U32) -> List<&2, G>:
   +c1 = R.range(seed, n)
   +c2 = R.range_except(R.step(seed), n, c1)
   splice(G, a, splice(G, b, a, U32.max(c1, c2)), U32.min(c1, c2))
+
+# O trecho [lo, hi) trocado entre os pais
+def cross_2point(-G: Data, +a: List<&2, G>, +b: List<&2, G>, +n: U32, +seed: U32) -> List<&2, G> & List<&2, G>:
+  (child_2point(G, a, b, n, seed), child_2point(G, b, a, n, seed))
 
 # ----------------------------------------------------------------
 # CRUZAMENTO UNIFORME
 # ----------------------------------------------------------------
 # Cada posição vem de um pai ou do outro com 50% de chance (random_bool). A
-# escolha da próxima posição é sorteada aqui e desce como PARÂMETRO.
+# escolha da próxima posição é sorteada aqui e desce como PARÂMETRO. Com a
+# mesma semente e os pais trocados, as moedas são as mesmas: o filho B leva
+# exatamente os genes que o A não levou.
 
 def uniform.go(-G: Data, a: List<&2, G>, b: List<&2, G>, from_a: Bool, +seed: U32) -> List<&2, G>:
   match a b from_a:
@@ -73,8 +97,11 @@ def uniform.go(-G: Data, a: List<&2, G>, b: List<&2, G>, from_a: Bool, +seed: U3
       +ns = R.step(seed)
       Con{y, uniform.go(G, xs, ys, R.bool(ns), ns)}
 
-def cross_uniform(-G: Data, a: List<&2, G>, b: List<&2, G>, +seed: U32) -> List<&2, G>:
+def child_uniform(-G: Data, a: List<&2, G>, b: List<&2, G>, +seed: U32) -> List<&2, G>:
   uniform.go(G, a, b, R.bool(seed), seed)
+
+def cross_uniform(-G: Data, +a: List<&2, G>, +b: List<&2, G>, +seed: U32) -> List<&2, G> & List<&2, G>:
+  (child_uniform(G, a, b, seed), child_uniform(G, b, a, seed))
 
 # ----------------------------------------------------------------
 # ORDER CROSSOVER (OX1) — para genomas que SÃO uma permutação
@@ -129,15 +156,25 @@ def unmarked(~G: Data, ~key: G -> U32, l: List<&2, G>, a: Array<U32>) -> List<&2
     case Con{+h, t}:
       unmarked.go(~G, ~key, t, Array.get(U32, a, key(h)), h)
 
-def cross_ox1(~G: Data, ~key: G -> U32, a: List<&2, G>, b: List<&2, G>,
-              +n: U32, +keys: U32, +seed: U32) -> List<&2, G>:
-  # dois cortes distintos, como no Rust (random_range_except)
-  +c1 = R.range(seed, n)
-  +c2 = R.range_except(R.step(seed), n, c1)
-  +p1 = U32.min(c1, c2)
-  +p2 = U32.max(c1, c2)
+# Um filho com cortes dados: o segmento [p1, p2] de `a`, completado com os genes de `b`
+def ox1_fill(~G: Data, ~key: G -> U32, a: List<&2, G>, b: List<&2, G>,
+              +n: U32, +keys: U32, +p1: U32, +p2: U32) -> List<&2, G>:
   +seg = V.take(G, V.drop(G, a, p1), ((p2 - p1 : U32) + 1 : U32))
   +start = U32.mod((p2 + 1 : U32), n)
   marks = mark(~G, ~key, seg, Array.new(U32, V.depth_for(keys), 0))
   rest = unmarked(~G, ~key, V.rotate(G, b, start), marks)
   V.rotate(G, V.append(G, rest, seg), U32.mod((n - start : U32), n))
+
+# O filho A, com dois cortes distintos sorteados como no Rust
+# (random_range_except)
+def child_ox1(~G: Data, ~key: G -> U32, a: List<&2, G>, b: List<&2, G>,
+              +n: U32, +keys: U32, +seed: U32) -> List<&2, G>:
+  +c1 = R.range(seed, n)
+  +c2 = R.range_except(R.step(seed), n, c1)
+  ox1_fill(~G, ~key, a, b, n, keys, U32.min(c1, c2), U32.max(c1, c2))
+
+# Os dois filhos, com os MESMOS cortes (como os dois laços do Rust): o A leva
+# o segmento de `a` e é completado por `b`; o B, o contrário
+def cross_ox1(~G: Data, ~key: G -> U32, +a: List<&2, G>, +b: List<&2, G>,
+              +n: U32, +keys: U32, +seed: U32) -> List<&2, G> & List<&2, G>:
+  (child_ox1(~G, ~key, a, b, n, keys, seed), child_ox1(~G, ~key, b, a, n, keys, seed))

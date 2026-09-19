@@ -102,6 +102,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 * **Balanceie.** O fork-join não rouba trabalho: se um lado termina antes, aquele núcleo fica ocioso. Numa CPU híbrida (núcleos P + E) a tarefa mais lenta dita o tempo. E nunca haverá mais tarefas pesadas simultâneas do que folhas na árvore de chamadas paralelas (8 ilhas ⇒ platô em 8 threads).
 * **Passadas sequenciais contam (Amdahl).** O `diversity_check` do motor é uma passada sequencial por ilha: com uma ilha só, 12 threads não ganham nada. Com várias ilhas, cada passada roda na tarefa da sua ilha.
 * **Volume de dados limita.** O mesmo GA, mesma forma, mesmo trabalho total: 3,16× com genomas de 10 mil genes (cabem em cache), 1,45× com 1 milhão (500 MB, limitado por banda de memória).
+* **Quando os dados vivos passam da cache, o custo por iteração CRESCE com o tempo.** O alocador nativo reaproveita os nós liberados numa pilha LIFO por thread (`heap_alloc` no C gerado): depois de muitas gerações, as listas novas nascem espalhadas pelo heap e percorrê-las vira acesso aleatório à memória. Medido no onemax com 8 ilhas × 64 × 1000 genes (~15 MB, acima dos 12 MB de L3): 44 ms por geração no início, 105 ms na geração 300, com a memória constante (não é vazamento); com uma ilha só (cabe na cache), 4,5 → 6 ms. Consequências: compare versões com a mesma semente e o mesmo número de gerações, meça trechos longos e não só o começo, e desconfie de ganho "superlinear" com threads nesse regime (8× com 16 threads no onemax de 3 mil genes): ele vem de mais acessos à memória em paralelo, não de mais CPU.
 
 ---
 
@@ -245,6 +246,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
       case Nil{}: Con{h, Nil{}}
       case Con{h2, rest}: Con{h2, Con{h, rest}}
   ```
+* **Devolver DOIS resultados de uma recursão** usa o mesmo truque: a recursão devolve o par e um auxiliar não recursivo o recebe como PARÂMETRO (`def cons2(x, y, r: A & B): (p, q) = r ...`) e põe as duas cabeças. Funciona, mas **meça no uso real**: para montar os dois filhos de um cruzamento numa varredura só, um microbenchmark (filhos somados e descartados na hora) mostrou 2× mais rápido que duas varreduras, e dentro do GA, onde os filhos vivem gerações e são percorridos de novo, deixou o motor 1,6× (1 ponto) a 3,4× (uniforme) mais LENTO. Os cruzamentos do motor usam duas varreduras.
 * **`do` é palavra reservada** (do bloco `do IO<T>:`) e não pode ser nome de parâmetro.
 
 ---

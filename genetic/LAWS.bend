@@ -73,7 +73,7 @@ law stats_leaf_sum:
 # os dois lados normalizam para o mesmo termo.
 
 # Instâncias concretas (as leis não quantificam sobre parâmetros `~`):
-def cross_u(ctx: U32, a: List<&2, U32>, b: List<&2, U32>, s: U32) -> List<&2, U32>:
+def cross_u(ctx: U32, a: List<&2, U32>, b: List<&2, U32>, s: U32) -> List<&2, U32> & List<&2, U32>:
   Op.cross_uniform(U32, a, b, s)
 
 def mut_s(ctx: U32, g: List<&2, U32>, rate: U32, s: U32) -> List<&2, U32>:
@@ -91,23 +91,23 @@ law combine_is_manual_code:
    == M.mut_neighbor(~U32, M.mut_swap(~U32, l, n, R.scale(rate, {0.5 : F32}), R.split.fst(seed)),
                      n, R.scale(rate, {0.5 : F32}), R.split.snd(seed)) : List<&2, U32>}
 
-# LEI 9: sem sorteio de cruzamento, o filho é o pai 1 (o cruzamento nem é
-# construído)
+# LEI 9: sem sorteio de cruzamento, os dois filhos são os dois pais (o
+# cruzamento nem é construído)
 law cross_maybe_false_clones:
   for +ctx: U32
   for +a: List<&2, U32>
   for +b: List<&2, U32>
   for +seed: U32
-  {GA.cross_maybe(~U32, ~List<&2, U32>, ~cross_u, False{}, ctx, a, b, seed) == a : List<&2, U32>}
+  {GA.cross_maybe(~U32, ~List<&2, U32>, ~cross_u, False{}, ctx, a, b, seed) == (a, b) : List<&2, U32> & List<&2, U32>}
 
-# LEI 10: com sorteio, o filho é exatamente o cruzamento do problema
+# LEI 10: com sorteio, os filhos são exatamente o cruzamento do problema
 law cross_maybe_true_crosses:
   for +ctx: U32
   for +a: List<&2, U32>
   for +b: List<&2, U32>
   for +seed: U32
   {GA.cross_maybe(~U32, ~List<&2, U32>, ~cross_u, True{}, ctx, a, b, seed)
-   == cross_u(ctx, a, b, seed) : List<&2, U32>}
+   == cross_u(ctx, a, b, seed) : List<&2, U32> & List<&2, U32>}
 
 # LEI 11: sem sorteio de mutação, o genoma passa intacto
 law mutate_maybe_false_keeps:

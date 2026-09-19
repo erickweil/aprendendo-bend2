@@ -6,12 +6,14 @@ import ./operators.bend as Op
 # ================================================================
 # TESTE DOS CRUZAMENTOS (operators.bend)
 # ================================================================
-# Invariantes verificados, em tamanho pequeno (varredura de sementes) e em
-# tamanho grande (100 mil genes):
-#  - posicionais: comprimento preservado e todo gene do filho vem de um dos
-#    pais NA MESMA POSIÇÃO
-#  - OX1: o filho é uma permutação válida; com pais iguais devolve o pai;
-#    funciona para qualquer tipo de gene que tenha uma `~key`
+# Todo cruzamento produz DOIS filhos. Invariantes verificados, em tamanho
+# pequeno (varredura de sementes) e em tamanho grande (100 mil genes):
+#  - posicionais: os filhos são COMPLEMENTARES — em cada posição, os genes dos
+#    dois filhos são os dois genes dos pais naquela posição (o que implica
+#    comprimento preservado e todo gene vindo de um pai na mesma posição)
+#  - OX1: os dois filhos são permutações válidas; com pais iguais devolve os
+#    pais; o exemplo do Rust dá os mesmos dois filhos; funciona para qualquer
+#    tipo de gene que tenha uma `~key`
 # ================================================================
 
 def eq(a: List<&2, U32>, b: List<&2, U32>) -> Bool:
@@ -25,26 +27,29 @@ def eq(a: List<&2, U32>, b: List<&2, U32>) -> Bool:
     case Con{x, xs} Con{y, ys}:
       Bool.and(U32.is_eq(x, y), eq(xs, ys))
 
-# Todo gene de `c` é igual ao de `a` ou ao de `b` na mesma posição, e os três
-# têm o mesmo comprimento
-def from_parents(c: List<&2, U32>, a: List<&2, U32>, b: List<&2, U32>) -> Bool:
-  match c a b:
-    case Nil{} Nil{} Nil{}:
+# Em cada posição, {ca[i], cb[i]} = {a[i], b[i]}, e os quatro têm o mesmo
+# comprimento
+def complementary(ca: List<&2, U32>, cb: List<&2, U32>, a: List<&2, U32>, b: List<&2, U32>) -> Bool:
+  match ca cb a b:
+    case Nil{} Nil{} Nil{} Nil{}:
       True{}
-    case Nil{} Nil{} Con{y, ys}:
+    case Con{+z, zs} Con{+w, ws} Con{+x, xs} Con{+y, ys}:
+      Bool.and(Bool.or(Bool.and(U32.is_eq(z, x), U32.is_eq(w, y)), Bool.and(U32.is_eq(z, y), U32.is_eq(w, x))),
+               complementary(zs, ws, xs, ys))
+    case _ _ _ _:
       False{}
-    case Nil{} Con{x, xs} Nil{}:
-      False{}
-    case Nil{} Con{x, xs} Con{y, ys}:
-      False{}
-    case Con{z, zs} Nil{} Nil{}:
-      False{}
-    case Con{z, zs} Nil{} Con{y, ys}:
-      False{}
-    case Con{z, zs} Con{x, xs} Nil{}:
-      False{}
-    case Con{+z, zs} Con{x, xs} Con{y, ys}:
-      Bool.and(Bool.or(U32.is_eq(z, x), U32.is_eq(z, y)), from_parents(zs, xs, ys))
+
+def pair_complementary(r: List<&2, U32> & List<&2, U32>, a: List<&2, U32>, b: List<&2, U32>) -> Bool:
+  (ca, cb) = r
+  complementary(ca, cb, a, b)
+
+def pair_eq(r: List<&2, U32> & List<&2, U32>, a: List<&2, U32>, b: List<&2, U32>) -> Bool:
+  (ca, cb) = r
+  Bool.and(eq(ca, a), eq(cb, b))
+
+def pair_perm(r: List<&2, U32> & List<&2, U32>, +n: U32) -> Bool:
+  (ca, cb) = r
+  Bool.and(V.is_permutation(ca, n), V.is_permutation(cb, n))
 
 def offset(l: List<&2, U32>, +k: U32) -> List<&2, U32>:
   match l:
@@ -63,16 +68,16 @@ def ok(b: Bool) -> U32:
 def check_pos(+n: U32, +s: U32) -> U32:
   +a = V.perm_range(n)
   +b = offset(V.perm_range(n), 1000000)
-  (ok(from_parents(Op.cross_uniform(U32, a, b, s), a, b)) +
-   ok(from_parents(Op.cross_1point(U32, a, b, n, s), a, b)) +
-   ok(from_parents(Op.cross_2point(U32, a, b, n, s), a, b)) : U32)
+  (ok(pair_complementary(Op.cross_uniform(U32, a, b, s), a, b)) +
+   ok(pair_complementary(Op.cross_1point(U32, a, b, n, s), a, b)) +
+   ok(pair_complementary(Op.cross_2point(U32, a, b, n, s), a, b)) : U32)
 
 # --- OX1: validade e identidade ---
 def check_ox1(+n: U32, +s: U32) -> U32:
   +a = V.perm_random(n, s)
   +b = V.perm_random(n, R.step(s))
-  (ok(V.is_permutation(Op.cross_ox1(~U32, ~key_u32, a, b, n, n, s), n)) +
-   ok(eq(Op.cross_ox1(~U32, ~key_u32, a, a, n, n, s), a)) : U32)
+  (ok(pair_perm(Op.cross_ox1(~U32, ~key_u32, a, b, n, n, s), n)) +
+   ok(pair_eq(Op.cross_ox1(~U32, ~key_u32, a, a, n, n, s), a, a)) : U32)
 
 def sweep_pos(k: Nat, +n: U32, +s: U32, +acc: U32) -> U32:
   match k:
@@ -99,8 +104,9 @@ def char_keys(l: List<&2, Char>) -> List<&2, U32>:
     case Con{c, t}:
       Con{key_char(c), char_keys(t)}
 
-def is_alphabet_perm(l: List<&2, Char>) -> Bool:
-  V.is_permutation(char_keys(l), 26)
+def is_alphabet_perm(r: List<&2, Char> & List<&2, Char>) -> Bool:
+  (ca, cb) = r
+  Bool.and(V.is_permutation(char_keys(ca), 26), V.is_permutation(char_keys(cb), 26))
 
 def alphabet() -> List<&2, Char>:
   String.to_list("abcdefghijklmnopqrstuvwxyz")
@@ -126,11 +132,15 @@ def le(a: U32, b: U32) -> Bool:
 def partial_set() -> List<&2, U32>:
   [2, 4, 5, 7, 9]
 
+def same_set(r: List<&2, U32> & List<&2, U32>, +set: List<&2, U32>) -> Bool:
+  (ca, cb) = r
+  Bool.and(eq(List.sort(~U32, ~le, ca), set), eq(List.sort(~U32, ~le, cb), set))
+
 def check_partial(+s: U32) -> U32:
   +set = partial_set()
   +a = V.shuffle(~U32, set, 5, s)
   +b = V.shuffle(~U32, set, 5, R.step(s))
-  ok(eq(List.sort(~U32, ~le, Op.cross_ox1(~U32, ~key_u32, a, b, 5, 10, s)), set))
+  ok(same_set(Op.cross_ox1(~U32, ~key_u32, a, b, 5, 10, s), set))
 
 def sweep_partial(k: Nat, +s: U32, +acc: U32) -> U32:
   match k:
@@ -151,12 +161,25 @@ def check_extremes() -> String:
      ok(eq(Op.splice(U32, a, b, 0), b)) +
      ok(eq(Op.splice(U32, a, b, 3), [0, 1, 2, 103, 104, 105, 106, 107])) : U32), 3)
 
+# O exemplo comentado no CrossoverOX1 do Rust, com cortes p1 = 2, p2 = 4:
+#   A = [A B C D E F G], B = [F G A B C D E]
+#   filho A = [A B C D E F G], filho B = [D E A B C F G]
+def rust_b() -> List<&2, U32>:
+  [5, 6, 0, 1, 2, 3, 4]
+
+def ox1_rust() -> U32:
+  +a = V.perm_range(7)
+  +b = rust_b()
+  (ok(eq(Op.ox1_fill(~U32, ~key_u32, a, b, 7, 7, 2, 4), [0, 1, 2, 3, 4, 5, 6])) +
+   ok(eq(Op.ox1_fill(~U32, ~key_u32, b, a, 7, 7, 2, 4), [3, 4, 0, 1, 2, 5, 6])) : U32)
+
 def main() -> IO(Unit):
   IO.print(
     "=== TESTE DOS CRUZAMENTOS (operators.bend) ===\n" ++
-    verdict("posicionais, n = 8, 2000 sementes x 3", sweep_pos(2000n, 8, 13579, 0), 6000) ++
-    verdict("posicionais, n = 100000, 5 sementes x 3", sweep_pos(5n, 100000, 24680, 0), 15) ++
+    verdict("posicionais complementares, n = 8, 2000 sementes x 3", sweep_pos(2000n, 8, 13579, 0), 6000) ++
+    verdict("posicionais complementares, n = 100000, 5 sementes x 3", sweep_pos(5n, 100000, 24680, 0), 15) ++
     check_extremes() ++
+    verdict("OX1: o exemplo do Rust (os dois filhos)", ox1_rust(), 2) ++
     verdict("OX1, n = 12, 2000 sementes x (valido + identidade)", sweep_ox1(2000n, 12, 86427531, 0), 4000) ++
     verdict("OX1, n = 1000, 200 sementes x 2", sweep_ox1(200n, 1000, 111, 0), 400) ++
     verdict("OX1, n = 100000, 5 sementes x 2", sweep_ox1(5n, 100000, 222, 0), 10) ++

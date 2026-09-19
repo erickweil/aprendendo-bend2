@@ -19,8 +19,11 @@ def fit(ctx: U32, g: U32) -> U32:
 def hash(ctx: U32, g: U32) -> U32:
   g
 
-def cross(ctx: U32, a: U32, b: U32, seed: U32) -> U32:
-  U32.xor(a, U32.and(b, R.mix(seed)))
+def cross(ctx: U32, a: U32, b: U32, seed: U32) -> U32 & U32:
+  +a = a
+  +b = b
+  +m = R.mix(seed)
+  (U32.xor(a, U32.and(b, m)), U32.xor(b, U32.and(a, m)))
 
 def mutate(ctx: U32, g: U32, rate: U32, seed: U32) -> U32:
   U32.xor(g, R.mix(seed))

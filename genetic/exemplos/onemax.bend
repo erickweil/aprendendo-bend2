@@ -20,8 +20,9 @@ import ./../mutations.bend as M
 # Seleção..: torneio de 5 dentro de cada ilha, elitismo estrito, migração do
 #            campeão global a cada época
 #
-# Uso: bend onemax.bend [N] [GERAÇÕES] [ILHAS] [POP] [SEMENTE]
-#      2^ILHAS ilhas com 2^POP indivíduos cada (padrão: 8 x 8 = 64)
+# Uso: bend onemax.bend [N] [GERAÇÕES] [ILHAS] [POP] [SEMENTE] [ÉPOCA]
+#      2^ILHAS ilhas com 2^POP indivíduos cada (padrão: 8 x 8 = 64);
+#      ÉPOCA = gerações entre migrações e relatórios (padrão: GERAÇÕES/10)
 # ================================================================
 
 # ----------------------------------------------------------------
@@ -48,7 +49,7 @@ def count_true(l: List<&2, Bool>, +acc: U32) -> U32:
 def fitness(n: U32, gene: List<&2, Bool>) -> U32:
   count_true(gene, 0)
 
-def cross(n: U32, a: List<&2, Bool>, b: List<&2, Bool>, seed: U32) -> List<&2, Bool>:
+def cross(n: U32, a: List<&2, Bool>, b: List<&2, Bool>, seed: U32) -> List<&2, Bool> & List<&2, Bool>:
   Op.cross_1point(Bool, a, b, n, seed)
 
 def b2u(b: Bool) -> U32:
@@ -96,6 +97,7 @@ def run(args: List<String>) -> IO(Unit):
   +isl = IOHelper.num_at(nums, 2n, 3)
   +pop = IOHelper.num_at(nums, 3n, 3)
   +s0 = IOHelper.num_at(nums, 4n, 12345678)
+  +epoch = U32.max(IOHelper.num_at(nums, 5n, U32.div(gens, 10)), 1)
   # Mesma configuração do teste do Rust: 90% / 90% / 1/N, torneio de 5
   +cfg = GA.config(R.per(9, 10), R.per(9, 10), R.per(1, n), 5, 0, n, pop, 0)
   +a0 = GA.gen_archipelago(~U32, ~List<&2, Bool>, ~init_gene, ~fitness, U32.to_nat(isl), n, cfg, s0)
@@ -107,7 +109,7 @@ def run(args: List<String>) -> IO(Unit):
       " x " ++ U32.show(U32.shln(1, U32.to_nat(pop))) ++ " indivíduos" ++
       " | gerações: " ++ U32.show(gens) ++ "\n" ++
       "  geração 0: " ++ U32.show(best(a0))),
-    u => report(10n, a0, U32.to_nat(U32.div(gens, 10)), 0, n, cfg, R.step(s0)))
+    u => report(U32.to_nat(U32.div(gens, epoch)), a0, U32.to_nat(epoch), 0, n, cfg, R.step(s0)))
 
 def main() -> IO(Unit):
   IO.bind(List<String>, Unit, IO.args(), run)
