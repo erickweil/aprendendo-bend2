@@ -67,13 +67,11 @@ def fitness(+ctx: Ctx, g: Array<U32>) -> Array<U32> & U32:
 def mutate(+ctx: Ctx, g: Array<U32>, +rate: U32, +seed: U32) -> Array<U32>:
   Op.mut_replace(g, ctx_genes(ctx), 2, rate, seed)
 
-# cruzamento: um ponto, in-place nos dois genomas (que já são os filhos)
-def crossover(+ctx: Ctx, a: Array<U32>, b: Array<U32>, +seed: U32) -> Array<U32> & Array<U32>:
-  Op.cross_1point(a, b, ctx_genes(ctx), seed)
-
-# cópia: o motor usa isto para o filho nascer com os genes do pai
-def copy_into(+ctx: Ctx, dst: Array<U32>, src: Array<U32>) -> Array<U32> & Array<U32>:
-  Arr.copy_range(~U32, dst, src, 0, ctx_genes(ctx))
+# "4 ENTRAM, 4 SAEM": lê os dois pais e escreve os dois filhos numa varredura
+# só. A aptidão é etapa separada, depois da mutação.
+def breed(+ctx: Ctx, ca: Array<U32>, cb: Array<U32>, pa: Array<U32>, pb: Array<U32>,
+          cruza: Bool, +seed: U32) -> (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  Op.breed_1point(~U32, ca, cb, pa, pb, ctx_genes(ctx), cruza, seed)
 
 # ----------------------------------------------------------------
 # main
@@ -94,7 +92,7 @@ def run(+genes_d: U32, +pop_d: U32, +gens: U32, +seed: U32, +demes_d: U32, +epoc
   +cfg = GA.cfg_new(R.per(9, 10), R.per(9, 10), R.per(1, ctx_genes(ctx)), 5, U32.is_ne(div, 0), max_stag)
   relato(
     GA.best_st(~Array<U32>,
-      GA.archipelago(~Array<U32>, ~Ctx, ~alloc, ~init, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash,
+      GA.archipelago(~Array<U32>, ~Ctx, ~alloc, ~init, ~breed, ~mutate, ~fitness, ~hash,
         U32.to_nat(U32.max(U32.div(gens, U32.max(epoca, 1)), 1)), U32.to_nat(demes_d),
         GA.start_st(~Array<U32>, ~Ctx, ~fitness,
           A.pop_new(~Array<U32>, ~Ctx, ~alloc, ~init, U32.to_nat(pop_d), ctx, seed), ctx, R.step(seed)),

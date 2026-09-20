@@ -56,6 +56,10 @@ def show_ind(ind: A.Individual<Array<U32>>, +ctx: U32, +at: U32) -> A.Individual
 def show_slot(p: A.Pop<Array<U32>>, +i: U32) -> A.Pop<Array<U32>> & String:
   A.read1(~Array<U32>, ~U32, ~String, ~show_ind, p, i, 0)
 
+# o mesmo, no arranjo da PRÓXIMA geração
+def show_slot_nxt(p: A.Pop<Array<U32>>, +i: U32) -> A.Pop<Array<U32>> & String:
+  A.read1_nxt(~Array<U32>, ~U32, ~String, ~show_ind, p, i, 0)
+
 # ----------------------------------------------------------------
 # testes
 # ----------------------------------------------------------------
@@ -91,32 +95,44 @@ def teste_avaliacao.go(r: A.Pop<Array<U32>> & (U32 & U32)) -> String:
 def teste_avaliacao() -> String:
   teste_avaliacao.go(pop_avaliada())
 
-# 2) at2 troca material entre dois slots: corte fixo em 4 num genoma de 8
-def cruza.fin(r: Array<U32> & Array<U32>) -> A.Individual<Array<U32>> & A.Individual<Array<U32>>:
-  (ga, gb) = r
-  (A.Individual{ga, 0, 0}, A.Individual{gb, 0, 0})
+# 2) at4 "4 entram, 4 saem": dois pais em `cur`, dois filhos em `nxt`,
+#    com corte fixo em 4 num genoma de 8
+def cruza.fin(r: (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>)) ->
+  (A.Individual<Array<U32>> & A.Individual<Array<U32>>) & (A.Individual<Array<U32>> & A.Individual<Array<U32>>):
+  (filhos, pais) = r
+  (ga, gb) = filhos
+  (gpa, gpb) = pais
+  ((A.Individual{ga, 0, 0}, A.Individual{gb, 0, 0}),
+   (A.Individual{gpa, 1, 0}, A.Individual{gpb, 1, 0}))
 
-def cruza(ia: A.Individual<Array<U32>>, ib: A.Individual<Array<U32>>, +ctx: U32) -> A.Individual<Array<U32>> & A.Individual<Array<U32>>:
-  match ia ib:
-    case A.Individual{ga, fa, ha} A.Individual{gb, fb, hb}:
-      cruza.fin(Arr.swap_range(~U32, ga, gb, 4, 4))
+def cruza(ija: A.Individual<Array<U32>>, ijb: A.Individual<Array<U32>>,
+          ipa: A.Individual<Array<U32>>, ipb: A.Individual<Array<U32>>, +ctx: U32) ->
+  (A.Individual<Array<U32>> & A.Individual<Array<U32>>) & (A.Individual<Array<U32>> & A.Individual<Array<U32>>):
+  match ija ijb ipa ipb:
+    case A.Individual{ga, fa, ha} A.Individual{gb, fb, hb} A.Individual{gpa, fpa, hpa} A.Individual{gpb, fpb, hpb}:
+      cruza.fin(Op.breed_1point(~U32, ga, gb, gpa, gpb, 8, True{}, 42))
 
-def teste_at2.mostra(p: A.Pop<Array<U32>>) -> String:
+def teste_at4.mostra(p: A.Pop<Array<U32>>) -> String:
+  T.with(A.Pop<Array<U32>>, String, String, show_slot_nxt(p, 0), p2 => s0 =>
+  T.with(A.Pop<Array<U32>>, String, String, show_slot_nxt(p2, 1), p3 => s1 =>
+    "filho0=" ++ s0 ++ "  filho1=" ++ s1))
+
+def teste_at4.go(r: A.Pop<Array<U32>> & (U32 & U32)) -> String:
+  (p, best) = r
+  teste_at4.mostra(A.at4(~Array<U32>, ~U32, ~cruza, p, 0, 1, 0, 1, 0))
+
+def teste_at4() -> String:
+  teste_at4.go(pop_avaliada())
+
+# 3) os slots como saíram do pop_new, antes de qualquer cruzamento
+def teste_slots.mostra(p: A.Pop<Array<U32>>) -> String:
   T.with(A.Pop<Array<U32>>, String, String, show_slot(p, 0), p2 => s0 =>
   T.with(A.Pop<Array<U32>>, String, String, show_slot(p2, 1), p3 => s1 =>
     "slot0=" ++ s0 ++ "  slot1=" ++ s1))
 
-def teste_at2.go(r: A.Pop<Array<U32>> & (U32 & U32)) -> String:
-  (p, best) = r
-  teste_at2.mostra(A.at2(~Array<U32>, ~U32, ~cruza, p, 0, 1, 0))
-
-def teste_at2() -> String:
-  teste_at2.go(pop_avaliada())
-
-# 3) os slots como saíram do pop_new, antes de qualquer cruzamento
 def teste_slots.go(r: A.Pop<Array<U32>> & (U32 & U32)) -> String:
   (p, best) = r
-  teste_at2.mostra(p)
+  teste_slots.mostra(p)
 
 def teste_slots() -> String:
   teste_slots.go(pop_avaliada())
@@ -141,6 +157,9 @@ def mostra2(r: Array<U32> & Array<U32>) -> String:
 def teste_uniforme() -> String:
   mostra2(Op.cross_uniform(genoma_a(), genoma_b(), 8, R.per(1, 2), 987654321))
 
+def teste_2pontos() -> String:
+  mostra2(Op.cross_2point(genoma_a(), genoma_b(), 8, 987654321))
+
 def teste_1ponto() -> String:
   mostra2(Op.cross_1point(genoma_a(), genoma_b(), 8, 42))
 
@@ -162,11 +181,12 @@ def main() -> IO(Unit):
       "slot0=[1, 1, 1, 1, 0, 1, 1, 0] fit=7  slot1=[1, 0, 1, 1, 1, 0, 1, 0] fit=6"))
     u : Unit <- IO.print(check("evaluate: soma por fit_at e melhor acumulado", teste_avaliacao(),
       "soma_fits=21 melhor=slot0 fit=7"))
-    u : Unit <- IO.print(check("at2: troca os 4 últimos genes dos slots 0 e 1, zera o fit", teste_at2(),
-      "slot0=[1, 1, 1, 1, 1, 0, 1, 0] fit=0  slot1=[1, 0, 1, 1, 0, 1, 1, 0] fit=0"))
+    u : Unit <- IO.print(check("at4: 2 pais em cur -> 2 filhos em nxt (corte 1)", teste_at4(),
+      "filho0=[1, 0, 1, 1, 1, 0, 1, 0] fit=0  filho1=[1, 1, 1, 1, 0, 1, 1, 0] fit=0"))
     u : Unit <- IO.print("== operadores de gene ==")
     u : Unit <- IO.print(check("cross_1point (corte sorteado = 1)", teste_1ponto(),
       "a=[1, 0, 0, 0, 0, 0, 0, 0] b=[0, 1, 1, 1, 1, 1, 1, 1]"))
+    u : Unit <- IO.print("  (informativo) cross_2point:  " ++ teste_2pontos())
     u : Unit <- IO.print(check("cross_uniform (metade a metade)", teste_uniforme(),
       "a=[0, 1, 0, 1, 1, 1, 1, 1] b=[1, 0, 1, 0, 0, 0, 0, 0]"))
     u : Unit <- IO.print(check("mut_replace (taxa 1/4, 8 genes)", teste_mut(),
