@@ -31,24 +31,27 @@ import ./../utils/random.bend as R
 # ================================================================
 
 type Config is Data:
-  Config{cross_rate: U32, mut_rate: U32, gene_rate: U32, tsize: U32, diversity: Bool}
+  Config{cross_rate: U32, mut_rate: U32, gene_rate: U32, tsize: U32, diversity: Bool, max_stag: U32}
 
-def cfg_new(+cross_rate: U32, +mut_rate: U32, +gene_rate: U32, +tsize: U32, +diversity: Bool) -> Config:
-  Config{cross_rate, mut_rate, gene_rate, tsize, diversity}
+# `max_stag` = gerações sem melhora até reiniciar a população (0 desliga o
+# controle de estagnação). Na metade disso a mutação já dobra.
+def cfg_new(+cross_rate: U32, +mut_rate: U32, +gene_rate: U32, +tsize: U32,
+            +diversity: Bool, +max_stag: U32) -> Config:
+  Config{cross_rate, mut_rate, gene_rate, tsize, diversity, max_stag}
 
 def cfg_cross(+cfg: Config) -> U32:
   match cfg:
-    case Config{+cross_rate, mut_rate, gene_rate, tsize, diversity}:
+    case Config{+cross_rate, mut_rate, gene_rate, tsize, diversity, max_stag}:
       cross_rate
 
 def cfg_mut(+cfg: Config) -> U32:
   match cfg:
-    case Config{cross_rate, +mut_rate, gene_rate, tsize, diversity}:
+    case Config{cross_rate, +mut_rate, gene_rate, tsize, diversity, max_stag}:
       mut_rate
 
 def cfg_gene(+cfg: Config) -> U32:
   match cfg:
-    case Config{cross_rate, mut_rate, +gene_rate, tsize, diversity}:
+    case Config{cross_rate, mut_rate, +gene_rate, tsize, diversity, max_stag}:
       gene_rate
 
 # com `diversity = False{}` o motor NÃO calcula o hash dos filhos nem faz a
@@ -58,12 +61,17 @@ def cfg_gene(+cfg: Config) -> U32:
 # para OneMax.
 def cfg_div(+cfg: Config) -> Bool:
   match cfg:
-    case Config{cross_rate, mut_rate, gene_rate, tsize, +diversity}:
+    case Config{cross_rate, mut_rate, gene_rate, tsize, +diversity, max_stag}:
       diversity
+
+def cfg_stag(+cfg: Config) -> U32:
+  match cfg:
+    case Config{cross_rate, mut_rate, gene_rate, tsize, diversity, +max_stag}:
+      max_stag
 
 def cfg_tsize(+cfg: Config) -> U32:
   match cfg:
-    case Config{cross_rate, mut_rate, gene_rate, +tsize, diversity}:
+    case Config{cross_rate, mut_rate, gene_rate, +tsize, diversity, max_stag}:
       tsize
 
 # O que uma callback precisa saber. `Data`, porque as callbacks recebem com `+`.
@@ -94,38 +102,43 @@ def call_seed(-P: Data, +c: Call<P>) -> U32:
 
 # Os escalares de um evento, para não carregar seis parâmetros em cada passo.
 type Ev is Data:
-  Ev{va: U32, vb: U32, best_idx: U32, best_fit: U32, seed: U32}
+  Ev{va: U32, vb: U32, best_idx: U32, best_fit: U32, stag: U32, seed: U32}
 
 def ev_va(+e: Ev) -> U32:
   match e:
-    case Ev{+va, vb, bi, bf, seed}:
+    case Ev{+va, vb, bi, bf, stag, seed}:
       va
 
 def ev_vb(+e: Ev) -> U32:
   match e:
-    case Ev{va, +vb, bi, bf, seed}:
+    case Ev{va, +vb, bi, bf, stag, seed}:
       vb
 
 def ev_bi(+e: Ev) -> U32:
   match e:
-    case Ev{va, vb, +bi, bf, seed}:
+    case Ev{va, vb, +bi, bf, stag, seed}:
       bi
 
 def ev_bf(+e: Ev) -> U32:
   match e:
-    case Ev{va, vb, bi, +bf, seed}:
+    case Ev{va, vb, bi, +bf, stag, seed}:
       bf
 
 def ev_seed(+e: Ev) -> U32:
   match e:
-    case Ev{va, vb, bi, bf, +seed}:
+    case Ev{va, vb, bi, bf, stag, +seed}:
       seed
 
+def ev_stag(+e: Ev) -> U32:
+  match e:
+    case Ev{va, vb, bi, bf, +stag, seed}:
+      stag
+
 def ev_set_va(+e: Ev, +va: U32) -> Ev:
-  Ev{va, ev_vb(e), ev_bi(e), ev_bf(e), ev_seed(e)}
+  Ev{va, ev_vb(e), ev_bi(e), ev_bf(e), ev_stag(e), ev_seed(e)}
 
 def ev_set_vb(+e: Ev, +vb: U32) -> Ev:
-  Ev{ev_va(e), vb, ev_bi(e), ev_bf(e), ev_seed(e)}
+  Ev{ev_va(e), vb, ev_bi(e), ev_bf(e), ev_stag(e), ev_seed(e)}
 
 def call_hash_on(-P: Data, +c: Call<P>) -> Bool:
   match c:
@@ -134,7 +147,7 @@ def call_hash_on(-P: Data, +c: Call<P>) -> Bool:
 
 # O estado de uma corrida.
 type Run<-G: Type> is Type:
-  Run{pop: A.Pop<G>, best_idx: U32, best_fit: U32, seed: U32}
+  Run{pop: A.Pop<G>, best_idx: U32, best_fit: U32, stag: U32, seed: U32}
 
 # ----------------------------------------------------------------
 # SORTEIO COM DUAS EXCLUSÕES
@@ -272,17 +285,17 @@ def melhor(+bi: U32, +bf: U32, +i: U32, +f: U32) -> U32 & U32:
 # a semente do PRÓXIMO evento: o corpo do evento só usa os `split.*` desta
 # semente, então `step` é um fluxo que não se sobrepõe a nenhum deles
 # (Armadilha 9: dois consumidores do mesmo fluxo repetem os mesmos números)
-def ev.s6c(~G: Type, p: A.Pop<G>, best: U32 & U32, +seed: U32) -> Run<G>:
+def ev.s6c(~G: Type, p: A.Pop<G>, best: U32 & U32, +stag: U32, +seed: U32) -> Run<G>:
   (+b1, +b2) = best
-  Run{p, b1, b2, R.step(seed)}
+  Run{p, b1, b2, stag, R.step(seed)}
 
-def ev.s6b(~G: Type, p: A.Pop<G>, best: U32 & U32, +vb: U32, +fb: U32, +seed: U32) -> Run<G>:
+def ev.s6b(~G: Type, p: A.Pop<G>, best: U32 & U32, +vb: U32, +fb: U32, +stag: U32, +seed: U32) -> Run<G>:
   (+b1, +b2) = best
-  ev.s6c(~G, p, melhor(b1, b2, vb, fb), seed)
+  ev.s6c(~G, p, melhor(b1, b2, vb, fb), stag, seed)
 
 def ev.s6(~G: Type, r: A.Pop<G> & U32, +e: Ev, +fa: U32) -> Run<G>:
   (p, +fb) = r
-  ev.s6b(~G, p, melhor(ev_bi(e), ev_bf(e), ev_va(e), fa), ev_vb(e), fb, ev_seed(e))
+  ev.s6b(~G, p, melhor(ev_bi(e), ev_bf(e), ev_va(e), fa), ev_vb(e), fb, ev_stag(e), ev_seed(e))
 
 def ev.s5(~G: Type, ~P: Data, ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G,
           ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
@@ -488,26 +501,26 @@ def gen.go(~G: Type, ~P: Data, ~copy_into: @+c: P -> G -> G -> (G & G),
       run
     case 1n+q:
       match run:
-        case Run{pop, +bi, +bf, +seed}:
+        case Run{pop, +bi, +bf, +stag, +seed}:
           gen.go(~G, ~P, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, q,
             event(~G, ~P, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash,
-                  pop, Ev{n, n, bi, bf, seed}, ctx, cfg, n),
+                  pop, Ev{n, n, bi, bf, stag, seed}, ctx, cfg, n),
             ctx, cfg, n)
 
 # Uma geração: `n/2` eventos (logo `n` filhos) e a passada de diversidade.
 # O conjunto de bits é rascunho da ÉPOCA: entra e sai junto com o estado, sem
 # ser realocado a cada geração.
-def gen.div2(~G: Type, r: A.Pop<G> & Array<U32>, +bi: U32, +bf: U32, +seed: U32) -> Run<G> & Array<U32>:
+def gen.div2(~G: Type, r: A.Pop<G> & Array<U32>, +bi: U32, +bf: U32, +stag: U32, +seed: U32) -> Run<G> & Array<U32>:
   (p, seen) = r
-  (Run{p, bi, bf, seed}, seen)
+  (Run{p, bi, bf, stag, seed}, seen)
 
 def gen.div(~G: Type, ~P: Data, ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G,
             ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
             run: Run<G>, seen: Array<U32>, +ctx: P, +cfg: Config, +n: U32) -> Run<G> & Array<U32>:
   match run:
-    case Run{pop, +bi, +bf, +seed}:
+    case Run{pop, +bi, +bf, +stag, +seed}:
       gen.div2(~G, diversify(~G, ~P, ~mutate, ~fitness, ~hash, pop, seen, n, bi,
-        Call{ctx, 0, R.scale(cfg_gene(cfg), {4.0 : F32}), R.split.fth(seed), True{}}), bi, bf, R.step(seed))
+        Call{ctx, 0, R.scale(cfg_gene(cfg), {4.0 : F32}), R.split.fth(seed), True{}}), bi, bf, stag, R.step(seed))
 
 def gen.div.if(~G: Type, ~P: Data, ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G,
                ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
@@ -518,15 +531,115 @@ def gen.div.if(~G: Type, ~P: Data, ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 
     case False{}:
       T.pair(Run<G>, Array<U32>, run, seen)
 
-def generation(~G: Type, ~P: Data, ~copy_into: @+c: P -> G -> G -> (G & G),
+# ----------------------------------------------------------------
+# ESTAGNAÇÃO
+# ----------------------------------------------------------------
+# `stag` conta gerações sem melhora. Na metade de `max_stag` a mutação dobra
+# (mais exploração); passando de `max_stag`, a população é reiniciada com
+# `~init`, poupando o elite — e o contador zera. Com `max_stag = 0` nada
+# disso acontece.
+
+# a configuração EFETIVA desta geração
+def eff_cfg(+cfg: Config, +stag: U32) -> Config:
+  +limite = cfg_stag(cfg)
+  +forte = Bool.and(U32.is_ne(limite, 0), U32.is_ge(stag, U32.shr(limite)))
+  Config{cfg_cross(cfg),
+         Bool.pick(U32, forte, R.scale(cfg_mut(cfg), {2.0 : F32}), cfg_mut(cfg)),
+         Bool.pick(U32, forte, R.scale(cfg_gene(cfg), {2.0 : F32}), cfg_gene(cfg)),
+         cfg_tsize(cfg), cfg_div(cfg), limite}
+
+# reinício: cada slot (menos o elite) recebe um genoma novo de `~init`, é
+# avaliado e re-hasheado. É in-place: `~init` escreve no buffer que já existe.
+def restart.one(~G: Type, ~P: Data, ~init: @+c: P -> G -> @+s: U32 -> G,
+                ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
+                ind: A.Individual<G>, +call: Call<P>, +at: U32) -> A.Individual<G> & U32:
+  match ind:
+    case A.Individual{gene, fit, h}:
+      +s = call_seed(P, call)
+      mut_eval.fin(~G, ~P, ~hash,
+        fitness(call_ctx(P, call), init(call_ctx(P, call), gene, R.hash32((s + at : U32)))), call)
+
+def restart.skip(~G: Type, ~P: Data, ~init: @+c: P -> G -> @+s: U32 -> G,
+                 ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
+                 pular: Bool, p: A.Pop<G>, +i: U32, +call: Call<P>) -> A.Pop<G> & U32:
+  match pular:
+    case True{}:
+      (p, 0)
+    case False{}:
+      A.read1(~G, ~Call<P>, ~U32, ~restart.one(~G, ~P, ~init, ~fitness, ~hash), p, i, call)
+
+def restart.go(~G: Type, ~P: Data, ~init: @+c: P -> G -> @+s: U32 -> G,
+               ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
+               k: Nat, r: A.Pop<G> & U32, +i: U32, +skip: U32, +call: Call<P>) -> A.Pop<G>:
+  match k:
+    case 0n:
+      (p, +f) = r
+      p
+    case 1n+q:
+      (p, +f) = r
+      restart.go(~G, ~P, ~init, ~fitness, ~hash, q,
+        restart.skip(~G, ~P, ~init, ~fitness, ~hash, U32.is_eq(i, skip), p, i, call),
+        (i + 1 : U32), skip, call)
+
+def restart(~G: Type, ~P: Data, ~init: @+c: P -> G -> @+s: U32 -> G,
+            ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
+            p: A.Pop<G>, +n: U32, +skip: U32, +call: Call<P>) -> A.Pop<G>:
+  restart.go(~G, ~P, ~init, ~fitness, ~hash, U32.to_nat(n), (p, 0), 0, skip, call)
+
+# depois da geração: conta a estagnação e, se passou do limite, reinicia
+def stag.fin(~G: Type, p: A.Pop<G>, seen: Array<U32>, +bi: U32, +bf: U32, +stag: U32, +seed: U32) -> Run<G> & Array<U32>:
+  T.pair(Run<G>, Array<U32>, Run{p, bi, bf, stag, seed}, seen)
+
+def stag.if(~G: Type, ~P: Data, ~init: @+c: P -> G -> @+s: U32 -> G,
+            ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
+            reinicia: Bool, p: A.Pop<G>, seen: Array<U32>, +bi: U32, +bf: U32, +stag: U32,
+            +ctx: P, +cfg: Config, +n: U32, +seed: U32) -> Run<G> & Array<U32>:
+  match reinicia:
+    case True{}:
+      stag.fin(~G, restart(~G, ~P, ~init, ~fitness, ~hash, p, n, bi,
+        Call{ctx, 0, 0, R.split.snd(seed), cfg_div(cfg)}), seen, bi, bf, 0, R.step(seed))
+    case False{}:
+      stag.fin(~G, p, seen, bi, bf, stag, seed)
+
+def stag.conta(~G: Type, ~P: Data, ~init: @+c: P -> G -> @+s: U32 -> G,
+               ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
+               run: Run<G>, seen: Array<U32>, +antes: U32, +ctx: P, +cfg: Config, +n: U32) -> Run<G> & Array<U32>:
+  match run:
+    case Run{pop, +bi, +bf, stag, +seed}:
+      +novo_stag = Bool.pick(U32, U32.is_gt(bf, antes), 0, U32.inc(stag))
+      +limite = cfg_stag(cfg)
+      stag.if(~G, ~P, ~init, ~fitness, ~hash,
+        Bool.and(U32.is_ne(limite, 0), U32.is_gt(novo_stag, limite)),
+        pop, seen, bi, bf, novo_stag, ctx, cfg, n, seed)
+
+def stag.open(~G: Type, ~P: Data, ~init: @+c: P -> G -> @+s: U32 -> G,
+              ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
+              st: Run<G> & Array<U32>, +antes: U32, +ctx: P, +cfg: Config, +n: U32) -> Run<G> & Array<U32>:
+  (run, seen) = st
+  stag.conta(~G, ~P, ~init, ~fitness, ~hash, run, seen, antes, ctx, cfg, n)
+
+def generation(~G: Type, ~P: Data, ~init: @+c: P -> G -> @+s: U32 -> G, ~copy_into: @+c: P -> G -> G -> (G & G),
                ~crossover: @+c: P -> G -> G -> @+s: U32 -> (G & G),
                ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G, ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
-               run: Run<G>, seen: Array<U32>, +ctx: P, +cfg: Config, +n: U32) -> Run<G> & Array<U32>:
-  gen.div.if(~G, ~P, ~mutate, ~fitness, ~hash, cfg_div(cfg),
-    gen.go(~G, ~P, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, U32.to_nat(U32.shr(n)), run, ctx, cfg, n),
-    seen, ctx, cfg, n)
+               run: Run<G>, seen: Array<U32>, +antes: U32, +stag: U32, +ctx: P, +cfg: Config, +n: U32) -> Run<G> & Array<U32>:
+  stag.open(~G, ~P, ~init, ~fitness, ~hash,
+    gen.div.if(~G, ~P, ~mutate, ~fitness, ~hash, cfg_div(cfg),
+      gen.go(~G, ~P, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, U32.to_nat(U32.shr(n)),
+             run, ctx, eff_cfg(cfg, stag), n),
+      seen, ctx, cfg, n),
+    antes, ctx, cfg, n)
 
-def evolve(~G: Type, ~P: Data, ~copy_into: @+c: P -> G -> G -> (G & G),
+
+def evolve.step(~G: Type, ~P: Data, ~init: @+c: P -> G -> @+s: U32 -> G, ~copy_into: @+c: P -> G -> G -> (G & G),
+                ~crossover: @+c: P -> G -> G -> @+s: U32 -> (G & G),
+                ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G, ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
+                run: Run<G>, seen: Array<U32>, +ctx: P, +cfg: Config, +n: U32) -> Run<G> & Array<U32>:
+  match run:
+    case Run{pop, +bi, +bf, +stag, +seed}:
+      generation(~G, ~P, ~init, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash,
+        Run{pop, bi, bf, stag, seed}, seen, bf, stag, ctx, cfg, n)
+
+def evolve(~G: Type, ~P: Data, ~init: @+c: P -> G -> @+s: U32 -> G, ~copy_into: @+c: P -> G -> G -> (G & G),
            ~crossover: @+c: P -> G -> G -> @+s: U32 -> (G & G),
            ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G, ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
            k: Nat, st: Run<G> & Array<U32>, +ctx: P, +cfg: Config, +n: U32) -> Run<G> & Array<U32>:
@@ -535,9 +648,10 @@ def evolve(~G: Type, ~P: Data, ~copy_into: @+c: P -> G -> G -> (G & G),
       st
     case 1n+q:
       (run, seen) = st
-      evolve(~G, ~P, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, q,
-        generation(~G, ~P, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, run, seen, ctx, cfg, n),
+      evolve(~G, ~P, ~init, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, q,
+        evolve.step(~G, ~P, ~init, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, run, seen, ctx, cfg, n),
         ctx, cfg, n)
+
 
 # ----------------------------------------------------------------
 # COMEÇO E FIM
@@ -546,7 +660,7 @@ def evolve(~G: Type, ~P: Data, ~copy_into: @+c: P -> G -> G -> (G & G),
 # A primeira avaliação, que dá o melhor inicial
 def start.fin2(~G: Type, p: A.Pop<G>, best: U32 & U32, +seed: U32) -> Run<G>:
   (+bi, +bf) = best
-  Run{p, bi, bf, seed}
+  Run{p, bi, bf, 0, seed}
 
 def start.fin(~G: Type, r: A.Pop<G> & (U32 & U32), +seed: U32) -> Run<G>:
   (p, best) = r
@@ -559,8 +673,8 @@ def start(~G: Type, ~P: Data, ~fitness: @+c: P -> G -> (G & U32),
 # O melhor da corrida, sem consumir o estado
 def best_of(~G: Type, run: Run<G>) -> Run<G> & U32:
   match run:
-    case Run{pop, +bi, +bf, +seed}:
-      (Run{pop, bi, bf, seed}, bf)
+    case Run{pop, +bi, +bf, +stag, +seed}:
+      (Run{pop, bi, bf, stag, seed}, bf)
 
 # ----------------------------------------------------------------
 # ARQUIPÉLAGO: DEMES EM PARALELO
@@ -610,12 +724,12 @@ def arch.merge.left(~G: Type, pl: A.Pop<G>, pr: A.Pop<G>, +bl: U32, +br: U32) ->
 
 def arch.merge.runs(~G: Type, l: Run<G>, pr: A.Pop<G>, +br: U32, +seed: U32) -> Run<G> & U32:
   match l:
-    case Run{pl, +bl, bf, sl}:
-      (Run{arch.merge.left(~G, pl, pr, bl, br), 0, 0, seed}, bl)
+    case Run{pl, +bl, bf, st, sl}:
+      (Run{arch.merge.left(~G, pl, pr, bl, br), 0, 0, st, seed}, bl)
 
 def arch.merge.open_r(~G: Type, l: Run<G>, r: Run<G>) -> Run<G> & U32:
   match r:
-    case Run{pr, +br, bf, +sr}:
+    case Run{pr, +br, bf, st, +sr}:
       arch.merge.runs(~G, l, pr, br, R.split.trd(sr))
 
 # junta as duas metades (com migração) e reavalia para achar o melhor do todo
@@ -626,7 +740,7 @@ def arch.merge.fin(~G: Type, r: A.Pop<G> & (U32 & U32), +seed: U32) -> Run<G>:
 def arch.merge.eval2(~G: Type, ~P: Data, ~fitness: @+c: P -> G -> (G & U32),
                      run: Run<G>, +ctx: P) -> Run<G>:
   match run:
-    case Run{pop, bi, bf, +seed}:
+    case Run{pop, bi, bf, +stag, +seed}:
       arch.merge.fin(~G, A.evaluate(~G, ~P, ~fitness, pop, ctx), seed)
 
 def arch.merge.eval(~G: Type, ~P: Data, ~fitness: @+c: P -> G -> (G & U32),
@@ -648,39 +762,39 @@ def arch.merge2(~G: Type, ~P: Data, ~fitness: @+c: P -> G -> (G & U32),
   (run_r, seen_r) = r
   T.pair(Run<G>, Array<U32>, arch.merge(~G, ~P, ~fitness, run_l, run_r, ctx), seen_l)
 
-def arch.go(~G: Type, ~P: Data, ~alloc: @+c: P -> G, ~copy_into: @+c: P -> G -> G -> (G & G),
+def arch.go(~G: Type, ~P: Data, ~alloc: @+c: P -> G, ~init: @+c: P -> G -> @+s: U32 -> G, ~copy_into: @+c: P -> G -> G -> (G & G),
             ~crossover: @+c: P -> G -> G -> @+s: U32 -> (G & G),
             ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G, ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
             d: Nat, st: Run<G> & Array<U32>, +ctx: P, +cfg: Config, +gens: U32, +n: U32) -> Run<G> & Array<U32>:
   match d:
     case 0n:
-      evolve(~G, ~P, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, U32.to_nat(gens), st, ctx, cfg, n)
+      evolve(~G, ~P, ~init, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, U32.to_nat(gens), st, ctx, cfg, n)
     case 1n+ +p:
       # a divisão é aberta AQUI dentro (matches aninhados sobre campos): um
       # auxiliar que abrisse os pares teria de chamar `arch.go` de volta, e
       # Bend 2 não tem recursão mútua
       (run, seen) = st
       match run:
-        case Run{pop, bi, bf, +seed}:
+        case Run{pop, bi, bf, +stag, +seed}:
           match pop:
             case A.Pop{arr, h1, h2, +size}:
               match arr:
                 case ALeaf{x}:
                   # deme de um indivíduo: nada a dividir (não ocorre com
                   # d <= log2(pop), que é o contrato de `archipelago`)
-                  evolve(~G, ~P, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, U32.to_nat(gens),
-                    T.pair(Run<G>, Array<U32>, Run{A.Pop{ALeaf{x}, h1, h2, size}, bi, bf, seed}, seen), ctx, cfg, n)
+                  evolve(~G, ~P, ~init, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, U32.to_nat(gens),
+                    T.pair(Run<G>, Array<U32>, Run{A.Pop{ALeaf{x}, h1, h2, size}, bi, bf, stag, seed}, seen), ctx, cfg, n)
                 case ANode{xs, ys}:
                   # cada deme leva os SEUS dois buracos e o SEU conjunto de
                   # bits: valor linear não se compartilha entre tarefas.
                   # São 2 genomas + 8 KB por deme, uma vez por época.
                   +half = U32.shr(size)
-                  l r = arch.go(~G, ~P, ~alloc, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, p, T.pair(Run<G>, Array<U32>, Run{A.Pop{xs, h1, h2, half}, 0, 0, R.split.fst(seed)}, seen), ctx, cfg, gens, half) arch.go(~G, ~P, ~alloc, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, p, T.pair(Run<G>, Array<U32>, Run{A.Pop{ys, A.fresh(~G, alloc(ctx)), A.fresh(~G, alloc(ctx)), half}, 0, 0, R.split.snd(seed)}, Array.new(U32, bits_d(), 0)), ctx, cfg, gens, half)
+                  l r = arch.go(~G, ~P, ~alloc, ~init, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, p, T.pair(Run<G>, Array<U32>, Run{A.Pop{xs, h1, h2, half}, 0, 0, stag, R.split.fst(seed)}, seen), ctx, cfg, gens, half) arch.go(~G, ~P, ~alloc, ~init, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, p, T.pair(Run<G>, Array<U32>, Run{A.Pop{ys, A.fresh(~G, alloc(ctx)), A.fresh(~G, alloc(ctx)), half}, 0, 0, stag, R.split.snd(seed)}, Array.new(U32, bits_d(), 0)), ctx, cfg, gens, half)
                   arch.merge2(~G, ~P, ~fitness, l, r, ctx)
 
 # `epochs` épocas de `gens` gerações em cada um dos 2^d demes, com migração
 # entre as metades ao fim de cada época.
-def archipelago(~G: Type, ~P: Data, ~alloc: @+c: P -> G, ~copy_into: @+c: P -> G -> G -> (G & G),
+def archipelago(~G: Type, ~P: Data, ~alloc: @+c: P -> G, ~init: @+c: P -> G -> @+s: U32 -> G, ~copy_into: @+c: P -> G -> G -> (G & G),
                 ~crossover: @+c: P -> G -> G -> @+s: U32 -> (G & G),
                 ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G, ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
                 epochs: Nat, +d: Nat, st: Run<G> & Array<U32>, +ctx: P, +cfg: Config, +gens: U32, +n: U32) -> Run<G> & Array<U32>:
@@ -688,8 +802,8 @@ def archipelago(~G: Type, ~P: Data, ~alloc: @+c: P -> G, ~copy_into: @+c: P -> G
     case 0n:
       st
     case 1n+q:
-      archipelago(~G, ~P, ~alloc, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, q, d,
-        arch.go(~G, ~P, ~alloc, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, d, st, ctx, cfg, gens, n),
+      archipelago(~G, ~P, ~alloc, ~init, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, q, d,
+        arch.go(~G, ~P, ~alloc, ~init, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash, d, st, ctx, cfg, gens, n),
         ctx, cfg, gens, n)
 
 # o estado inicial de uma corrida: população avaliada e o conjunto de bits
