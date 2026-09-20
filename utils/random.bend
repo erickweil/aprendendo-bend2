@@ -113,8 +113,12 @@ def scale(+threshold: U32, +m: F32) -> U32:
   F32.to_u32(F32.min((U32.to_f32(threshold) * m : F32), {4294967040.0 : F32}))
 
 # Uniforme em (0, 1], com 24 bits de precisão (o que um F32 representa)
+# (o `mix` sai de dentro da anotação: desde o 2.0.17 um nome local dentro de
+# `( .. : F32)` pode ser resolvido como `F32.<nome>` quando o módulo é
+# importado, e o erro vira `expected: a defined name, observed: F32.<nome>`)
 def unit(+seed: U32) -> F32:
-  ((U32.to_f32(U32.shrn(mix(seed), 8n)) + {1.0 : F32}) / {16777216.0 : F32} : F32)
+  +m = U32.to_f32(U32.shrn(mix(seed), 8n))
+  ((m + {1.0 : F32}) / {16777216.0 : F32} : F32)
 
 # Amostra uniforme em [lo, hi] com 10000 níveis discretos
 def rnd_range_f32(+seed: U32, +lo: F32, +hi: F32) -> F32:
@@ -151,8 +155,9 @@ def ln_miss(+threshold: U32) -> F32:
 # Limiar 0 nunca sorteia; o quociente é limitado antes da conversão porque
 # converter um F32 acima de 2^32 para U32 é indefinido em C.
 def gap(+seed: U32, +threshold: U32, +lnq: F32) -> U32:
+  +lu = F32.log(unit(seed))
   Bool.pick(U32, U32.is_zero(threshold), MAX(),
-    F32.to_u32(F32.min((F32.log(unit(seed)) / lnq : F32), {4000000000.0 : F32})))
+    F32.to_u32(F32.min((lu / lnq : F32), {4000000000.0 : F32})))
 
 def poisson.go(k: Nat, done: Bool, +p: F32, +l: F32, +count: U32, +seed: U32) -> U32:
   match k done:
@@ -161,7 +166,8 @@ def poisson.go(k: Nat, done: Bool, +p: F32, +l: F32, +count: U32, +seed: U32) ->
     case 0n False{}:
       count
     case 1n+q False{}:
-      +p2 = (p * unit(seed) : F32)
+      +u = unit(seed)
+      +p2 = (p * u : F32)
       +stop = F32.is_le(p2, l)
       poisson.go(q, stop, p2, l, Bool.pick(U32, stop, count, U32.inc(count)), step(seed))
 
