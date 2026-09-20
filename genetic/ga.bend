@@ -1,5 +1,6 @@
 import Base
 import ./arena.bend as A
+import ./../utils/arrays.bend as Arr
 import ./../utils/random.bend as R
 
 # ================================================================
@@ -391,3 +392,121 @@ def best_of(~G: Type, run: Run<G>) -> Run<G> & U32:
   match run:
     case Run{pop, +bi, +bf, +seed}:
       (Run{pop, bi, bf, seed}, bf)
+
+# ----------------------------------------------------------------
+# ARQUIPÉLAGO: DEMES EM PARALELO
+# ----------------------------------------------------------------
+# A população é dividida em 2^d demes com `match ANode`, cada um evoluindo
+# numa tarefa. Dividir custa só cópia de HANDLES (um por indivíduo), não de
+# genes — é o que torna o paralelismo barato aqui.
+#
+# Cada deme precisa dos SEUS dois buracos: um valor linear não se compartilha
+# entre tarefas. A divisão aloca dois genomas por deme, uma vez por ÉPOCA (não
+# por geração); a junção os descarta.
+#
+# A migração troca slots entre as duas metades (`Arr.swap_range_hole`): troca
+# de handle, nenhum gene copiado. Depois da junção, uma passada de
+# `A.evaluate` acha o melhor do conjunto — como todos já têm fitness, ela é só
+# uma varredura de ~3 ns por indivíduo.
+
+def arch.join(~G: Type, st: (Array<A.Individual<G>> & Array<A.Individual<G>>) & A.Individual<G>,
+              h2: A.Individual<G>, +half: U32) -> A.Pop<G>:
+  (ab, h1) = st
+  (arr_l, arr_r) = ab
+  A.Pop{ANode{arr_l, arr_r}, h1, h2, U32.shl(half)}
+
+# segunda troca: o melhor da direita vai para a esquerda
+def arch.mig2(~G: Type, st: (Array<A.Individual<G>> & Array<A.Individual<G>>) & A.Individual<G>,
+              h2: A.Individual<G>, +br: U32, +half: U32) -> A.Pop<G>:
+  (ab, h1) = st
+  (arr_l, arr_r) = ab
+  arch.join(~G, Arr.swap_range_hole(~A.Individual<G>, arr_l, arr_r, h1, br, 1), h2, half)
+
+# duas trocas: o slot do melhor de cada metade troca com o MESMO índice da
+# outra metade
+def arch.migrate(~G: Type, arr_l: Array<A.Individual<G>>, arr_r: Array<A.Individual<G>>,
+                 h1: A.Individual<G>, h2: A.Individual<G>, +bl: U32, +br: U32, +half: U32) -> A.Pop<G>:
+  arch.mig2(~G, Arr.swap_range_hole(~A.Individual<G>, arr_l, arr_r, h1, bl, 1), h2, br, half)
+
+def arch.merge.right(~G: Type, arr_l: Array<A.Individual<G>>, h1: A.Individual<G>, h2: A.Individual<G>,
+                     pr: A.Pop<G>, +bl: U32, +br: U32) -> A.Pop<G>:
+  match pr:
+    case A.Pop{arr_r, hr1, hr2, +sr}:
+      arch.migrate(~G, arr_l, arr_r, h1, h2, bl, br, sr)
+
+def arch.merge.left(~G: Type, pl: A.Pop<G>, pr: A.Pop<G>, +bl: U32, +br: U32) -> A.Pop<G>:
+  match pl:
+    case A.Pop{arr_l, h1, h2, sl}:
+      arch.merge.right(~G, arr_l, h1, h2, pr, bl, br)
+
+def arch.merge.runs(~G: Type, l: Run<G>, pr: A.Pop<G>, +br: U32, +seed: U32) -> Run<G> & U32:
+  match l:
+    case Run{pl, +bl, bf, sl}:
+      (Run{arch.merge.left(~G, pl, pr, bl, br), 0, 0, seed}, bl)
+
+def arch.merge.open_r(~G: Type, l: Run<G>, r: Run<G>) -> Run<G> & U32:
+  match r:
+    case Run{pr, +br, bf, +sr}:
+      arch.merge.runs(~G, l, pr, br, R.split.trd(sr))
+
+# junta as duas metades (com migração) e reavalia para achar o melhor do todo
+def arch.merge.fin(~G: Type, r: A.Pop<G> & (U32 & U32), +seed: U32) -> Run<G>:
+  (p, best) = r
+  start.fin2(~G, p, best, seed)
+
+def arch.merge.eval2(~G: Type, ~P: Data, ~fitness: @+c: P -> G -> (G & U32),
+                     run: Run<G>, +ctx: P) -> Run<G>:
+  match run:
+    case Run{pop, bi, bf, +seed}:
+      arch.merge.fin(~G, A.evaluate(~G, ~P, ~fitness, pop, ctx), seed)
+
+def arch.merge.eval(~G: Type, ~P: Data, ~fitness: @+c: P -> G -> (G & U32),
+                    r: Run<G> & U32, +ctx: P) -> Run<G>:
+  (run, +bl) = r
+  arch.merge.eval2(~G, ~P, ~fitness, run, ctx)
+
+def arch.merge(~G: Type, ~P: Data, ~fitness: @+c: P -> G -> (G & U32),
+               l: Run<G>, r: Run<G>, +ctx: P) -> Run<G>:
+  arch.merge.eval(~G, ~P, ~fitness, arch.merge.open_r(~G, l, r), ctx)
+
+# ---- a recursão paralela ----
+
+def arch.go(~G: Type, ~P: Data, ~alloc: @+c: P -> G, ~copy_into: @+c: P -> G -> G -> (G & G),
+            ~crossover: @+c: P -> G -> G -> @+s: U32 -> (G & G),
+            ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G, ~fitness: @+c: P -> G -> (G & U32),
+            d: Nat, run: Run<G>, +ctx: P, +cfg: Config, +gens: U32, +n: U32) -> Run<G>:
+  match d:
+    case 0n:
+      evolve(~G, ~P, ~copy_into, ~crossover, ~mutate, ~fitness, U32.to_nat(gens), run, ctx, cfg, n)
+    case 1n+ +p:
+      # a divisão é aberta AQUI dentro (matches aninhados sobre campos), porque
+      # um auxiliar que abrisse o par teria de chamar `arch.go` de volta, e
+      # Bend 2 não tem recursão mútua
+      match run:
+        case Run{pop, bi, bf, +seed}:
+          match pop:
+            case A.Pop{arr, h1, h2, +size}:
+              match arr:
+                case ALeaf{x}:
+                  # deme de um indivíduo: nada a dividir (não ocorre com
+                  # d <= log2(pop), que é o contrato de `archipelago`)
+                  evolve(~G, ~P, ~copy_into, ~crossover, ~mutate, ~fitness, U32.to_nat(gens),
+                    Run{A.Pop{ALeaf{x}, h1, h2, size}, bi, bf, seed}, ctx, cfg, n)
+                case ANode{xs, ys}:
+                  +half = U32.shr(size)
+                  l r = arch.go(~G, ~P, ~alloc, ~copy_into, ~crossover, ~mutate, ~fitness, p, Run{A.Pop{xs, h1, h2, half}, 0, 0, R.split.fst(seed)}, ctx, cfg, gens, half) arch.go(~G, ~P, ~alloc, ~copy_into, ~crossover, ~mutate, ~fitness, p, Run{A.Pop{ys, A.fresh(~G, alloc(ctx)), A.fresh(~G, alloc(ctx)), half}, 0, 0, R.split.snd(seed)}, ctx, cfg, gens, half)
+                  arch.merge(~G, ~P, ~fitness, l, r, ctx)
+
+# `epochs` épocas de `gens` gerações em cada um dos 2^d demes, com migração
+# entre as metades ao fim de cada época.
+def archipelago(~G: Type, ~P: Data, ~alloc: @+c: P -> G, ~copy_into: @+c: P -> G -> G -> (G & G),
+                ~crossover: @+c: P -> G -> G -> @+s: U32 -> (G & G),
+                ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G, ~fitness: @+c: P -> G -> (G & U32),
+                epochs: Nat, +d: Nat, run: Run<G>, +ctx: P, +cfg: Config, +gens: U32, +n: U32) -> Run<G>:
+  match epochs:
+    case 0n:
+      run
+    case 1n+q:
+      archipelago(~G, ~P, ~alloc, ~copy_into, ~crossover, ~mutate, ~fitness, q, d,
+        arch.go(~G, ~P, ~alloc, ~copy_into, ~crossover, ~mutate, ~fitness, d, run, ctx, cfg, gens, n),
+        ctx, cfg, gens, n)
