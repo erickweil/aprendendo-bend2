@@ -166,14 +166,6 @@ def peek_fit(~G: Type, ind: Individual<G>, +ctx: U32, +at: U32) -> Individual<G>
 def fit_at(~G: Type, p: Pop<G>, +i: U32) -> Pop<G> & U32:
   read1(~G, ~U32, ~U32, ~peek_fit(~G), p, i, 0)
 
-def peek_hash(~G: Type, ind: Individual<G>, +ctx: U32, +at: U32) -> Individual<G> & U32:
-  match ind:
-    case Individual{gene, fit, +hash}:
-      (Individual{gene, fit, hash}, hash)
-
-def hash_at(~G: Type, p: Pop<G>, +i: U32) -> Pop<G> & U32:
-  read1(~G, ~U32, ~U32, ~peek_hash(~G), p, i, 0)
-
 # ----------------------------------------------------------------
 # ACESSO AO TAMANHO
 # ----------------------------------------------------------------

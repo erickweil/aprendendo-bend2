@@ -1,8 +1,8 @@
 import Base
 import ./../arena.bend as A
 import ./../operators.bend as Op
+import ./../ga.bend as GA
 import ./../../utils/arrays.bend as Arr
-import ./../../utils/tuples.bend as T
 import ./../../utils/random.bend as R
 import ./../../utils/io.bend as IOU
 
@@ -64,33 +64,38 @@ def mutate(+ctx: Ctx, g: Array<U32>, +rate: U32, +seed: U32) -> Array<U32>:
 def crossover(+ctx: Ctx, a: Array<U32>, b: Array<U32>, +seed: U32) -> Array<U32> & Array<U32>:
   Op.cross_1point(a, b, ctx_genes(ctx), seed)
 
+# cópia: o motor usa isto para o filho nascer com os genes do pai
+def copy_into(+ctx: Ctx, dst: Array<U32>, src: Array<U32>) -> Array<U32> & Array<U32>:
+  Arr.copy_range(~U32, dst, src, 0, ctx_genes(ctx))
+
 # ----------------------------------------------------------------
-# main: por enquanto monta a população, avalia e mostra o melhor.
-# O laço de evolução entra quando o motor (ga.bend) estiver pronto.
-# ARGS: log2(genes) log2(pop) semente
+# main
+# ARGS: log2(genes) log2(pop) gerações semente
 # ----------------------------------------------------------------
 
-# (desestruturar a tupla de dentro exige a própria def: aninhar as duas
-# desestruturações na mesma função não infere)
-def relato.fin(best: U32 & U32, +genes: U32, +pop: U32) -> String:
-  (+bi, +bf) = best
-  "genes=" ++ U32.show(genes) ++ " pop=" ++ U32.show(pop) ++
-  " | melhor inicial: slot " ++ U32.show(bi) ++ " com " ++ U32.show((bf - 1 : U32)) ++ "/" ++ U32.show(genes)
+def relato(r: GA.Run<Array<U32>> & U32, +genes: U32, +pop: U32, +gens: U32) -> String:
+  (run, +bf) = r
+  "genes=" ++ U32.show(genes) ++ " pop=" ++ U32.show(pop) ++ " gerações=" ++ U32.show(gens) ++
+  " | melhor: " ++ U32.show((bf - 1 : U32)) ++ "/" ++ U32.show(genes) ++
+  Bool.pick(String, U32.is_eq((bf - 1 : U32), genes), "  (ÓTIMO)", "")
 
-def relato(r: A.Pop<Array<U32>> & (U32 & U32), +genes: U32, +pop: U32) -> String:
-  (p, best) = r
-  relato.fin(best, genes, pop)
-
-def run(+genes_d: U32, +pop_d: U32, +seed: U32) -> String:
+def run(+genes_d: U32, +pop_d: U32, +gens: U32, +seed: U32) -> String:
   +ctx = ctx_new(genes_d, R.per(1, U32.shln(1, U32.to_nat(genes_d))))
+  +n = U32.shln(1, U32.to_nat(pop_d))
+  # mesma configuração do teste do Rust: 90% de cruzamento, 90% de mutação,
+  # taxa por gene 1/N, torneio de 5
+  +cfg = GA.cfg_new(R.per(9, 10), R.per(9, 10), R.per(1, ctx_genes(ctx)), 5)
   relato(
-    A.evaluate(~Array<U32>, ~Ctx, ~fitness,
-      A.pop_new(~Array<U32>, ~Ctx, ~alloc, ~init, U32.to_nat(pop_d), ctx, seed), ctx),
-    ctx_genes(ctx), U32.shln(1, U32.to_nat(pop_d)))
+    GA.best_of(~Array<U32>,
+      GA.evolve(~Array<U32>, ~Ctx, ~copy_into, ~crossover, ~mutate, ~fitness, U32.to_nat(gens),
+        GA.start(~Array<U32>, ~Ctx, ~fitness,
+          A.pop_new(~Array<U32>, ~Ctx, ~alloc, ~init, U32.to_nat(pop_d), ctx, seed), ctx, R.step(seed)),
+        ctx, cfg, n)),
+    ctx_genes(ctx), n, gens)
 
 def go(args: List<String>) -> IO(Unit):
   +nums = IOU.numbers(args)
-  IO.print(run(IOU.num_at(nums, 0n, 10), IOU.num_at(nums, 1n, 6), IOU.num_at(nums, 2n, 12345)))
+  IO.print(run(IOU.num_at(nums, 0n, 7), IOU.num_at(nums, 1n, 6), IOU.num_at(nums, 2n, 100), IOU.num_at(nums, 3n, 12345)))
 
 def main() -> IO(Unit):
   IO.bind(List<String>, Unit, IO.args(), go)
