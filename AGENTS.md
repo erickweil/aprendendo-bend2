@@ -200,6 +200,24 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 A solução geralmente está em usar Bool.pick ou criar funções auxiliares que retornam o atributo desejado.
 
 
+### 🔴 Armadilha 5b: chamada local dentro de anotação vira `Tipo.nome` (só quando o módulo é importado)
+> **Conceito:** desde o 2.0.17 o operador pega o tipo da anotação `( .. : T)` em volta dele. O efeito colateral é que um nome LOCAL chamado dentro dessa anotação pode ser resolvido no namespace do tipo.
+
+* **O erro:**
+  ```bend
+  +p2 = (p * unit(seed) : F32)     # ❌ expected: a defined name, observed: F32.../utils/random.unit
+  ```
+  O nome local `unit` virou `F32.unit`, que não existe.
+* **Só aparece quando o módulo é IMPORTADO por outro.** Checando o arquivo sozinho, `--check-only` diz `All terms check` — o erro só surge no arquivo que o importa. Um módulo "verificado" isoladamente pode estar quebrado.
+* **A solução** é tirar a chamada de dentro da anotação:
+  ```bend
+  +u = unit(seed)
+  +p2 = (p * u : F32)              # ✔️
+  ```
+* Mordeu duas vezes neste repositório: `utils/random.bend` (`unit`, `gap`, `poisson.go`) e `genetic/ga.bend` (`call_seed`).
+
+---
+
 ### 🔴 Armadilha 6: Inferência de Tipos em Construtores
 > **Conceito:** O sistema de tipos bidirecional do Bend 2 exige contexto de tipo para construtores ADT.
 
