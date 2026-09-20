@@ -1,6 +1,6 @@
 # AGENTS.md — Guia de Engenharia e Operação em Bend 2
 
-> Verificado contra o **bend 2.0.16**. Ao atualizar o bend, regenere o GUIDE.md e reverifique as armadilhas com sondas curtas compiladas para nativo.
+> Verificado contra o **bend 2.0.21**. Ao atualizar o bend, regenere o GUIDE.md (`bend guide > GUIDE.md`), leia o CHANGELOG (`curl -sL https://raw.githubusercontent.com/bendlang/bend/main/CHANGELOG.md`) e reverifique as armadilhas com sondas curtas compiladas para nativo. A versão instalada sai de `bend version`.
 
 ## 1. Como Orquestrar a Execução do Bend 2 com Segurança
 
@@ -24,7 +24,8 @@ Para aprender sobre o BEND2, leia o GUIDE.md gerado pelo comando `bend guide > G
 * **Performance só se mede no NATIVO.** O interpretador (`bend arquivo.bend`) não é um nativo mais lento: ele tem um comportamento fundamentalmente diferente (ex.: `Bool.pick` é preguiçoso nele e estrito no nativo). Nenhum argumento de performance vale se não vier de um binário `-o`. E há erros que **só o backend nativo acusa** (ex.: "an open Array element type") — compile também o que só foi checado.
 * **Ao medir código paralelo, varie as threads** (`--threads 1 2 4 8 12`) e compare com o teto real da máquina: um benchmark de tarefas **idênticas e independentes** com trabalho contínuo de CPU (neste i5-1245U de 15 W: 8 tarefas escalam só 1,7×, 64 tarefas 2,6×, nada melhora além de 4 threads). O `pow2` do GUIDE, com tarefas minúsculas, dá 3,2× e é uma referência otimista. Um platô antes do número de tarefas independentes indica parte sequencial ou desbalanceamento; um platô que piora conforme o volume de dados cresce indica limite de banda de memória.
 * **Compilação e Verificação Estática:**
-  - Verificação de provas e teoremas: `timeout 60s bend PROOF.bend` (o `--checkup` falha nesse par, veja a seção 4).
+  - Checar sem rodar: `timeout 60s bend <arquivo.bend> --check-only` (checa o arquivo e os imports).
+  - Verificação de provas e teoremas: `timeout 60s bend PROOF.bend` (veja a seção 4 sobre o par LAWS/PROOF).
   - Inspeção do código gerado: `timeout 60s bend <arquivo.bend> -o saida.c` (emite o fonte C sem compilar).
 
 ---
@@ -114,7 +115,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
   ```bend
   b = {Box{[0 : U32*4n]} : Box<Array<U32>>}  # ❌ "expected: Data, observed: Type"
   ```
-  Logo, não serve como genoma de um GA (o campeão é duplicado para a população inteira).
+  Um campo de registro **`Type`** aceita, sim (veja a Armadilha 3c): `type Individual<-G: Type> is Type` guarda um `Array`. O que não existe é `Array` dentro de `Data`
 * **Genéricos sobre o elemento precisam ser template.** Com `-G: Data` (apagado) o verificador aceita, mas o backend nativo recusa com **"an open Array element type"**: ele precisa do tipo concreto. Use `~G: Data`, que especializa em tempo de compilação.
 * **Ler um `Array` num laço:** `Array.get` devolve o par `(array, valor)`, e desestruturar o retorno de uma chamada é um `match` proibido; o auxiliar óbvio cairia em recursão mútua. A saída é fazer do par o **estado do laço** e desestruturá-lo como parâmetro, dentro de cada caso:
   ```bend
@@ -128,6 +129,43 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
         read(p, Array.get(U32, a, s), (acc + v : U32), R.step(s))
   ```
 
+---
+
+### 🔴 Armadilha 3c: o `Array` é uma árvore no TIPO e um buffer plano na MEMÓRIA
+> **Conceito:** `Array<T>` é declarado como árvore (`ALeaf`/`ANode`) e o `match` nela é legal, mas no nativo os dados vivem num buffer plano. **Abrir um nó com `match` materializa/copia a sub-árvore.** Toda a diferença de desempenho entre as formas de percorrer um array vem daí. Tudo abaixo foi medido no nativo com `utils/arrays.bend` (i5-1245U, n = 2^20, 100 passadas).
+
+* **A tabela que decide como escrever:**
+
+  | operação | custo por elemento | como é feita |
+  |---|---|---|
+  | `reduce` / `fold_rot` (laço por índice) | **0,4 ns** | `Array.get`/`Array.swap` |
+  | `for_each_rot` (1 swap por elemento) | **0,58 ns** | `Array.swap` |
+  | `for_each` (get + set) | 0,78 ns | `Array.get` + `Array.set` |
+  | `for_each_hole` (2 swaps) | 1,30 ns | `Array.swap` × 2 |
+  | `zip_with` (2 get + 1 set) | 1,5 ns | por índice |
+  | `reduce_consume` (percurso em árvore) | **18,8 ns** | `match ALeaf/ANode` |
+  | `reduce` antigo em árvore, com `with` por nó | **65 ns** | `match` + closure por elemento |
+
+* **Regra:** percorra sempre por ÍNDICE; nunca com `match` na estrutura. Um `match` estrutural é 20× a 160× mais caro.
+* **`with`/closure por elemento é veneno:** a mesma travessia custa 1,5 ns por elemento com auxiliar nomeado e **38 ns** com um `with` por elemento (25×). Use `with` só na borda (abrir o `Array.size` no começo, montar o IO no fim) — veja `utils/tuples.bend`.
+* **`Array.size` é grátis** (O(log n)): 100 mil chamadas num array de 2^20 em menos de 10 ms. Não precisa carregar o tamanho na mão por medo dele.
+* **Elemento `Data` vs elemento `Type`.** `Array.get` exige `-T: Data` (ele copia o valor). Para elemento `Type` (um `Array` dentro de `Array`, ou um registro linear) **só existe `Array.swap`**, que é o `mem::replace` do Rust: para tirar um valor é preciso pôr outro no lugar — um **buraco**.
+  - O buraco **circula**: entra no slot, e quando o valor volta o buraco reaparece na mão. Uma única alocação no programa inteiro.
+  - **Não existe swap de duas posições sem buraco em O(1).** Dá para escrever sem buraco descendo a estrutura (`match` até os dois `ALeaf` e reconstruir trocados — funciona, e `i == j` fica no-op de graça), mas custa **O(n)**: 1M trocas num array de 2^12 levam 15,65 s contra 0,01 s da versão com buraco (3 swaps, ~10 ns cada). **Falta um `Array.swap2(a, i, j)` na Base** (o `slice::swap` do Rust) — vale abrir issue.
+  - **Percorrer com 1 swap por elemento (`for_each_rot`/`fold_rot`) é a forma mais rápida de todas**, inclusive mais rápida que get+set em elemento `Data`: o valor devolvido ao array é o elemento já processado do passo anterior, então o buraco só entra uma vez. **Preço:** o array termina rotacionado uma posição. Ótimo para uma população (saco de indivíduos), **inaceitável para dados posicionais** como os genes de um genoma.
+  - `swap_at_hole(i, j)` com `i == j` **corromperia** o array (o buraco ficaria dentro) — checar antes é obrigatório, e índices dão a volta, então normalize com `U32.and(i, n-1)` antes de comparar.
+* **Registro `Type` polimórfico funciona**: `type Individual<-G: Type> is Type: Individual{gene: G, fit: U32, hash: U32}` guarda um `Array` num campo, e `Array<Individual<Array<U32>>>` é uma população válida. Ler um campo é O(1): `Array.swap` empresta, desestrutura, reconstrói o registro, devolve — **medido 3 ns por leitura**, igual a ler de um `Array<U32>` espelho.
+* **Dividir a população em paralelo é barato; dividir um genoma não.** `match ANode` num `Array<Individual>` copia só os *handles* (n = número de indivíduos), então demes em paralelo custam quase nada: 128 indivíduos × 16 384 genes, 100 gerações, 8 demes → 0,55 s com 1 thread e 0,38 s com 2, memória constante. O mesmo `match` num genoma de 1M genes copia 1M palavras.
+* **Um argumento template não captura valor de runtime:** `Arr.from_fn(~U32, ~(k => (j * 10 + k : U32)), 2n)` com `j` vindo de parâmetro falha com *"a template applied to closed ~ arguments (a def parameter is not comptime)"*. É por isso que toda callback do motor recebe o contexto `P` como parâmetro comum. Arrays de elemento `Type` também não podem ser criados com `Array.new` (que exige `Data`): construa o esqueleto com recursão comum devolvendo `ALeaf`/`ANode`.
+
+---
+
+### 🔴 Armadilha 3d: aleatoriedade — o `IO.random_u32` não serve para o laço quente
+> **Conceito:** desde a 2.0.x existe `IO.random_u32() -> IO(Result<...>)`, que é uma **syscall `getrandom()` por chamada**, dentro do IO.
+
+* **Medido no nativo:** `IO.random_u32` custa **11 µs por chamada** (100 mil chamadas em 1,10 s) — 5500× o xorshift puro. E sendo IO, não pode ser chamado de dentro de código puro nem de tarefa paralela.
+* **Use-o só para a semente inicial** (uma chamada no `main`), como o `fastrand` do Rust: aleatório seguro só na semente, xorshift determinístico daí em diante.
+* **Custos do gerador puro** (`utils/random.bend`, 50M sorteios): `R.step` (xorshift) **2,0 ns**; `R.range` (step + `mix` + mod) **3,6 ns**; `R.hash32` (lowbias32 completo) 3,0 ns.
 ---
 
 ### 🔴 Armadilha 4: `Nat` NÃO é caro no nativo (corrigido)
@@ -218,7 +256,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
   def outer(~h: U32 -> U32, x: U32) -> U32: ap(~twice(~h), x)   # ✔️ capturando um template externo
   ```
   Isso permite compor operadores (ex.: um `mutation_combine` que monta uma mutação a partir de outras) sem duplicar código.
-* **Cada especialização de template conta como uma "unsafe annotation"** no 2.0.16: `ap(~inc, 1)` sozinho já faz o checker dizer `All terms check, with 1 unsafe annotation`. A cópia especializada não é reverificada (o corpo genérico já foi). Não confunda com `@unsafe` explícito — veja o checklist.
+* **Uma instância que chama de volta uma instância em verificação é recusada** (2.0.21): `loop(~k, u) = bounce(~loop(~k), u)` com `bounce(~f, u) = f(u)` é lido como auto-chamada que não decresce. Se precisar desse formato, quebre a recursão num parâmetro comum (não template).
 * **O template exige a assinatura exata, inclusive quantidades.** Uma função com `+` nos parâmetros não serve para um template declarado sem `+`:
   ```bend
   def bit_count(+x: U32) -> U32: ...
@@ -296,7 +334,10 @@ aprendendo-bend2/
 ├── GUIDE.md                   # Gerado por `bend guide` (regenere ao atualizar o bend)
 ├── bin/                       # Binários compilados (ignorado pelo git)
 ├── exemplos/                  # Exemplos de código em Bend 2 para aprendizado
-├── utils/                     # Helpers gerais: random, math, vec4, io, json
+├── utils/                     # Helpers gerais:
+│   ├── arrays.bend            #   percursos e trocas de Array (custos na Armadilha 3c)
+│   ├── tuples.bend            #   `A & B`: pair/with/fst/snd/map_* (leia o aviso sobre closure)
+│   └── random, math, vec4, io, json
 └── genetic/                   # Motor genético (veja genetic/README.md)
 ```
 
@@ -305,10 +346,9 @@ aprendendo-bend2/
 ## 4. Checklist de Verificação Antes de Enviar Commits
 
 ```bash
-# 1. Verificar provas formais. Não permita `@unsafe` EXPLÍCITO (a terminação dessa def não é verificada).
-#    As "unsafe annotations" que o 2.0.16 conta por especialização de template (`~`) são outra coisa:
-#    contam as cópias especializadas, que não são reverificadas, e aparecem em qualquer código com templates.
-timeout 60s bend nome-do-arquivo.bend --checkup
+# 1. Checar o arquivo e seus imports SEM rodar. O veredito nomeia as defs que
+#    dependem de `@unsafe` ou de código estrangeiro; não permita `@unsafe` EXPLÍCITO
+timeout 60s bend nome-do-arquivo.bend --check-only
 # ATENÇÃO ao par LAWS.bend / PROOF.bend: `LAWS.bend` falha, verifique `bend PROOF.bend` direto.
 
 # 2. Executar testes caso existam
