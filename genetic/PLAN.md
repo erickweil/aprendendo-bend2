@@ -196,27 +196,51 @@ dados vivos é constante** — medido 10–13 MB para 8,4 MB de dados ao longo d
 6. **Falta na Base**: `Array.swap2(a, i, j)` (o `slice::swap` do Rust). Sem ele,
    toda troca precisa de buraco e paga 3 swaps em vez de 1. Vale abrir issue.
 
-## 10. Ordem de implementação
+## 10. Estado da implementação
 
-Cada passo termina em binário nativo medido.
+Cada etapa terminou em binário nativo medido, com commit próprio.
 
 1. ✅ `utils/arrays.bend`: `copy_range` (0,6 ns/posição), `swap_range` (1,1 ns),
-   `fill` (0,3 ns) e `swap_range_hole`, com testes.
-2. ✅ `genetic/arena.bend`: `Individual`/`Pop`, empréstimo com dois buracos,
-   `at1`/`read1`/`at2`/`fit_at`/`evaluate`, e `operators.bend` com os
-   cruzamentos e as mutações in-place. 7 testes travados.
-   - Desvio do §4: o motor copia os pais nos filhos e cruza os filhos entre si,
-     em vez do `~crossover` de 4 genomas. Com 4 genomas fora do array seriam
-     precisos 4 buracos; com 2 bastam dois. A medir na etapa 4.
-   - A avaliação usa uma passada que PRESERVA a ordem (2 swaps por slot), não o
-     `fold_rot` (1 swap, rotaciona): a passada custa O(genoma) por indivíduo, e
-     a diferença de travessia (0,4 contra 1,3 ns por indivíduo) é ~0,1% do
-     total — não paga o risco de errar os índices guardados.
-3. ✅ OneMax na arena, 1 deme, só mutação: **0,5 ns por gene** (419M avaliações
-   em 0,21 s), memória **constante** (18,5 MB para 16,8 MB de dados) e **sem
-   degradação** — 0,30 / 0,20 / 0,22 ms por geração em corridas de 100 / 200 /
-   400 gerações, contra 44 ms → 105 ms do motor v2 em `List`.
-4. Torneio + elitismo por índice: comparar convergência com o v2, semente fixa.
-5. Ilhas/Demes em paralelo + migração por troca de slot: medir `--threads 1 2 4 8`.
-6. Diversidade + estagnação; sudoku como caso difícil (foi o que exigiu o
-   diversity check no v2).
+   `fill` (0,3 ns), `swap_range_hole`, `fold_rot`, com testes (14 casos).
+2. ✅ `genetic/arena.bend` + `operators.bend`: `Individual`/`Pop`, empréstimo
+   com dois buracos, `at1`/`read1`/`at2`/`fit_at`/`hash_at`/`evaluate`,
+   cruzamentos (1 ponto, 2 pontos, uniforme) e mutações in-place. 7 testes.
+3. ✅ OneMax na arena: **0,5 ns por gene**, memória constante, **sem
+   degradação** (0,30 / 0,20 / 0,22 ms por geração em 100 / 200 / 400
+   gerações, contra 44 → 105 ms do v2 em `List`).
+4. ✅ `genetic/ga.bend`: torneio do pior para vítimas e do melhor para pais,
+   elitismo de graça (o elite é excluído do sorteio), reprodução steady-state.
+   Ótimo do OneMax por volta da geração 60 em 8 de 8 sementes; 1024 genes,
+   pop 64, 300 gerações em **0,03 s contra 1,36 s do v2 (~45×)**.
+5. ✅ Arquipélago: demes em paralelo por `match ANode`, migração por troca de
+   slot (zero gene copiado). 1,6× com 2 threads (teto da máquina), resultado
+   idêntico em 1–12 threads. **No OneMax mais demes PIORA** (é unimodal);
+   migrar a cada 5 gerações dá 4053/4096 contra 3742 sem migração.
+6. ✅ Diversidade (hash no nascimento + bitset por deme, **configurável**:
+   dobra o tempo para +2% no OneMax) e estagnação (mutação adaptativa +
+   reinício in-place: população de 8 em 512 genes empaca em 507/512 sem ela e
+   chega a 512/512 com `max_stag = 25`).
+7. ✅ `exemplos/trap.bend`, o caso difícil: com diversidade + 8 demes +
+   estagnação, 108–111/128 contra 101–105 do baseline em 3 sementes.
+
+### O que falta
+
+- **Sudoku.** A aptidão precisa de 243 contadores de rascunho, e alocá-los por
+  indivíduo por geração quebraria o 0-alloc. A saída provável: o genoma carrega
+  o próprio rascunho na cauda (81 células do quadro + contadores, num `Array`
+  de 512), porque contexto do problema é `Data` e não pode guardar `Array`.
+- **LAWS.bend / PROOF.bend** (combinado para o final).
+- **Medir o desvio do §4**: a interface tem `~crossover` de 2 genomas (o motor
+  copia os pais nos filhos antes) em vez de 4. Custa uma passada extra de
+  cópia por filho; a alternativa de 4 genomas exigiria 4 buracos.
+- **Operadores que faltam** do v2: OX1 (genoma-permutação), mutação por troca
+  de vizinhos, `mutation_combine`.
+
+### Contabilidade de alocação, como ficou
+
+| momento | o que aloca |
+|---|---|
+| largada | população (2^d genomas), 2 buracos, 1 bitset de 8 KB |
+| início de época, por deme | 2 buracos + 1 bitset (só com demes: 2^d > 1) |
+| **por geração** | **nada** |
+
