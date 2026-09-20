@@ -48,7 +48,7 @@ def show_ind.fin(s: String, +fit: U32, +hash: U32) -> A.Individual<Array<U32>> &
 # ATENÇÃO: esta callback devolve um indivíduo de MENTIRA (genoma de 1 gene) no
 # lugar do original, para poder mostrá-lo. Serve só para teste, e cada slot só
 # pode ser mostrado uma vez.
-def show_ind(ind: A.Individual<Array<U32>>, +ctx: U32) -> A.Individual<Array<U32>> & String:
+def show_ind(ind: A.Individual<Array<U32>>, +ctx: U32, +at: U32) -> A.Individual<Array<U32>> & String:
   match ind:
     case A.Individual{gene, +fit, +hash}:
       show_ind.fin(Arr.show(~U32, ~U32.show, gene), fit, hash)

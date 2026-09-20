@@ -72,12 +72,12 @@ def at1.put(~G: Type, r: Array<Individual<G>> & Individual<G>, h2: Individual<G>
   (arr, h1) = r
   Pop{arr, h1, h2, size}
 
-def at1.call(~G: Type, ~C: Data, ~f: Individual<G> -> @+c: C -> Individual<G>,
+def at1.call(~G: Type, ~C: Data, ~f: Individual<G> -> @+c: C -> @+at: U32 -> Individual<G>,
              r: Array<Individual<G>> & Individual<G>, h2: Individual<G>, +i: U32, +ctx: C, +size: U32) -> Pop<G>:
   (arr, ind) = r
-  at1.put(~G, Array.swap(Individual<G>, arr, i, f(ind, ctx)), h2, size)
+  at1.put(~G, Array.swap(Individual<G>, arr, i, f(ind, ctx, i)), h2, size)
 
-def at1(~G: Type, ~C: Data, ~f: Individual<G> -> @+c: C -> Individual<G>, p: Pop<G>, +i: U32, +ctx: C) -> Pop<G>:
+def at1(~G: Type, ~C: Data, ~f: Individual<G> -> @+c: C -> @+at: U32 -> Individual<G>, p: Pop<G>, +i: U32, +ctx: C) -> Pop<G>:
   match p:
     case Pop{arr, h1, h2, +size}:
       at1.call(~G, ~C, ~f, Array.swap(Individual<G>, arr, i, h1), h2, i, ctx, size)
@@ -94,12 +94,12 @@ def read1.split(~G: Type, ~S: Type, arr: Array<Individual<G>>, h2: Individual<G>
   (ind, value) = r
   read1.put(~G, ~S, Array.swap(Individual<G>, arr, i, ind), h2, value, size)
 
-def read1.call(~G: Type, ~C: Data, ~S: Type, ~f: Individual<G> -> @+c: C -> (Individual<G> & S),
+def read1.call(~G: Type, ~C: Data, ~S: Type, ~f: Individual<G> -> @+c: C -> @+at: U32 -> (Individual<G> & S),
                r: Array<Individual<G>> & Individual<G>, h2: Individual<G>, +i: U32, +ctx: C, +size: U32) -> Pop<G> & S:
   (arr, ind) = r
-  read1.split(~G, ~S, arr, h2, f(ind, ctx), i, size)
+  read1.split(~G, ~S, arr, h2, f(ind, ctx, i), i, size)
 
-def read1(~G: Type, ~C: Data, ~S: Type, ~f: Individual<G> -> @+c: C -> (Individual<G> & S),
+def read1(~G: Type, ~C: Data, ~S: Type, ~f: Individual<G> -> @+c: C -> @+at: U32 -> (Individual<G> & S),
           p: Pop<G>, +i: U32, +ctx: C) -> Pop<G> & S:
   match p:
     case Pop{arr, h1, h2, +size}:
@@ -158,7 +158,7 @@ def at2(~G: Type, ~C: Data, ~f: Individual<G> -> Individual<G> -> @+c: C -> (Ind
 # LER O FITNESS (a primitiva do torneio)
 # ----------------------------------------------------------------
 
-def peek_fit(~G: Type, ind: Individual<G>, +ctx: U32) -> Individual<G> & U32:
+def peek_fit(~G: Type, ind: Individual<G>, +ctx: U32, +at: U32) -> Individual<G> & U32:
   match ind:
     case Individual{gene, +fit, hash}:
       (Individual{gene, fit, hash}, fit)
@@ -166,7 +166,7 @@ def peek_fit(~G: Type, ind: Individual<G>, +ctx: U32) -> Individual<G> & U32:
 def fit_at(~G: Type, p: Pop<G>, +i: U32) -> Pop<G> & U32:
   read1(~G, ~U32, ~U32, ~peek_fit(~G), p, i, 0)
 
-def peek_hash(~G: Type, ind: Individual<G>, +ctx: U32) -> Individual<G> & U32:
+def peek_hash(~G: Type, ind: Individual<G>, +ctx: U32, +at: U32) -> Individual<G> & U32:
   match ind:
     case Individual{gene, fit, +hash}:
       (Individual{gene, fit, hash}, hash)
@@ -204,7 +204,7 @@ def eval_one.if(~G: Type, ~P: Data, ~fitness: @+c: P -> G -> (G & U32),
 
 # Avalia se ainda não foi avaliado, e devolve o indivíduo com a aptidão
 def eval_one(~G: Type, ~P: Data, ~fitness: @+c: P -> G -> (G & U32),
-             ind: Individual<G>, +ctx: P) -> Individual<G> & U32:
+             ind: Individual<G>, +ctx: P, +at: U32) -> Individual<G> & U32:
   match ind:
     case Individual{gene, +fit, hash}:
       eval_one.if(~G, ~P, ~fitness, U32.is_zero(fit), gene, fit, hash, ctx)
