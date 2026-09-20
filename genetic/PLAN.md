@@ -200,12 +200,22 @@ dados vivos é constante** — medido 10–13 MB para 8,4 MB de dados ao longo d
 
 Cada passo termina em binário nativo medido.
 
-1. `utils/arrays.bend`: devolver `copy_range`, `fill`, `swap_range`,
-   `swap_range_hole`, com testes.
-2. `genetic/arena.bend`: esqueleto da população, empréstimo, `Individual`,
-   avaliação com `fold_rot`, operadores in-place (1 ponto, 2 pontos, uniforme,
-   mutação). Testes isolados.
-3. OneMax na arena, 1 deme, só mutação: confirmar a ordem de grandeza (ns por gene) e a **memória constante ao longo de 300 gerações**.
+1. ✅ `utils/arrays.bend`: `copy_range` (0,6 ns/posição), `swap_range` (1,1 ns),
+   `fill` (0,3 ns) e `swap_range_hole`, com testes.
+2. ✅ `genetic/arena.bend`: `Individual`/`Pop`, empréstimo com dois buracos,
+   `at1`/`read1`/`at2`/`fit_at`/`evaluate`, e `operators.bend` com os
+   cruzamentos e as mutações in-place. 7 testes travados.
+   - Desvio do §4: o motor copia os pais nos filhos e cruza os filhos entre si,
+     em vez do `~crossover` de 4 genomas. Com 4 genomas fora do array seriam
+     precisos 4 buracos; com 2 bastam dois. A medir na etapa 4.
+   - A avaliação usa uma passada que PRESERVA a ordem (2 swaps por slot), não o
+     `fold_rot` (1 swap, rotaciona): a passada custa O(genoma) por indivíduo, e
+     a diferença de travessia (0,4 contra 1,3 ns por indivíduo) é ~0,1% do
+     total — não paga o risco de errar os índices guardados.
+3. ✅ OneMax na arena, 1 deme, só mutação: **0,5 ns por gene** (419M avaliações
+   em 0,21 s), memória **constante** (18,5 MB para 16,8 MB de dados) e **sem
+   degradação** — 0,30 / 0,20 / 0,22 ms por geração em corridas de 100 / 200 /
+   400 gerações, contra 44 ms → 105 ms do motor v2 em `List`.
 4. Torneio + elitismo por índice: comparar convergência com o v2, semente fixa.
 5. Ilhas/Demes em paralelo + migração por troca de slot: medir `--threads 1 2 4 8`.
 6. Diversidade + estagnação; sudoku como caso difícil (foi o que exigiu o
