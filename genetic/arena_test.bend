@@ -169,6 +169,24 @@ def teste_mut() -> String:
 def teste_mut_swap() -> String:
   Arr.show(~U32, ~U32.show, Op.mut_swap(Arr.for_each(~U32, ~U32, ~idx, [0 : U32*8n], 0), 8, 3, 777))
 
+def key_u32(+x: U32) -> U32:
+  x
+
+def rev_idx(v: U32, +c: U32, i: U32) -> U32:
+  (7 - i : U32)
+
+def teste_ox1.fin(r: (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>)) -> String:
+  (filhos, _) = r
+  (ca, cb) = filhos
+  "ca=" ++ Arr.show(~U32, ~U32.show, ca) ++ " cb=" ++ Arr.show(~U32, ~U32.show, cb)
+
+def teste_ox1() -> String:
+  pa = Arr.for_each(~U32, ~U32, ~idx, [0 : U32*8n], 0)
+  pb = Arr.for_each(~U32, ~U32, ~rev_idx, [0 : U32*8n], 0)
+  ca = [0 : U32*8n]
+  cb = [0 : U32*8n]
+  teste_ox1.fin(Op.breed_ox1(~U32, ~key_u32, ca, cb, pa, pb, 8, True{}, 12345))
+
 def check(rot: String, +obtido: String, +esperado: String) -> String:
   +ok = String.eq(obtido, esperado)
   Bool.pick(String, ok, "  ok    ", "  FALHA ") ++ rot ++ ": " ++ obtido ++
@@ -191,5 +209,6 @@ def main() -> IO(Unit):
       "a=[0, 1, 0, 1, 1, 1, 1, 1] b=[1, 0, 1, 0, 0, 0, 0, 0]"))
     u : Unit <- IO.print(check("mut_replace (taxa 1/4, 8 genes)", teste_mut(),
       "[0, 0, 0, 1, 0, 0, 0, 0]"))
-    IO.print(check("mut_swap (3 trocas, preserva o multiconjunto)", teste_mut_swap(),
+    u : Unit <- IO.print(check("mut_swap (3 trocas, preserva o multiconjunto)", teste_mut_swap(),
       "[1, 3, 2, 5, 4, 0, 6, 7]"))
+    IO.print("  (informativo) breed_ox1:     " ++ teste_ox1())
