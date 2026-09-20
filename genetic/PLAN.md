@@ -190,9 +190,9 @@ dados vivos é constante** — medido 10–13 MB para 8,4 MB de dados ao longo d
    muda a pressão seletiva em relação ao v2. Comparar com semente fixa, mesmo
    número de gerações, no OneMax e no sudoku.
 4. **`f64` como aptidão** não existe aqui: `U32`, como no v2.
-5. **Falta em `utils/arrays.bend`**: `copy_range`, `fill`, `swap_range` e
-   `swap_range_hole` (as duas últimas foram escritas e medidas — 1,4 ns por
-   posição — e removidas na simplificação; voltam quando o crossover entrar).
+5. ~~Falta em `utils/arrays.bend`~~ **feito**: `copy_range` (0,6 ns/posição),
+   `swap_range` (1,1 ns), `fill` (0,3 ns) e `swap_range_hole`, com testes em
+   `utils/arrays_test.bend`.
 6. **Falta na Base**: `Array.swap2(a, i, j)` (o `slice::swap` do Rust). Sem ele,
    toda troca precisa de buraco e paga 3 swaps em vez de 1. Vale abrir issue.
 
