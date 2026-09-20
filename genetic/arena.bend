@@ -175,6 +175,16 @@ def size_of(~G: Type, p: Pop<G>) -> Pop<G> & U32:
     case Pop{arr, h1, h2, +size}:
       (Pop{arr, h1, h2, size}, size)
 
+def peek_hash(~G: Type, ind: Individual<G>, +ctx: U32, +at: U32) -> Individual<G> & U32:
+  match ind:
+    case Individual{gene, fit, +hash}:
+      (Individual{gene, fit, hash}, hash)
+
+# o hash guardado do slot i (0 = desconhecido). É a leitura da passada de
+# diversidade, do mesmo custo da leitura de fitness do torneio.
+def hash_at(~G: Type, p: Pop<G>, +i: U32) -> Pop<G> & U32:
+  read1(~G, ~U32, ~U32, ~peek_hash(~G), p, i, 0)
+
 # ----------------------------------------------------------------
 # AVALIAÇÃO
 # ----------------------------------------------------------------

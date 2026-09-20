@@ -45,6 +45,13 @@ def init_gene(v: U32, +seed: U32, i: U32) -> U32:
 def init(+ctx: Ctx, g: Array<U32>, +seed: U32) -> Array<U32>:
   Arr.for_each(~U32, ~U32, ~init_gene, g, seed)
 
+# hash do genoma (polinomial), para o diversity check
+def hash_gene(+x: U32, acc: U32, i: U32) -> U32:
+  (U32.mul(acc, 31) + x : U32)
+
+def hash(+ctx: Ctx, g: Array<U32>) -> Array<U32> & U32:
+  Arr.reduce(~U32, ~U32, ~hash_gene, g, 7)
+
 # fitness: soma dos bits + 1
 def count_bit(+x: U32, acc: U32, i: U32) -> U32:
   (acc + x : U32)
@@ -70,26 +77,26 @@ def copy_into(+ctx: Ctx, dst: Array<U32>, src: Array<U32>) -> Array<U32> & Array
 
 # ----------------------------------------------------------------
 # main
-# ARGS: log2(genes) log2(pop) gerações semente log2(demes) época
+# ARGS: log2(genes) log2(pop) gerações semente log2(demes) época diversidade(0/1)
 # ----------------------------------------------------------------
 
-def relato(r: GA.Run<Array<U32>> & U32, +genes: U32, +pop: U32, +gens: U32, +demes: U32) -> String:
-  (run, +bf) = r
+def relato(r: (GA.Run<Array<U32>> & Array<U32>) & U32, +genes: U32, +pop: U32, +gens: U32, +demes: U32) -> String:
+  (st, +bf) = r
   "genes=" ++ U32.show(genes) ++ " pop=" ++ U32.show(pop) ++ " demes=" ++ U32.show(demes) ++
   " gerações=" ++ U32.show(gens) ++ " | melhor: " ++ U32.show((bf - 1 : U32)) ++ "/" ++ U32.show(genes) ++
   Bool.pick(String, U32.is_eq((bf - 1 : U32), genes), "  (ÓTIMO)", "")
 
-def run(+genes_d: U32, +pop_d: U32, +gens: U32, +seed: U32, +demes_d: U32, +epoca: U32) -> String:
+def run(+genes_d: U32, +pop_d: U32, +gens: U32, +seed: U32, +demes_d: U32, +epoca: U32, +div: U32) -> String:
   +ctx = ctx_new(genes_d, R.per(1, U32.shln(1, U32.to_nat(genes_d))))
   +n = U32.shln(1, U32.to_nat(pop_d))
   # mesma configuração do teste do Rust: 90% de cruzamento, 90% de mutação,
   # taxa por gene 1/N, torneio de 5
-  +cfg = GA.cfg_new(R.per(9, 10), R.per(9, 10), R.per(1, ctx_genes(ctx)), 5)
+  +cfg = GA.cfg_new(R.per(9, 10), R.per(9, 10), R.per(1, ctx_genes(ctx)), 5, U32.is_ne(div, 0))
   relato(
-    GA.best_of(~Array<U32>,
-      GA.archipelago(~Array<U32>, ~Ctx, ~alloc, ~copy_into, ~crossover, ~mutate, ~fitness,
+    GA.best_st(~Array<U32>,
+      GA.archipelago(~Array<U32>, ~Ctx, ~alloc, ~copy_into, ~crossover, ~mutate, ~fitness, ~hash,
         U32.to_nat(U32.max(U32.div(gens, U32.max(epoca, 1)), 1)), U32.to_nat(demes_d),
-        GA.start(~Array<U32>, ~Ctx, ~fitness,
+        GA.start_st(~Array<U32>, ~Ctx, ~fitness,
           A.pop_new(~Array<U32>, ~Ctx, ~alloc, ~init, U32.to_nat(pop_d), ctx, seed), ctx, R.step(seed)),
         ctx, cfg, U32.max(epoca, 1), n)),
     ctx_genes(ctx), n, gens, U32.shln(1, U32.to_nat(demes_d)))
@@ -97,7 +104,8 @@ def run(+genes_d: U32, +pop_d: U32, +gens: U32, +seed: U32, +demes_d: U32, +epoc
 def go(args: List<String>) -> IO(Unit):
   +nums = IOU.numbers(args)
   IO.print(run(IOU.num_at(nums, 0n, 7), IOU.num_at(nums, 1n, 6), IOU.num_at(nums, 2n, 100),
-               IOU.num_at(nums, 3n, 12345), IOU.num_at(nums, 4n, 0), IOU.num_at(nums, 5n, 10)))
+               IOU.num_at(nums, 3n, 12345), IOU.num_at(nums, 4n, 0), IOU.num_at(nums, 5n, 10),
+               IOU.num_at(nums, 6n, 0)))
 
 def main() -> IO(Unit):
   IO.bind(List<String>, Unit, IO.args(), go)
