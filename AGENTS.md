@@ -1,6 +1,6 @@
 # AGENTS.md — Guia de Engenharia e Operação em Bend 2
 
-> Verificado contra o **bend 2.0.21**. Ao atualizar o bend, regenere o GUIDE.md (`bend guide > GUIDE.md`), leia o CHANGELOG (`curl -sL https://raw.githubusercontent.com/bendlang/bend/main/CHANGELOG.md`) e reverifique as armadilhas com sondas curtas compiladas para nativo. A versão instalada sai de `bend version`.
+> Verificado contra o **bend 2.0.22**. Ao atualizar o bend, regenere o GUIDE.md (`bend guide > GUIDE.md`), leia o CHANGELOG (`curl -sL https://raw.githubusercontent.com/bendlang/bend/main/CHANGELOG.md`) e reverifique as armadilhas com sondas curtas compiladas para nativo. A versão instalada sai de `bend version`.
 
 ## 1. Como Orquestrar a Execução do Bend 2 com Segurança
 
@@ -103,6 +103,11 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 * **Descer uma árvore compartilhada é caro mesmo com tudo na cache.** Abrir um nó `+` com `match` entrega os campos como `+` (contagem de referência). Medido: ~25 ns por nível, ~170 ns para achar uma folha entre 64, contra ~3 ns para ler um `Array` local. Para MUITAS leituras aleatórias da mesma estrutura, copie o que precisa para um `Array` local numa travessia só e leia dali: foi o que tirou o torneio do GA da árvore (−11% a −30% no sudoku, conforme o tamanho do torneio).
 * **Balanceie.** O fork-join não rouba trabalho: se um lado termina antes, aquele núcleo fica ocioso. Numa CPU híbrida (núcleos P + E) a tarefa mais lenta dita o tempo. E nunca haverá mais tarefas pesadas simultâneas do que folhas na árvore de chamadas paralelas (8 ilhas ⇒ platô em 8 threads).
 * **Passadas sequenciais contam (Amdahl).** O `diversity_check` do motor é uma passada sequencial por ilha: com uma ilha só, 12 threads não ganham nada. Com várias ilhas, cada passada roda na tarefa da sua ilha.
+* **Desde o 2.0.22 dá para COMPARTILHAR um `Array` entre tarefas**, o que antes era impossível (`Array<T>` tem um dono só). `Array.fork(T, a)` devolve dois handles para o MESMO bloco, `Array.join(T, l, r)` junta de volta, e `Array.atomic.*` (`add sub and or xor min max cas exch`, mais `fadd` em `Array<F32>`) escrevem do jeito certo quando duas tarefas batem no mesmo slot. Verificado no nativo: duas tarefas somando 100 mil vezes no MESMO slot dão exatamente 200000 com `--threads 4` e com `--threads 1`.
+  - **`Array.fork`/`Array.join` são `@unsafe`** (nada garante que as escritas não se cruzem): o veredito do `--check-only` passa a nomear as defs que dependem deles, então isso aparece na revisão. Um `match` num handle forkado **copia** a parte, como um `Array.clone` — percorrer estruturalmente um array compartilhado continua proibido.
+  - **Custo medido** (10M operações, 1 thread, array de 2^10 na cache): `Array.atomic.add` **4,5 ns**, contra **0,55 ns** de um `Array.get` + `Array.set` comum. São ~8×: o atômico serve para o ponto de encontro (um acumulador, um contador, um histograma), não para o laço quente.
+  - Isso é a saída para o caso "tarefas que compartilham uma estrutura grande não escalam" acima: em vez de um `+pop` que paga um atômico por leitura e só é liberado no fim, um `fork` dá leitura direta ao bloco.
+
 * **Volume de dados limita.** O mesmo GA, mesma forma, mesmo trabalho total: 3,16× com genomas de 10 mil genes (cabem em cache), 1,45× com 1 milhão (500 MB, limitado por banda de memória).
 * **Quando os dados vivos passam da cache, o custo por iteração CRESCE com o tempo.** O alocador nativo reaproveita os nós liberados numa pilha LIFO por thread (`heap_alloc` no C gerado): depois de muitas gerações, as listas novas nascem espalhadas pelo heap e percorrê-las vira acesso aleatório à memória. Medido no onemax com 8 ilhas × 64 × 1000 genes (~15 MB, acima dos 12 MB de L3): 44 ms por geração no início, 105 ms na geração 300, com a memória constante (não é vazamento); com uma ilha só (cabe na cache), 4,5 → 6 ms. Consequências: compare versões com a mesma semente e o mesmo número de gerações, meça trechos longos e não só o começo, e desconfie de ganho "superlinear" com threads nesse regime (8× com 16 threads no onemax de 3 mil genes): ele vem de mais acessos à memória em paralelo, não de mais CPU.
 
@@ -116,7 +121,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
   b = {Box{[0 : U32*4n]} : Box<Array<U32>>}  # ❌ "expected: Data, observed: Type"
   ```
   Um campo de registro **`Type`** aceita, sim (veja a Armadilha 3c): `type Individual<-G: Type> is Type` guarda um `Array`. O que não existe é `Array` dentro de `Data`
-* **Genéricos sobre o elemento precisam ser template.** Com `-G: Data` (apagado) o verificador aceita, mas o backend nativo recusa com **"an open Array element type"**: ele precisa do tipo concreto. Use `~G: Data`, que especializa em tempo de compilação.
+* **Genéricos sobre o elemento precisam ser template.** Com `-G: Data` (apagado) o verificador aceita, mas o backend nativo recusa com **"an open Array element type"**: ele precisa do tipo concreto. Use `~G: Data`, que especializa em tempo de compilação. **Revalidado no 2.0.22** (o changelog mexeu no layout da célula, #893, mas isto não mudou): `def first(-T: Data, a: Array<T>) -> Array<T> & T: Array.get(T, a, 0)` dá `All terms check.` no `--check-only` e morre com `an open Array element type` no `-o`. É o exemplo mínimo de por que o passo 3 do checklist (compilar para nativo) não é opcional.
 * **Ler um `Array` num laço:** `Array.get` devolve o par `(array, valor)`, e desestruturar o retorno de uma chamada é um `match` proibido; o auxiliar óbvio cairia em recursão mútua. A saída é fazer do par o **estado do laço** e desestruturá-lo como parâmetro, dentro de cada caso:
   ```bend
   def read(k: Nat, r: Array<U32> & U32, +acc: U32, +s: U32) -> U32:
@@ -148,6 +153,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 
 * **Regra:** percorra sempre por ÍNDICE; nunca com `match` na estrutura. Um `match` estrutural é 20× a 160× mais caro.
 * **`with`/closure por elemento é veneno:** a mesma travessia custa 1,5 ns por elemento com auxiliar nomeado e **38 ns** com um `with` por elemento (25×). Use `with` só na borda (abrir o `Array.size` no começo, montar o IO no fim) — veja `utils/tuples.bend`.
+* **`[v : T*n]` é CONTAGEM, `[v : T^d]` é PROFUNDIDADE.** A contagem tem de ser potência de 2 ou o compilador responde `a power of two count (^d takes a depth)`. `[0 : U32*8n]` e `[0 : U32^3n]` são o mesmo array de 8 slots; `[0 : U32*20n]` não compila (20 não é potência de 2) — o que se queria ali era `[0 : U32^20n]`, com 2^20 slots.
 * **`Array.size` é grátis** (O(log n)): 100 mil chamadas num array de 2^20 em menos de 10 ms. Não precisa carregar o tamanho na mão por medo dele.
 * **Elemento `Data` vs elemento `Type`.** `Array.get` exige `-T: Data` (ele copia o valor). Para elemento `Type` (um `Array` dentro de `Array`, ou um registro linear) **só existe `Array.swap`**, que é o `mem::replace` do Rust: para tirar um valor é preciso pôr outro no lugar — um **buraco**.
   - O buraco **circula**: entra no slot, e quando o valor volta o buraco reaparece na mão. Uma única alocação no programa inteiro.
@@ -327,6 +333,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 ---
 
 ### 🔴 Armadilha 10: Ordem dos Parâmetros e dos Bindings
+* **Não há referência para a frente: uma def só enxerga o que já foi definido ACIMA dela no arquivo.** Chamar um auxiliar declarado mais abaixo dá `expected: a defined name, observed: <nome>`. Some isso à falta de recursão mútua (Armadilha 5) e a ordem do arquivo passa a ser parte do projeto: auxiliar primeiro, laço depois.
 * **O tipo de um template não pode citar um tipo declarado depois dele.** `def f(~key: G -> U32, -G: Data, ...)` passa no verificador mas falha no nativo com "expected: a defined name, observed: G". Declare o tipo primeiro, como template: `def f(~G: Data, ~key: G -> U32, ...)`.
 * **`match` depois de um `let` é rejeitado** ("this name is a def or a consumed binder"). Faça o `match` primeiro e os `let`s dentro de cada caso — inclusive `(a, v) = par`, que também é um `match`.
 * **`+x = x` dentro de um caso de `match` funciona** (verificado no 2.0.16). O que falha é um `let` seguido de um `match` ou de uma desestruturação `(a, v) = par` no mesmo bloco; nesse caso use o `+` direto no padrão: `case Con{+h, t}:`.

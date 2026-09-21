@@ -23,7 +23,6 @@ import ./../utils/random.bend as R
 #     profundidade).
 #
 # PRIMITIVAS (todas com 2 ou 4 swaps, sem alocação):
-#   at1    aplica f ao indivíduo do slot i
 #   read1  aplica f ao slot i e devolve também um valor
 #   at2    aplica f aos slots i e j (i != j)
 #   evaluate  uma passada avaliando quem ainda não tem fitness
@@ -133,15 +132,6 @@ def read1_nxt(~G: Type, ~C: Data, ~S: Type, ~f: Individual<G> -> @+c: C -> @+at:
     case Pop{cur, nxt, h1, h2, h3, h4, +size}:
       read1_nxt.fin(~G, ~S, slot1(~G, ~C, ~S, ~f, Array.swap(Individual<G>, nxt, i, h3), i, ctx),
                     cur, h1, h2, h4, size)
-
-# aplica f ao slot i de `cur` sem devolver valor (usado pelo reinício)
-def at1.drop(~G: Type, r: Pop<G> & U32) -> Pop<G>:
-  (p, +v) = r
-  p
-
-def at1(~G: Type, ~C: Data, ~f: Individual<G> -> @+c: C -> @+at: U32 -> (Individual<G> & U32),
-        p: Pop<G>, +i: U32, +ctx: C) -> Pop<G>:
-  at1.drop(~G, read1(~G, ~C, ~U32, ~f, p, i, ctx))
 
 # ----------------------------------------------------------------
 # at4: dois pais em `cur`, dois filhos em `nxt` (8 swaps)

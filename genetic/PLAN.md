@@ -1,6 +1,6 @@
 # Motor genético em Bend 2 — modelagem 0-copy / 0-alloc
 
-> Verificado contra o **bend 2.0.21**. Todo número aqui foi medido no nativo
+> Verificado contra o **bend 2.0.22**. Todo número aqui foi medido no nativo
 > (i5-1245U, 15 W). As armadilhas citadas estão no `AGENTS.md`.
 
 ## 1. O objetivo e o que ele custa
@@ -181,8 +181,17 @@ dados vivos é constante** — medido 10–13 MB para 8,4 MB de dados ao longo d
 
 ## 9. Riscos e pontos abertos
 
-1. **Não foi medida a geração completa** nesta forma — só as peças (arena,
-   empréstimo, torneio, crossover in-place, demes paralelos, `fold_rot`).
+1. ~~**Não foi medida a geração completa**~~ **medida no 2.0.22** e as duas
+   apostas do §1 se confirmam:
+   - **Sem degradação.** 1 deme, 4096 genes, pop 256, `--threads 1`: 0,70 /
+     0,72 / 0,70 / 0,69 ms por geração em corridas de 200 / 400 / 800 / 1600
+     gerações. Plano, contra os 44 → 105 ms do v2 em `List`. Memória constante.
+   - **Escala até o teto da máquina, não do código.** 4096 genes, 2000
+     gerações: 8 demes vão de 2,74 s (1 thread) a 1,39 s (12 threads) = 1,97×;
+     16 demes (pop 1024, 1000 gerações) vão de 2,74 s a 1,10 s = **2,49×**,
+     que é o teto documentado deste i5-1245U de 15 W para tarefas
+     independentes (AGENTS.md, Armadilha 3). Resultado bit-idêntico de 1 a 12
+     threads.
 2. **A rotação do `fold_rot`** é segura para a população (saco de indivíduos) e
    **proibida dentro de um genoma** (genes são posicionais). Quem escrever um
    operador precisa saber a diferença.
@@ -220,8 +229,21 @@ Cada etapa terminou em binário nativo medido, com commit próprio.
    dobra o tempo para +2% no OneMax) e estagnação (mutação adaptativa +
    reinício in-place: população de 8 em 512 genes empaca em 507/512 sem ela e
    chega a 512/512 com `max_stag = 25`).
-7. ✅ `exemplos/trap.bend`, o caso difícil: com diversidade + 8 demes +
-   estagnação, 108–111/128 contra 101–105 do baseline em 3 sementes.
+7. ⚠️ `exemplos/trap.bend`, o caso difícil. A medição original (diversidade +
+   8 demes + estagnação dando 108–111/128 contra 101–105 do baseline) era do
+   motor steady-state e **não reproduz mais** depois da reescrita geracional.
+   Remedido no 2.0.22 (1000 gerações, 3 sementes, `--threads 8`):
+
+   | configuração | 128 genes, pop 64 | 512 genes, pop 128 |
+   |---|---|---|
+   | baseline (1 deme, sem div, sem stag) | 104 / 111 / 109 | 432 / 424 / 422 |
+   | 8 demes + diversidade + `max_stag=25` | 105 / 108 / 110 | 427 / 424 / 424 |
+
+   Empate. O baseline geracional melhorou sozinho e os mecanismos deixaram de
+   aparecer. A hipótese principal está em "O que falta" abaixo: o `eff_cfg`
+   dobra a mutação sob estagnação mas **não afrouxa o torneio**, enquanto o
+   motor em Rust reduz os dois. Enquanto isso não for medido, não dá para
+   afirmar que diversidade e estagnação estejam pagando o próprio custo.
 
 ### O que falta
 
@@ -235,6 +257,24 @@ Cada etapa terminou em binário nativo medido, com commit próprio.
   cópia por filho; a alternativa de 4 genomas exigiria 4 buracos.
 - **Operadores que faltam** do v2: OX1 (genoma-permutação), mutação por troca
   de vizinhos, `mutation_combine`.
+- **Paridade com o motor em Rust** (`rust-wasm/src/genetic`), por ordem de
+  impacto suspeito — é o caminho para destravar o item 7 acima:
+  1. **`tournament_multiplier`.** Sob estagnação o Rust *reduz* o tamanho do
+     torneio ao mesmo tempo que aumenta a mutação, afrouxando a pressão
+     seletiva. O `eff_cfg` daqui só dobra a mutação e mantém `cfg_tsize`.
+  2. **Melhor-de-todos-os-tempos com reinjeção.** O Rust guarda `best_genes` e
+     o reinjeta num slot aleatório na metade da estagnação. Aqui o elite
+     garante monotonicidade, mas a reinjeção não existe.
+  3. **Torneio que pula hash igual.** O `tournament_selection` do Rust descarta
+     candidatos com o mesmo hash do pai já escolhido; o `draw` daqui exclui só
+     por índice.
+  4. **Diversidade re-cruza, não re-muta.** O Rust tenta até 3 vezes com
+     *outros pais*; aqui o duplicado é remutado no lugar com 4× a taxa.
+- **O filho desperdiçado.** `gen.go` roda `size/2` eventos e preenche os
+  `size` slots de `nxt`; em seguida `elite_to_nxt` sobrescreve o slot 0. O
+  filho daquele slot é cruzado, mutado e **avaliado** (a parte cara) para ser
+  jogado fora: 1/size do trabalho por geração (1,6% com pop 64). Corrigir
+  exige mexer na indexação do laço, então ficou anotado, não feito.
 
 ### Contabilidade de alocação, como ficou
 

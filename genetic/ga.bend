@@ -7,25 +7,25 @@ import ./../utils/random.bend as R
 # ================================================================
 # O MOTOR (ga.bend)
 # ================================================================
-# Uma geração são `size/2` EVENTOS de reprodução. Cada evento:
+# Modelo GERACIONAL, o mesmo do motor em Rust: lê-se de `cur` e escreve-se em
+# `nxt`, e no fim os dois trocam de papel. Um filho só vira pai na geração
+# seguinte. Uma geração são `size/2` EVENTOS de reprodução; cada evento:
 #
-#   1. sorteia duas vítimas distintas pelo torneio do PIOR entre `tsize`,
-#      nunca o elite (que é excluído do sorteio: elitismo estrito de graça)
-#   2. sorteia dois pais pelo torneio do MELHOR entre `tsize`
-#   3. copia os genes dos pais para as vítimas, que viram os filhos
-#   4. com probabilidade `cross_rate`, cruza os dois filhos entre si
-#   5. com probabilidade `mut_rate`, muta cada filho (taxa por gene
-#      `gene_rate`), e o AVALIA na hora
+#   1. sorteia dois pais DISTINTOS em `cur`, pelo torneio do melhor entre
+#      `tsize` (o segundo torneio exclui o índice do primeiro)
+#   2. "4 entram, 4 saem": os dois pais e os dois filhos (slots `j` e `j+1` de
+#      `nxt`) saem dos arranjos de uma vez; com probabilidade `cross_rate` o
+#      operador cruza, senão copia os pais nos filhos. Os pais voltam INTACTOS
+#   3. com probabilidade `mut_rate`, muta cada filho (taxa por gene
+#      `gene_rate`) e o avalia
 #
-# Por que avaliar na hora: um filho recém-nascido tem fitness 0 (a marca de
-# "não avaliado") e o torneio do pior escolheria logo ele como vítima do
-# evento seguinte — o filho morreria antes de viver. Avaliando na hora o custo
-# é o mesmo (uma avaliação por filho) e o problema some.
+# Não há vítima e não há escolha de quem morre: a geração inteira é
+# substituída de uma vez. O elitismo é a etapa seguinte — `elite_to_nxt` põe o
+# melhor de `cur` no slot 0 de `nxt`, por TROCA DE HANDLE (zero gene copiado).
 #
-# Por que steady-state, e não "monta a geração nova a partir da velha": a
-# geração nova exigiria um segundo arranjo (2× memória). Aqui os filhos nascem
-# por cima dos piores, no mesmo arranjo. O efeito é pressão seletiva um pouco
-# maior; a etapa 4 do PLAN.md manda comparar a convergência com o motor v2.
+# ⚠️ Como os `size/2` eventos já preenchem os `size` slots de `nxt`, o filho
+# escrito no slot 0 é descartado pelo elitismo: uma reprodução (com a sua
+# avaliação) é jogada fora por geração, ou 1/size do trabalho.
 #
 # NADA aqui aloca: tudo é `Array.swap` sobre a arena.
 # ================================================================
@@ -136,48 +136,47 @@ def draw(+seed: U32, +n: U32, +ex1: U32, +ex2: U32) -> U32:
 # ----------------------------------------------------------------
 # TORNEIO
 # ----------------------------------------------------------------
-# `worst = True{}` procura o PIOR (escolha de vítima); `False{}`, o melhor.
-# Cada sorteio é uma leitura de fitness na arena (~3 ns).
+# Sorteia `tsize` slots e fica com o de MAIOR aptidão. Cada sorteio é uma
+# leitura de fitness na arena (~3 ns).
+#
+# (Houve aqui um parâmetro `worst`, para o torneio do PIOR, que o modelo
+# steady-state usava para escolher a vítima. No modelo geracional a geração
+# inteira é substituída e não há vítima: os dois chamadores pediam sempre o
+# melhor, então o parâmetro saiu.)
 
-def tourn.better(+worst: Bool, +f: U32, +bf: U32) -> Bool:
-  Bool.pick(Bool, worst, U32.is_lt(f, bf), U32.is_gt(f, bf))
+def tourn.better(+f: U32, +bf: U32) -> Bool:
+  U32.is_gt(f, bf)
 
-def tourn.idx(+worst: Bool, +cand: U32, +f: U32, +bi: U32, +bf: U32) -> U32:
-  Bool.pick(U32, tourn.better(worst, f, bf), cand, bi)
+def tourn.idx(+cand: U32, +f: U32, +bi: U32, +bf: U32) -> U32:
+  Bool.pick(U32, tourn.better(f, bf), cand, bi)
 
-def tourn.fit(+worst: Bool, +f: U32, +bf: U32) -> U32:
-  Bool.pick(U32, tourn.better(worst, f, bf), f, bf)
+def tourn.fit(+f: U32, +bf: U32) -> U32:
+  Bool.pick(U32, tourn.better(f, bf), f, bf)
 
-def tourn.go(~G: Type, k: Nat, st: A.Pop<G> & U32, +worst: Bool, +cand: U32,
+def tourn.go(~G: Type, k: Nat, st: A.Pop<G> & U32, +cand: U32,
              +bi: U32, +bf: U32, +n: U32, +ex1: U32, +ex2: U32, +seed: U32) -> A.Pop<G> & U32:
   match k:
     case 0n:
       (p, +f) = st
-      (p, tourn.idx(worst, cand, f, bi, bf))
+      (p, tourn.idx(cand, f, bi, bf))
     case 1n+q:
       (p, +f) = st
       +c2 = draw(seed, n, ex1, ex2)
-      tourn.go(~G, q, A.fit_at(~G, p, c2), worst, c2,
-        tourn.idx(worst, cand, f, bi, bf), tourn.fit(worst, f, bf),
+      tourn.go(~G, q, A.fit_at(~G, p, c2), c2,
+        tourn.idx(cand, f, bi, bf), tourn.fit(f, bf),
         n, ex1, ex2, R.step(seed))
 
 # `tsize` sorteios entre os `n` slots, pulando `ex1` e `ex2`.
-def tournament(~G: Type, p: A.Pop<G>, +worst: Bool, +tsize: U32, +n: U32,
+def tournament(~G: Type, p: A.Pop<G>, +tsize: U32, +n: U32,
                +ex1: U32, +ex2: U32, +seed: U32) -> A.Pop<G> & U32:
   +c0 = draw(seed, n, ex1, ex2)
-  tourn.go(~G, U32.to_nat((U32.max(tsize, 1) - 1 : U32)), A.fit_at(~G, p, c0), worst, c0, c0,
-    Bool.pick(U32, worst, R.MAX(), 0), n, ex1, ex2, R.step(seed))
+  tourn.go(~G, U32.to_nat((U32.max(tsize, 1) - 1 : U32)), A.fit_at(~G, p, c0), c0, c0,
+    0, n, ex1, ex2, R.step(seed))
 
 # ----------------------------------------------------------------
 # CALLBACKS DOS OPERADORES
 # ----------------------------------------------------------------
 
-# copiar os genes do pai (2º slot) para a vítima (1º slot): a vítima vira filho
-# (fitness e hash zerados), o pai fica intacto
-# CRUZAMENTO "4 ENTRAM, 4 SAEM": os dois pais (no arranjo atual) e os dois
-# filhos (no arranjo da próxima geração) saem dos arranjos de uma vez, o
-# operador do problema lê os pais e escreve os filhos numa varredura só, e
-# todos voltam. Os pais ficam INTACTOS, com fitness e hash preservados.
 # CRUZAMENTO "4 ENTRAM, 4 SAEM": os dois pais (no arranjo atual) e os dois
 # filhos (no da próxima geração) saem dos arranjos de uma vez, o operador do
 # problema lê os pais e escreve os filhos, e todos voltam. Os pais ficam
@@ -245,31 +244,32 @@ def mut_eval(~G: Type, ~P: Data, ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 ->
 # ----------------------------------------------------------------
 # UM EVENTO
 # ----------------------------------------------------------------
-# Cadeia de auxiliares NÃO recursivos (Bend 2 não tem recursão mútua): cada um
-# recebe a tupla do passo anterior, abre, e passa a arena adiante.
-
-# ----------------------------------------------------------------
-# UM EVENTO
-# ----------------------------------------------------------------
 # Dois torneios acham os pais no arranjo ATUAL; os filhos vão para os slots
 # `j` e `j+1` do arranjo da PRÓXIMA geração, percorridos em sequência. Não há
 # vítima: a geração inteira é substituída de uma vez, no fim.
+#
+# É uma cadeia de auxiliares NÃO recursivos (Bend 2 não tem recursão mútua):
+# cada um recebe a tupla do passo anterior, abre, e passa a arena adiante.
 
 def ev.fim(~G: Type, r: A.Pop<G> & U32) -> A.Pop<G>:
   (p, +fb) = r
   p
 
+# ⚠️ Armadilha 9: os dois torneios de pai deste mesmo evento já gastam
+# `R.split.fst(seed)` e `R.split.snd(seed)`. A semente de mutação de cada filho
+# precisa de um `R.step` por cima, ou os dois consumidores andam pelo MESMO
+# fluxo (os quatro `split` já estão ocupados: trd/fth vão no cruzamento).
 def ev.mutb(~G: Type, ~P: Data, ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G, ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
             r: A.Pop<G> & U32, +j: U32, +ctx: P, +cfg: Config, +seed: U32) -> A.Pop<G>:
   (p, +fa) = r
   ev.fim(~G, A.read1_nxt(~G, ~Call<P>, ~U32, ~mut_eval(~G, ~P, ~mutate, ~fitness, ~hash),
-    p, U32.inc(j), Call{ctx, cfg_mut(cfg), cfg_gene(cfg), R.split.snd(seed), cfg_div(cfg), False{}}))
+    p, U32.inc(j), Call{ctx, cfg_mut(cfg), cfg_gene(cfg), R.step(R.split.snd(seed)), cfg_div(cfg), False{}}))
 
 def ev.muta(~G: Type, ~P: Data, ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G, ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
             p: A.Pop<G>, +j: U32, +ctx: P, +cfg: Config, +seed: U32) -> A.Pop<G>:
   ev.mutb(~G, ~P, ~mutate, ~fitness, ~hash,
     A.read1_nxt(~G, ~Call<P>, ~U32, ~mut_eval(~G, ~P, ~mutate, ~fitness, ~hash),
-      p, j, Call{ctx, cfg_mut(cfg), cfg_gene(cfg), R.split.fst(seed), cfg_div(cfg), False{}}),
+      p, j, Call{ctx, cfg_mut(cfg), cfg_gene(cfg), R.step(R.split.fst(seed)), cfg_div(cfg), False{}}),
     j, ctx, cfg, seed)
 
 def ev.pb(~G: Type, ~P: Data, ~breed: @+c: P -> G -> G -> G -> G -> @cruza: Bool -> @+s: U32 -> ((G & G) & (G & G)), ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G, ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
@@ -284,13 +284,13 @@ def ev.pa(~G: Type, ~P: Data, ~breed: @+c: P -> G -> G -> G -> G -> @cruza: Bool
           r: A.Pop<G> & U32, +j: U32, +ctx: P, +cfg: Config, +n: U32, +seed: U32) -> A.Pop<G>:
   (p, +pa) = r
   ev.pb(~G, ~P, ~breed, ~mutate, ~fitness, ~hash,
-    tournament(~G, p, False{}, cfg_tsize(cfg), n, pa, n, R.split.snd(seed)),
+    tournament(~G, p, cfg_tsize(cfg), n, pa, n, R.split.snd(seed)),
     pa, j, ctx, cfg, seed)
 
 def event(~G: Type, ~P: Data, ~breed: @+c: P -> G -> G -> G -> G -> @cruza: Bool -> @+s: U32 -> ((G & G) & (G & G)), ~mutate: @+c: P -> G -> @+r: U32 -> @+s: U32 -> G, ~fitness: @+c: P -> G -> (G & U32), ~hash: @+c: P -> G -> (G & U32),
           p: A.Pop<G>, +j: U32, +ctx: P, +cfg: Config, +n: U32, +seed: U32) -> A.Pop<G>:
   ev.pa(~G, ~P, ~breed, ~mutate, ~fitness, ~hash,
-    tournament(~G, p, False{}, cfg_tsize(cfg), n, n, n, R.split.fst(seed)),
+    tournament(~G, p, cfg_tsize(cfg), n, n, n, R.split.fst(seed)),
     j, ctx, cfg, n, seed)
 
 # ----------------------------------------------------------------
