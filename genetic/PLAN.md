@@ -279,6 +279,45 @@ Cada etapa terminou em binário nativo medido, com commit próprio.
    frio, reconstrói a lista localmente. **Regra: contexto de problema só
    carrega escalares.**
 
+### Bend contra o motor em TS (quadro vazio)
+
+Mesma configuração dos dois lados — cruzamento 0,9, mutação 0,9, taxa por gene
+1/81, torneio 10, diversidade ligada — contra `my-website/src/lib/genetic`.
+O TS foi medido em **dois runtimes**, porque a escolha muda o resultado em
+~30%: `bun 1.4.2` (JavaScriptCore) e `node v24.16` via `tsx` (V8). O tempo é
+medido com `performance.now()` dentro do script, então a partida do runtime
+não entra; os tempos do Bend incluem 3,1 ms de partida do processo, medidos à
+parte.
+
+**O port é fiel.** As GERAÇÕES até resolver batem entre os motores (pop 128:
+mediana 98 no Bend, 81–93 no TS; média 120 nos dois), então toda a diferença
+de tempo abaixo é de implementação, não de algoritmo.
+
+Vazão, 5000 gerações, sem parada antecipada em nenhum dos lados:
+
+| pop | node (V8) | bun (JSC) | Bend 1 thread | Bend 8 demes / 8 threads |
+|---|---|---|---|---|
+| 128 | 4 278 ger/s | 5 655 ger/s | 8 957 (2,1× node) | 38 062 (8,9× node) |
+| 512 | 1 093 ger/s | 1 441 ger/s | 2 262 (2,1× node) | 9 911 (9,1× node) |
+| 2048 | 260 ger/s | 338 ger/s | 553 (2,1× node) | 2 713 (10,4× node) |
+
+Tempo até resolver o quadro vazio, pop 1024 (mediana):
+
+| | tempo | gerações |
+|---|---|---|
+| TS em node | 0,140 s | 56 |
+| TS em bun | 0,105 s | 55 |
+| Bend, 1 deme, 1 thread | 0,054 s | 53 |
+| Bend, 8 demes, 8 threads | **0,017 s** | ~50 |
+
+Ou seja: **~2,1× por thread** contra o V8 e ~1,6× contra o JSC, e **8–10×**
+com as ilhas em 8 threads. `bun` é 1,30–1,32× mais rápido que `node` neste
+trabalho, de forma consistente nas três populações.
+
+⚠️ Com **1 deme**, 8 threads não dão ganho nenhum (8 957 → 8 969 ger/s): o
+paralelismo mora nas ilhas, e o Bend não paraleliza o que não foi escrito para
+ser paralelo (Armadilha 3).
+
 ### O que falta
 
 - **LAWS.bend / PROOF.bend** (combinado para o final).
