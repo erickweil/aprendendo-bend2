@@ -484,12 +484,13 @@ def melhor(r: (GA.Run<Array<U32>> & Array<U32>) & U32, +alvo: U32, +ndicas: U32,
   melhor.run(run, bf, alvo, ndicas, gens)
 
 def run(+qual: U32, +pop_d: U32, +gens: U32, +seed: U32, +demes_d: U32, +epoca: U32,
-        +div: U32, +max_stag: U32) -> String:
+        +div: U32, +max_stag: U32, +tsize: U32) -> String:
   +ctx = sudoku_new(qual)
   +n = U32.shln(1, U32.to_nat(pop_d))
   # mesma configuração do motor em TS: 90% de cruzamento, 90% de mutação,
   # ~1 troca por tabuleiro (taxa por gene 1/81), torneio de 5
-  +cfg = GA.cfg_new(R.per(9, 10), R.per(9, 10), R.per(1, 81), 5, U32.is_ne(div, 0), max_stag)
+  +cfg = GA.cfg_new(R.per(9, 10), R.per(9, 10), R.per(1, 81), U32.max(tsize, 2),
+                    U32.is_ne(div, 0), max_stag)
   melhor(
     GA.best_st(~Array<U32>,
       GA.archipelago(~Array<U32>, ~Sudoku, ~alloc, ~init, ~breed, ~mutate, ~fitness, ~hash,
@@ -504,7 +505,8 @@ def go(args: List<String>) -> IO(Unit):
   +nums = IOU.numbers(args)
   IO.print(run(IOU.num_at(nums, 0n, 0), IOU.num_at(nums, 1n, 8), IOU.num_at(nums, 2n, 1000),
                IOU.num_at(nums, 3n, 12345), IOU.num_at(nums, 4n, 0), IOU.num_at(nums, 5n, 10),
-               IOU.num_at(nums, 6n, 1), IOU.num_at(nums, 7n, 50)))
+               IOU.num_at(nums, 6n, 1), IOU.num_at(nums, 7n, 50),
+               IOU.num_at(nums, 8n, 5)))
 
 def main() -> IO(Unit):
   IO.bind(List<String>, Unit, IO.args(), go)
