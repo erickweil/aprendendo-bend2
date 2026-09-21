@@ -160,3 +160,224 @@ def breed_1point(~T: Data, ca: Array<T>, cb: Array<T>, pa: Array<T>, pb: Array<T
   (Array<T> & Array<T>) & (Array<T> & Array<T>):
   +cut = Bool.pick(U32, cruza, U32.inc(R.range(seed, U32.max((n - 1 : U32), 1))), n)
   b1.dois(~T, b1.go(~T, U32.to_nat(cut), ((ca, cb), (pa, pb)), 0), cut, n)
+
+# ----------------------------------------------------------------
+# CRUZAMENTO OX1 (Order Crossover)
+# ----------------------------------------------------------------
+# Preserva permutação: sorteia dois cortes, copia o miolo [c1, c2] de cada pai
+# para o respectivo filho, e completa o resto lendo o OUTRO pai em ordem
+# circular a partir de c2+1, pulando as chaves que o miolo já trouxe.
+#
+# O ponto delicado é o "já trouxe": é preciso um CONJUNTO de chaves presentes.
+# A saída óbvia — uma máscara de bits num U32 — limita o operador a 32 chaves.
+# Dá para os 9 dígitos do sudoku e NÃO dá para um quadro de horário, onde as
+# chaves são dezenas ou centenas de disciplinas.
+#
+# Aqui o conjunto é uma FAIXA DE RASCUNHO do próprio array do filho, com uma
+# posição por chave: `filho[mark_base + chave]`. Não há teto de chaves, não há
+# alocação (o rascunho já existe no genoma, como a arena exige) e o teste de
+# pertinência é um `Array.get` — 0,55 ns. O rascunho é limpo no fim relendo o
+# miolo do pai: `mid_len` escritas, não `n_chaves`, então o custo NÃO cresce
+# com o tamanho do alfabeto.
+#
+# Por que `Array<U32>` e não `Array<T>` genérico: a marca é gravada DENTRO do
+# array do filho, então o sentinela tem de ser do tipo do elemento. Todo
+# genoma deste motor é `Array<U32>`; `~key` é que dá a genericidade, mapeando
+# o gene para o índice da marca.
+#
+# CONTRATO do chamador:
+#   - [mark_base, mark_base + n_chaves) não encosta em [base, base + n) nem em
+#     nenhuma outra parte viva do genoma;
+#   - `~key(x)` devolve uma chave em [0, n_chaves);
+#   - os dois pais são permutações do MESMO multiconjunto de chaves.
+
+# --- copiar o miolo do pai para o filho, marcando as chaves ---
+
+def ox1.mid.w(~key: @+x: U32 -> U32, child: Array<U32>, +idx: U32, +mark_base: U32,
+              r: Array<U32> & U32) -> Array<U32> & Array<U32>:
+  (parent, +v) = r
+  (Array.set(U32, Array.set(U32, child, idx, v), (mark_base + key(v) : U32), 1), parent)
+
+def ox1.mid.go(~key: @+x: U32 -> U32, k: Nat, st: Array<U32> & Array<U32>,
+               +idx: U32, +mark_base: U32) -> Array<U32> & Array<U32>:
+  match k:
+    case 0n:
+      st
+    case 1n+p:
+      (child, parent) = st
+      ox1.mid.go(~key, p, ox1.mid.w(~key, child, idx, mark_base, Array.get(U32, parent, idx)),
+                 (idx + 1 : U32), mark_base)
+
+# --- apagar as marcas, relendo o mesmo miolo ---
+
+def ox1.clear.w(~key: @+x: U32 -> U32, child: Array<U32>, +mark_base: U32,
+                r: Array<U32> & U32) -> Array<U32> & Array<U32>:
+  (parent, +v) = r
+  (Array.set(U32, child, (mark_base + key(v) : U32), 0), parent)
+
+def ox1.clear.go(~key: @+x: U32 -> U32, k: Nat, st: Array<U32> & Array<U32>,
+                 +idx: U32, +mark_base: U32) -> Array<U32> & Array<U32>:
+  match k:
+    case 0n:
+      st
+    case 1n+p:
+      (child, parent) = st
+      ox1.clear.go(~key, p, ox1.clear.w(~key, child, mark_base, Array.get(U32, parent, idx)),
+                   (idx + 1 : U32), mark_base)
+
+# --- completar o filho lendo o outro pai em ordem circular ---
+# `idx_c` só anda quando o gene é escrito, então viaja no estado; `idx_p` anda
+# sempre e é parâmetro comum do laço.
+
+def ox1.fill.put(presente: Bool, child: Array<U32>, parent: Array<U32>,
+                 +base: U32, +idx_c: U32, +n: U32, +v: U32) -> (Array<U32> & Array<U32>) & U32:
+  match presente:
+    case True{}:
+      ((child, parent), idx_c)
+    case False{}:
+      ((Array.set(U32, child, (base + idx_c : U32), v), parent), U32.mod(U32.inc(idx_c), n))
+
+def ox1.fill.test(parent: Array<U32>, +base: U32, +idx_c: U32, +n: U32, +v: U32,
+                  r: Array<U32> & U32) -> (Array<U32> & Array<U32>) & U32:
+  (child, +marca) = r
+  ox1.fill.put(U32.is_ne(marca, 0), child, parent, base, idx_c, n, v)
+
+def ox1.fill.read(~key: @+x: U32 -> U32, child: Array<U32>, +base: U32, +idx_c: U32,
+                  +n: U32, +mark_base: U32, r: Array<U32> & U32) -> (Array<U32> & Array<U32>) & U32:
+  (parent, +v) = r
+  ox1.fill.test(parent, base, idx_c, n, v, Array.get(U32, child, (mark_base + key(v) : U32)))
+
+def ox1.fill.step(~key: @+x: U32 -> U32, st: (Array<U32> & Array<U32>) & U32,
+                  +base: U32, +idx_p: U32, +n: U32, +mark_base: U32) -> (Array<U32> & Array<U32>) & U32:
+  (cp, +idx_c) = st
+  (child, parent) = cp
+  ox1.fill.read(~key, child, base, idx_c, n, mark_base,
+                Array.get(U32, parent, (base + idx_p : U32)))
+
+def ox1.fill.go(~key: @+x: U32 -> U32, k: Nat, st: (Array<U32> & Array<U32>) & U32,
+                +base: U32, +idx_p: U32, +n: U32, +mark_base: U32) -> (Array<U32> & Array<U32>) & U32:
+  match k:
+    case 0n:
+      st
+    case 1n+p:
+      ox1.fill.go(~key, p, ox1.fill.step(~key, st, base, idx_p, n, mark_base),
+                  base, U32.mod(U32.inc(idx_p), n), n, mark_base)
+
+# --- UM filho: miolo de `parent`, resto de `other` ---
+
+def ox1.one.d(st: Array<U32> & Array<U32>, other: Array<U32>) -> (Array<U32> & Array<U32>) & Array<U32>:
+  (st, other)
+
+def ox1.one.c(~key: @+x: U32 -> U32, r: (Array<U32> & Array<U32>) & U32, parent: Array<U32>,
+              +base: U32, +c1: U32, +mid_len: U32, +mark_base: U32) ->
+  (Array<U32> & Array<U32>) & Array<U32>:
+  (co, +idx_c) = r
+  (child, other) = co
+  ox1.one.d(ox1.clear.go(~key, U32.to_nat(mid_len), (child, parent), (base + c1 : U32), mark_base), other)
+
+def ox1.one.b(~key: @+x: U32 -> U32, st: Array<U32> & Array<U32>, other: Array<U32>,
+              +base: U32, +c1: U32, +mid_len: U32, +start: U32, +n: U32, +mark_base: U32) ->
+  (Array<U32> & Array<U32>) & Array<U32>:
+  (child, parent) = st
+  ox1.one.c(~key, ox1.fill.go(~key, U32.to_nat(n), ((child, other), start), base, start, n, mark_base),
+            parent, base, c1, mid_len, mark_base)
+
+# Devolve ((filho, parent), other)
+def ox1.one(~key: @+x: U32 -> U32, child: Array<U32>, parent: Array<U32>, other: Array<U32>,
+            +base: U32, +c1: U32, +mid_len: U32, +start: U32, +n: U32, +mark_base: U32) ->
+  (Array<U32> & Array<U32>) & Array<U32>:
+  ox1.one.b(~key, ox1.mid.go(~key, U32.to_nat(mid_len), (child, parent), (base + c1 : U32), mark_base),
+            other, base, c1, mid_len, start, n, mark_base)
+
+# --- os DOIS filhos: A leva o miolo de A e o resto de B; B, o espelho ---
+
+def ox1.two.fin(ca: Array<U32>, r: (Array<U32> & Array<U32>) & Array<U32>) ->
+  (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  (cbpb, pa) = r
+  (cb, pb) = cbpb
+  ((ca, cb), (pa, pb))
+
+def ox1.two.b(~key: @+x: U32 -> U32, cb: Array<U32>, r: (Array<U32> & Array<U32>) & Array<U32>,
+              +base: U32, +c1: U32, +mid_len: U32, +start: U32, +n: U32, +mark_base: U32) ->
+  (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  (capa, pb) = r
+  (ca, pa) = capa
+  ox1.two.fin(ca, ox1.one(~key, cb, pb, pa, base, c1, mid_len, start, n, mark_base))
+
+def ox1.two(~key: @+x: U32 -> U32, ca: Array<U32>, cb: Array<U32>, pa: Array<U32>, pb: Array<U32>,
+            +base: U32, +c1: U32, +mid_len: U32, +start: U32, +n: U32, +mark_base: U32) ->
+  (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  ox1.two.b(~key, cb, ox1.one(~key, ca, pa, pb, base, c1, mid_len, start, n, mark_base),
+            base, c1, mid_len, start, n, mark_base)
+
+# --- caminho SEM cruzamento: o filho é a cópia de um dos pais ---
+
+def ox1.copy.w(ca: Array<U32>, cb: Array<U32>, +idx: U32, r: Array<U32> & U32, +vb: U32,
+               pb: Array<U32>) -> (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  (pa, +va) = r
+  ((Array.set(U32, ca, idx, va), Array.set(U32, cb, idx, vb)), (pa, pb))
+
+def ox1.copy.rb(ca: Array<U32>, cb: Array<U32>, pa: Array<U32>, +idx: U32,
+                r: Array<U32> & U32) -> (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  (pb, +vb) = r
+  ox1.copy.w(ca, cb, idx, Array.get(U32, pa, idx), vb, pb)
+
+def ox1.copy.step(st: (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>), +idx: U32) ->
+  (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  (filhos, pais) = st
+  (ca, cb) = filhos
+  (pa, pb) = pais
+  ox1.copy.rb(ca, cb, pa, idx, Array.get(U32, pb, idx))
+
+def ox1.copy.go(k: Nat, st: (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>), +idx: U32) ->
+  (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  match k:
+    case 0n:
+      st
+    case 1n+p:
+      ox1.copy.go(p, ox1.copy.step(st, idx), (idx + 1 : U32))
+
+def ox1.copy.troca(st: (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>)) ->
+  (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  (filhos, pais) = st
+  (pa, pb) = pais
+  (filhos, (pb, pa))
+
+def ox1.copy.if(inverte: Bool, ca: Array<U32>, cb: Array<U32>, pa: Array<U32>, pb: Array<U32>,
+                +base: U32, +n: U32) -> (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  match inverte:
+    case True{}:
+      ox1.copy.troca(ox1.copy.go(U32.to_nat(n), ((ca, cb), (pb, pa)), base))
+    case False{}:
+      ox1.copy.go(U32.to_nat(n), ((ca, cb), (pa, pb)), base)
+
+# --- entrada pública ---
+
+def ox1.cortes(~key: @+x: U32 -> U32, ca: Array<U32>, cb: Array<U32>, pa: Array<U32>, pb: Array<U32>,
+               +base: U32, +n: U32, +mark_base: U32, +seed: U32) ->
+  (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  +a = R.range(seed, n)
+  +b = R.range_except(R.step(seed), n, a)
+  +c1 = U32.min(a, b)
+  +c2 = U32.max(a, b)
+  ox1.two(~key, ca, cb, pa, pb, base, c1, ((c2 - c1 : U32) + 1 : U32),
+          U32.mod(U32.inc(c2), n), n, mark_base)
+
+# OX1 na fatia [base, base + n), marcas em [mark_base, mark_base + chaves).
+# Com `cruza = False{}` os filhos são cópias dos pais (um sorteio decide quem
+# copia quem), que é o caminho "sem cruzamento" do motor.
+def breed_ox1_slice(~key: @+x: U32 -> U32,
+                    ca: Array<U32>, cb: Array<U32>, pa: Array<U32>, pb: Array<U32>,
+                    +base: U32, +n: U32, +mark_base: U32, cruza: Bool, +seed: U32) ->
+  (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  match cruza:
+    case True{}:
+      ox1.cortes(~key, ca, cb, pa, pb, base, n, mark_base, R.split.fst(seed))
+    case False{}:
+      ox1.copy.if(R.bool(R.split.snd(seed)), ca, cb, pa, pb, base, n)
+
+def breed_ox1(~key: @+x: U32 -> U32,
+              ca: Array<U32>, cb: Array<U32>, pa: Array<U32>, pb: Array<U32>,
+              +n: U32, +mark_base: U32, cruza: Bool, +seed: U32) ->
+  (Array<U32> & Array<U32>) & (Array<U32> & Array<U32>):
+  breed_ox1_slice(~key, ca, cb, pa, pb, 0, n, mark_base, cruza, seed)

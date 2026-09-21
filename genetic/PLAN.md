@@ -245,12 +245,42 @@ Cada etapa terminou em binário nativo medido, com commit próprio.
    motor em Rust reduz os dois. Enquanto isso não for medido, não dá para
    afirmar que diversidade e estagnação estejam pagando o próprio custo.
 
+8. ✅ `exemplos/sudoku.bend`, quadro vazio **e** com dicas. A premissa antiga
+   ("a aptidão precisa de 243 contadores de rascunho") estava errada: cada
+   unidade cabe num `U32` com duas máscaras de 16 bits (vistos / vistos duas
+   vezes), e "aparece exatamente uma vez" é `popcount(s1 & ~s2)`. Zero
+   contador, zero alocação.
+
+   Codificação do motor em TS: linha = permutação de 1..9, dicas MÓVEIS
+   sustentadas por bônus de +8, OX1 por linha. As dicas viajam no próprio
+   genoma (índices 81..161) para que o caminho quente não toque o contexto,
+   que é `Data`. Aptidão máxima = 243 + 8·dicas.
+
+   Medido (pop 1024, 20 mil gerações, 8 demes, 3 sementes), e conferido fora
+   do Bend: o quadro resolvido é um sudoku válido E mantém todas as dicas.
+
+   | quadro | dicas | alvo | resultado (3 sementes) |
+   |---|---|---|---|
+   | vazio | 0 | 243 | 243 / 243 / 243 — resolve sempre |
+   | fácil | 30 | 483 | 483 / 483 / 483 — resolve sempre |
+   | médio | 36 | 531 | 531 / 531 / 531 — resolve sempre |
+   | difícil | 28 | 467 | 467 / 463 / 459 — resolve às vezes |
+
+   **Escala melhor que qualquer outro exemplo daqui**: 6,18 s -> 0,98 s em 8
+   E-cores homogêneos (**6,31x**) e 4,08 s -> 0,91 s na máquina inteira com 8
+   threads (**4,48x**), contra 2,94x do onemax nas mesmas 8 E-cores.
+
+   Isso só aconteceu depois de achar um gargalo que custou 4x de paralelismo:
+   o contexto do problema carregava as 81 dicas numa `List`. O motor duplica
+   `+ctx` em toda callback e em toda tarefa, e cada duplicação de uma
+   estrutura de HEAP mexe num contador de referências compartilhado — um
+   atômico contestado no caminho quente. Com a lista no contexto: 6,61 s ->
+   4,18 s (1,58x). Só com escalares: 5,61 s -> 0,95 s (5,91x). O `init`, que é
+   frio, reconstrói a lista localmente. **Regra: contexto de problema só
+   carrega escalares.**
+
 ### O que falta
 
-- **Sudoku.** A aptidão precisa de 243 contadores de rascunho, e alocá-los por
-  indivíduo por geração quebraria o 0-alloc. A saída provável: o genoma carrega
-  o próprio rascunho na cauda (81 células do quadro + contadores, num `Array`
-  de 512), porque contexto do problema é `Data` e não pode guardar `Array`.
 - **LAWS.bend / PROOF.bend** (combinado para o final).
 - **Medir o desvio do §4**: a interface tem `~crossover` de 2 genomas (o motor
   copia os pais nos filhos antes) em vez de 4. Custa uma passada extra de

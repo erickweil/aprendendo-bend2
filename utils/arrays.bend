@@ -330,3 +330,87 @@ def show.go(~T: Type, ~fn: T -> String, arr: Array<T>) -> String:
 
 def show(~T: Type, ~fn: T -> String, arr: Array<T>) -> String:
   "[" ++ show.go(~T, ~fn, arr) ++ "]"
+# ----------------------------------------------------------------
+# fold_idx: dobra sobre uma SEQUÊNCIA DE ÍNDICES
+# ----------------------------------------------------------------
+# `reduce` percorre o array inteiro, em ordem. Muita coisa precisa percorrer
+# um SUBCONJUNTO em outra ordem: uma linha, uma coluna, uma caixa 3x3, uma
+# diagonal, uma faixa. Escrever isso à mão dá o andaime de sempre (um `.go`,
+# um `.step`, um `.val` e um record de estado) — e é o que torna o código
+# ilegível quando há seis percursos diferentes no mesmo arquivo.
+#
+# Aqui o percurso vira UM parâmetro: `~idx_of(c, k)` diz qual índice do array
+# corresponde ao k-ésimo elemento do percurso `c`. Como `~idx_of` e `~f` são
+# templates, são substituídos em tempo de compilação — custo zero, o laço
+# gerado é o mesmo que o escrito à mão.
+#
+#   linha  r:  idx_of(r, k) = r * 9 + k
+#   coluna c:  idx_of(c, k) = k * 9 + c
+#   caixa  b:  idx_of(b, k) = (b/3*3 + k/3) * 9 + (b%3*3 + k%3)
+#
+# `c` é o parâmetro COMUM (não template) porque vem de tempo de execução:
+# um template não captura valor de runtime.
+def fold_idx.put(~A: Data, ~S: Type, ~f: @+x: A -> @a: S -> @+k: U32 -> S,
+                 r: Array<A> & A, acc: S, +k: U32) -> Array<A> & S:
+  (arr, +value) = r
+  (arr, f(value, acc, k))
+
+def fold_idx.go(~A: Data, ~S: Type, ~idx_of: @+c: U32 -> @+k: U32 -> U32,
+                ~f: @+x: A -> @a: S -> @+k: U32 -> S,
+                n: Nat, st: Array<A> & S, +c: U32, +k: U32) -> Array<A> & S:
+  match n:
+    case 0n:
+      st
+    case 1n+p:
+      (arr, acc) = st
+      fold_idx.go(~A, ~S, ~idx_of, ~f, p,
+        fold_idx.put(~A, ~S, ~f, Array.get(A, arr, idx_of(c, k)), acc, k),
+        c, (k + 1 : U32))
+
+# Dobra `f` sobre os `count` elementos do percurso `c`. Devolve (array, acumulador).
+def fold_idx(~A: Data, ~S: Type, ~idx_of: @+c: U32 -> @+k: U32 -> U32,
+             ~f: @+x: A -> @a: S -> @+k: U32 -> S,
+             arr: Array<A>, acc: S, +c: U32, +count: U32) -> Array<A> & S:
+  fold_idx.go(~A, ~S, ~idx_of, ~f, U32.to_nat(count), (arr, acc), c, 0)
+
+# O percurso mais comum: a faixa contígua [c, c + count). Com `c = 0` é o
+# `reduce` restrito aos `count` primeiros elementos — que é o que falta para
+# dobrar só sobre a parte útil de um genoma que carrega rascunho na cauda.
+def idx_linear(+c: U32, +k: U32) -> U32:
+  (c + k : U32)
+
+def fold_range(~A: Data, ~S: Type, ~f: @+x: A -> @a: S -> @+k: U32 -> S,
+               arr: Array<A>, acc: S, +from: U32, +count: U32) -> Array<A> & S:
+  fold_idx(~A, ~S, ~idx_linear, ~f, arr, acc, from, count)
+
+# ----------------------------------------------------------------
+# map_idx: escreve sobre uma sequência de índices
+# ----------------------------------------------------------------
+# A companheira de `fold_idx`: mesmo percurso, mas em vez de acumular um
+# valor, reescreve cada posição visitada com `f(antigo, c, k)`. É o `for_each`
+# restrito a um percurso — preencher uma linha, zerar uma faixa de rascunho,
+# aplicar uma tabela.
+def map_idx.put(~A: Data, ~f: @+x: A -> @+c: U32 -> @+k: U32 -> A,
+                +idx: U32, +c: U32, +k: U32, r: Array<A> & A) -> Array<A>:
+  (arr, x) = r
+  Array.set(A, arr, idx, f(x, c, k))
+
+def map_idx.go(~A: Data, ~idx_of: @+c: U32 -> @+k: U32 -> U32,
+               ~f: @+x: A -> @+c: U32 -> @+k: U32 -> A,
+               n: Nat, arr: Array<A>, +c: U32, +k: U32) -> Array<A>:
+  match n:
+    case 0n:
+      arr
+    case 1n+p:
+      map_idx.go(~A, ~idx_of, ~f, p,
+        map_idx.put(~A, ~f, idx_of(c, k), c, k, Array.get(A, arr, idx_of(c, k))),
+        c, (k + 1 : U32))
+
+def map_idx(~A: Data, ~idx_of: @+c: U32 -> @+k: U32 -> U32,
+            ~f: @+x: A -> @+c: U32 -> @+k: U32 -> A,
+            arr: Array<A>, +c: U32, +count: U32) -> Array<A>:
+  map_idx.go(~A, ~idx_of, ~f, U32.to_nat(count), arr, c, 0)
+
+def map_range(~A: Data, ~f: @+x: A -> @+c: U32 -> @+k: U32 -> A,
+              arr: Array<A>, +from: U32, +count: U32) -> Array<A>:
+  map_idx(~A, ~idx_linear, ~f, arr, from, count)

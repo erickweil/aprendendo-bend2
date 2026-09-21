@@ -128,6 +128,44 @@ def teste_swap_range_hole() -> String:
 
 # ----------------------------------------------------------------
 
+# ---- fold_idx: percursos sobre um "grid" 4x2 guardado num Array de 8 ----
+# indices: linha r = r*4 + k  (4 elementos), coluna c = k*4 + c (2 elementos)
+def idx_lin4(+r: U32, +k: U32) -> U32:
+  ((r * 4 : U32) + k : U32)
+
+def idx_col4(+c: U32, +k: U32) -> U32:
+  ((k * 4 : U32) + c : U32)
+
+def soma_f(+x: U32, acc: U32, +k: U32) -> U32:
+  (acc + x : U32)
+
+def concat_f(+x: U32, acc: String, +k: U32) -> String:
+  acc ++ U32.show(x) ++ ","
+
+def so_valor(r: Array<U32> & U32) -> String:
+  (a, +v) = r
+  U32.show(v)
+
+def so_texto(r: Array<U32> & String) -> String:
+  (a, t) = r
+  t
+
+# soma da linha 1 = 4+5+6+7 = 22
+def teste_fold_linha() -> String:
+  so_valor(Arr.fold_idx(~U32, ~U32, ~idx_lin4, ~soma_f, marcado(), 0, 1, 4))
+
+# coluna 2 do grid 4x2 = elementos 2 e 6 -> "2,6,"
+def teste_fold_coluna() -> String:
+  so_texto(Arr.fold_idx(~U32, ~String, ~idx_col4, ~concat_f, marcado(), "", 2, 2))
+
+# fold_range(from=5, count=3) = 5+6+7 = 18
+def teste_fold_range() -> String:
+  so_valor(Arr.fold_range(~U32, ~U32, ~soma_f, marcado(), 0, 5, 3))
+
+# fold_range(count=0) nao le nada
+def teste_fold_range_vazio() -> String:
+  so_valor(Arr.fold_range(~U32, ~U32, ~soma_f, marcado(), 99, 3, 0))
+
 def check(rot: String, +obtido: String, +esperado: String) -> String:
   +ok = String.eq(obtido, esperado)
   Bool.pick(String, ok, "  ok    ", "  FALHA ") ++ rot ++ ": " ++ obtido ++
@@ -158,4 +196,9 @@ def main() -> IO(Unit):
     u : Unit <- IO.print("== faixas, elemento Type (buraco) ==")
     u : Unit <- IO.print(check("swap_at_hole(0,3) -> slots 0,3", teste_swap_at_hole(), "3,0"))
     u : Unit <- IO.print(check("swap_at_hole(2,2) intacto", teste_swap_at_hole_mesmo(), "0,3"))
-    IO.print(check("swap_range_hole(from=1,count=2) -> a[1],b[1]", teste_swap_range_hole(), "101,1"))
+    u : Unit <- IO.print(check("swap_range_hole(from=1,count=2) -> a[1],b[1]", teste_swap_range_hole(), "101,1"))
+    u : Unit <- IO.print("== fold_idx (percurso por indice) ==")
+    u : Unit <- IO.print(check("fold_idx linha 1 (soma)", teste_fold_linha(), "22"))
+    u : Unit <- IO.print(check("fold_idx coluna 2 (ordem)", teste_fold_coluna(), "2,6,"))
+    u : Unit <- IO.print(check("fold_range(from=5,count=3)", teste_fold_range(), "18"))
+    IO.print(check("fold_range(count=0) nao le", teste_fold_range_vazio(), "99"))
