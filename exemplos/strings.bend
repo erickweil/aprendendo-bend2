@@ -1,4 +1,5 @@
 import Base
+import ./../utils/io.bend as IOUtils
 
 # Uma String é uma lista encadeada de caracteres apontando para os próximos da frente
 # type Char is Data:
@@ -37,30 +38,42 @@ def Char.eq(a: Char, b: Char) -> Bool:
     case Chr{x} Chr{y}:
       U32.is_eq(x, y)
 
-def split.push(c: Char, partes: List<&2, String>) -> List<&2, String>:
-  match partes:
-    case Nil{}:
+def split.push(partes: List<String>, is_sep: Bool, c: Char) -> List<String>:
+  match partes is_sep:
+    # Primeiro push vai criar
+    case Nil{} False{}:
       Con{SCon{c, SNil{}}, Nil{}}
-    case Con{h, t}:
+    # Adiciona o caractere à string
+    case Con{h, t} False{}:
       Con{SCon{c, h}, t}
+    # Se é separador, cria uma nova string vazia
+    case partes True{}:
+      Con{SNil{}, partes}
 
 # Recursivo primeiro, reconstrói na volta, para manter ordem
-def split(+s: String, +sep: Char) -> List<&2, String>:
+def split(+s: String, +sep: Char) -> List<String>:
   match s:
     case SNil{}:
       Con{SNil{}, Nil{}}
     case SCon{c, t}:
-      pick(List<&2, String>, Char.eq(c, sep),
-        Con{SNil{}, split(t, sep)},
-        split.push(c, split(t, sep)))
+      split.push(split(t, sep), Char.eq(c, sep), c)
 
-def frase() -> String:
-  "Subi no Ônibus Arara em Roma"
+def show_list(list: List<String>) -> String:
+  match list:
+    case Nil{}:
+      ""
+    case Con{h, Nil{}}:
+      h
+    case Con{h, t}:
+      h ++ ", " ++ show_list(t)
 
 def main() -> IO(Unit):
-  +txt = frase()
   do IO<Unit>:
+    args : List<String> <- IO.args()
+    +txt : String = IOUtils.pop_or(&1, String, args, "Subi no Ônibus Arara em Roma")
+    splitted : List<String> = split(txt, Chr{32})
     u : Unit <- IO.print("frase:     " ++ txt)
+    u : Unit <- IO.print("separada:  " ++ show_list(splitted))
     u : Unit <- IO.print("invertida: " ++ inverter(txt, ""))
     u : Unit <- IO.print("tamanho:   " ++ U32.show(tamanho(txt)))
     

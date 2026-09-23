@@ -1,4 +1,5 @@
 import Base
+import ./../utils/io.bend as IOUtils
 
 # Fibonacci recursivo com Nat e match, onde cada chamada é um pedaço menor da chamada anterior
 def fib(+n: Nat) -> Nat:
@@ -11,7 +12,8 @@ def fib(+n: Nat) -> Nat:
     # Separa n em um pedaço menor p (igual a n - 2) 
     case 2n+p:
       # Chama recursivamente, usando o pedaço p que é n-2 e cria um pedaço 1n+p que é n-1
-      fib(p) + fib(1n+p)
+      f1 f2 = fib(p) fib(1n+p)
+      (f1 + f2 : Nat)
 
 # Fibonacci iterativo, usando iter para contagem recursiva
 def fib_iter(+iter: Nat, +a: U32, +b: U32) -> U32:
@@ -23,31 +25,24 @@ def fib_iter(+iter: Nat, +a: U32, +b: U32) -> U32:
     case 1n+p:
       fib_iter(p, b, (a + b : U32))
 
-def qual() -> Nat:
-  10n
+# Sim isso é ridículo está re-calculando o número denovo toda vez, mas é só para mostrar a diferença de performance entre o método recursivo e o iterativo
+def loop(n: Nat, +qual: U32) -> IO(Unit):
+  match n:
+    case 0n:
+      IO.print("Fim do loop")
+    case 1n+p:
+      # O cálculo usando Nat é muito mais lento por ser método recursivo 2^n e também por usar aritmética Nat
+      v = fib(U32.to_nat(qual))
+      IO.bind(Unit, Unit, IO.print(Nat.show(v)), _ => loop(p, (qual + 1 : U32)))
 
-def parse_nat(m: Maybe<&2, Nat>, default: Nat) -> Nat:
-  match m:
-    case None{}: default
-    case Some{val}: val
-
-def get_arg_nat(args: List<String>, default: Nat) -> Nat:
-  match args:
-    case Nil{}: default
-    case Con{first, rest}:
-      parse_nat(Nat.read(first), default)
-
-def run(args: List<String>) -> IO(Unit):
-  +n = get_arg_nat(args, qual())
-
-  do IO<Unit>:
-    u : Unit <- IO.print("Calculando Fibonacci Nº " ++ Nat.show(n) ++ "...")
-    # As linhas abaixo demoram aparecer pois o cálculo só acontece agora que precisa exibir o valor
-    u : Unit <- IO.print(Nat.show(n) ++ "º --> " ++ U32.show(fib_iter(n, 0, 1)) ++ " (U32)")
-    # O cálculo usando Nat é muito mais lento por ser método recursivo 2^n e também por usar aritmética Nat
-    u : Unit <- IO.print(Nat.show(n) ++ "º --> " ++ Nat.show(fib(n)) ++ " (Nat)")
-
-    IO.print("Finalizado")
+      # O cálculo usando U32 é muito mais rápido por ser método iterativo
+      # v = fib_iter(U32.to_nat(qual), 0, 1)
+      #IO.bind(Unit, Unit, IO.print(U32.show(v)), _ => loop(p, (qual + 1 : U32)))
 
 def main() -> IO(Unit):
-  IO.bind(List<String>, Unit, IO.args(), run)
+  do IO<Unit>:
+    args : List<String> <- IO.args()
+    +n : U32 = IOUtils.num_at(IOUtils.numbers(args), 0n, 10)
+
+    u : Unit <- IO.print("Calculando Fibonacci Nº " ++ U32.show(n) ++ "...")
+    loop(U32.to_nat(n), 1)

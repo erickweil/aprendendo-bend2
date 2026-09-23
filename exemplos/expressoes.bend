@@ -1,12 +1,5 @@
 import Base
 
-def pick(-A: Type, c: Bool, a: A, b: A) -> A:
-  match c:
-    case True{}:
-      a
-    case False{}:
-      b
-
 def List.pop(-A: Data, lista: List<&2, A>) -> Maybe<&2, A>:
   match lista:
     case Nil{}:
@@ -130,9 +123,14 @@ def avaliar(+arvore: ArvoreExpr) -> U32:
     case Valor{valor}:
       valor
     case Expr{op, esquerda, direita}:
-      +esquerda_valor = avaliar(esquerda)
-      +direita_valor = avaliar(direita)
-      avaliar.op(op, esquerda_valor, direita_valor)
+      # Avaliação paralela
+      a b = avaliar(esquerda) avaliar(direita)
+      avaliar.op(op, a, b)
+
+      # Avaliação sequencial
+      # +esquerda_valor = avaliar(esquerda)
+      # +direita_valor = avaliar(direita)
+      # avaliar.op(op, esquerda_valor, direita_valor)
 
 # Expressão escrita em notação polonesa reversa (RPN)
 def expressao(args: List<String>) -> List<&2, String>:
@@ -149,8 +147,7 @@ def run(args: List<String>) -> IO(Unit):
 
   +arvore = ArvoreExpr.from_rpn(parsed_tokens)
   msg = Maybe.map_or(ArvoreExpr, String, arvore,
-    a =>
-      +a = a
+    +a =>
       ArvoreExpr.show(a) ++ "\n" ++ U32.show(avaliar(a))
     ,
     "Erro ao construir árvore"

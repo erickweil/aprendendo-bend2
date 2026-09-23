@@ -1,12 +1,5 @@
 import Base
 
-def pick(-A: Type, c: Bool, a: A, b: A) -> A:
-  match c:
-    case True{}:
-      a
-    case False{}:
-      b
-
 # Em Bend2 toda função de dois parâmetros def f(a, b) é na verdade a => b => (...)
 # A função f recebe um elemento da lista e o acumulado e deve retornar novamente o acumulado
 def reduce(~A: Data, ~S: Data, ~f: @+a: S -> @+x: A -> S, xs: List<&2, A>, acc: S) -> S:
@@ -36,7 +29,7 @@ def inserir(~T: Data, ~cmp: @a: T -> @b: T -> Cmp, +a: Arvore<T>, +novo: T) -> A
     case Vazia{}:
       No{novo, Vazia{}, Vazia{}}
     case No{valor, esquerda, direita}:
-      pick(Arvore<T>, Cmp.is_lt(cmp(novo, valor)),
+      Bool.pick(Arvore<T>, Cmp.is_lt(cmp(novo, valor)),
         No{valor, inserir(~T, ~cmp, esquerda, novo), direita},
         No{valor, esquerda, inserir(~T, ~cmp, direita, novo)}
       )
@@ -46,9 +39,9 @@ def buscar(~T: Data, ~cmp: @a: T -> @b: T -> Cmp, +a: Arvore<T>, +busca: T) -> M
     case Vazia{}:
       None{}
     case No{valor, esquerda, direita}:
-      pick(Maybe<&2, T>, Cmp.is_eq(cmp(busca, valor)),
+      Bool.pick(Maybe<&2, T>, Cmp.is_eq(cmp(busca, valor)),
         Some{valor},
-        pick(Maybe<&2, T>, Cmp.is_lt(cmp(busca, valor)),
+        Bool.pick(Maybe<&2, T>, Cmp.is_lt(cmp(busca, valor)),
           buscar(~T, ~cmp, esquerda, busca),
           buscar(~T, ~cmp, direita, busca)
         )

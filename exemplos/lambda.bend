@@ -14,24 +14,6 @@ def repetir(~S: Type, ~f: S -> S, n: Nat, estado: S) -> S:
     case 1n+p:
       repetir(~S, ~f, p, f(estado))
 
-type Loop<-S: Data> is Type:
-  Repetir{estado: S}
-  Parar{estado: S}
-
-def repetir2.go(~S: Type, ~f: S -> Loop<S>, n: Nat, loop: Loop<S>) -> S:
-  match n:
-    case 0n:
-      estado
-    case 1n+p:
-      match loop:
-        case Repetir{estado}:
-          repetir2.go(~S, ~f, p, f(estado))
-        case Parar{estado}:
-          estado
-
-def repetir2(~S: Type, ~f: S -> Loop<S>, estado: S) -> S:
-  repetir2.go(~S, ~f, U32.to_nat(max_u32()), Repetir{estado})
-
 def power2(expoente: Nat) -> U32:
   repetir(~U32, ~(x => (2 * x : U32)), expoente, 1)
 

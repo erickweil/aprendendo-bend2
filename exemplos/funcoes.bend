@@ -14,20 +14,10 @@ def soma(a: U32, b: U32) -> U32:
   
 def media(a: U32, b: U32) -> U32:
   (soma(a,b) / 2 : U32)
-  
-# função auxiliar padrão para retornar o valor baseado em um teste lógico
-# é necessária pois o match só pode ser utilizado em valores recebido em parâmetros,
-# não pode em variáveis locais ou valores computados
-def pick(-A: Type, c: Bool, a: A, b: A) -> A:
-  match c:
-    case True{}:
-      a
-    case False{}:
-      b
 
 # Utilizando a função pick, escolhe o maior valor entre a e b
 def maior(+a: U32, +b: U32) -> U32:
-  pick(U32, (a > b : U32), a, b)
+  Bool.pick(U32, (a > b : U32), a, b)
   
 def main() -> IO(Unit):
   nota1 = valor(40)
@@ -43,4 +33,4 @@ def main() -> IO(Unit):
 
   anual = media(sem1, sem2)
     
-  IO.print(pick(String, (anual > 60 : U32), "Passou", "Reprovou"))
+  IO.print(Bool.pick(String, (anual > 60 : U32), "Passou", "Reprovou"))

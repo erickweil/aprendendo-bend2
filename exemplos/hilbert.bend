@@ -1,19 +1,10 @@
 import Base
-import arvore.bend as A
+import ./../utils/io.bend as IOUtils
+import ./../utils/math.bend as M
 
-def pick(-A: Type, c: Bool, a: A, b: A) -> A:
-  match c:
-    case True{}:
-      a
-    case False{}:
-      b
-
-def powerOfTwo(n: Nat, +acc: U32) -> U32:
-  match n:
-    case 0n:
-      acc
-    case 1n+p:
-      powerOfTwo(p, (acc + acc : U32))
+# -------------------------------------------------
+# Tipos, Direção e Posição 2D
+# -------------------------------------------------
 
 type Dir is Data:
   Norte{}
@@ -74,192 +65,174 @@ def Vec2.andar(vec: Vec2, dir: Dir) -> Vec2:
     case Oeste{}:
       Vec2{(x - 1 : U32), y}
 
-type Estado is Data:
-  EstadoFim{}
-  Estado{pos: Vec2, dir: Dir, chegada: Dir, acc: Estado}
+def Vec2.index(vec: Vec2, largura: U32) -> U32:
+  Vec2{x, y} = vec
+  (y * largura + x : U32)
 
-def esquerda(estado: Estado) -> Estado:
-    match estado:
-    case EstadoFim{}:
-      EstadoFim{}
-    case Estado{pos, dir, chegada, acc}:
-      Estado{pos, Dir.anti_horario(dir), chegada, acc}
+# -------------------------------------------------
+# Lógica iteração percorrendo a curva de Hilbert
+# -------------------------------------------------
 
-def direita(estado: Estado) -> Estado:
-    match estado:
-    case EstadoFim{}:
-      EstadoFim{}
-    case Estado{pos, dir, chegada, acc}:
-      Estado{pos, Dir.horario(dir), chegada, acc}
+type Tartaruga<-S: Type> is Type:
+  Tartaruga{pos: Vec2, dir: Dir, chegada: Dir, acc: S}
 
-def frente(+estado: Estado) -> Estado:
-    match estado:
-    case EstadoFim{}:
-      EstadoFim{}
-    case Estado{pos, dir, chegada, acc}:
-      Estado{Vec2.andar(pos, dir), dir, dir, estado}
+def esquerda(-S: Type, t: Tartaruga<S>) -> Tartaruga<S>:
+  Tartaruga{pos, dir, chegada, acc} = t
+  Tartaruga{pos, Dir.anti_horario(dir), chegada, acc}
 
-# iter_a e iter_b se chamam mutuamente, mas no Bend2 não dá para fazer, então por isso um função só
-def iter(+n: Nat, a_lado: Bool, estado: Estado) -> Estado:
+def direita(-S: Type, t: Tartaruga<S>) -> Tartaruga<S>:
+  Tartaruga{pos, dir, chegada, acc} = t
+  Tartaruga{pos, Dir.horario(dir), chegada, acc}
+
+def frente(~S: Type, ~f: S -> Vec2 -> Dir -> Dir -> S, t: Tartaruga<S>) -> Tartaruga<S>:
+  Tartaruga{+pos, +dir, chegada, acc} = t
+  Tartaruga{Vec2.andar(pos, dir), dir, dir, f(acc, pos, chegada, dir)}
+
+# iter_a e iter_b se chamam mutuamente, mas no Bend2 não dá para fazer (sem usar @unsafe), então por isso um função só
+def iter(~S: Type, ~f: S -> Vec2 -> Dir -> Dir -> S, +n: Nat, a_lado: Bool, t: Tartaruga<S>) -> Tartaruga<S>:
   match n:
     case 0n:
-      estado
+      t
     case 1n+p:
       match a_lado:
         # ITER A -> +BF-AFA-FB+
         case True{}:
-          estado = esquerda(estado)
-          estado = iter(p, False{}, estado)
-          estado = frente(estado)
-          estado = direita(estado)
-          estado = iter(p, True{}, estado)
-          estado = frente(estado)
-          estado = iter(p, True{}, estado)
-          estado = direita(estado)
-          estado = frente(estado)
-          estado = iter(p, False{}, estado)
-          estado = esquerda(estado)
-          estado
+          t = esquerda(S, t)
+          t = iter(~S, ~f, p, False{}, t)
+          t = frente(~S, ~f, t)
+          t = direita(S, t)
+          t = iter(~S, ~f, p, True{}, t)
+          t = frente(~S, ~f, t)
+          t = iter(~S, ~f, p, True{}, t)
+          t = direita(S, t)
+          t = frente(~S, ~f, t)
+          t = iter(~S, ~f, p, False{}, t)
+          t = esquerda(S, t)
+          t
         # ITER B -> -AF+BFB+FA-
         case False{}:
-          estado = direita(estado)
-          estado = iter(p, True{}, estado)
-          estado = frente(estado)
-          estado = esquerda(estado)
-          estado = iter(p, False{}, estado)
-          estado = frente(estado)
-          estado = iter(p, False{}, estado)
-          estado = esquerda(estado)
-          estado = frente(estado)
-          estado = iter(p, True{}, estado)
-          estado = direita(estado)
-          estado
+          t = direita(S, t)
+          t = iter(~S, ~f, p, True{}, t)
+          t = frente(~S, ~f, t)
+          t = esquerda(S, t)
+          t = iter(~S, ~f, p, False{}, t)
+          t = frente(~S, ~f, t)
+          t = iter(~S, ~f, p, False{}, t)
+          t = esquerda(S, t)
+          t = frente(~S, ~f, t)
+          t = iter(~S, ~f, p, True{}, t)
+          t = direita(S, t)
+          t
 
-def Estado.inicial() -> Estado:
-  Estado{Vec2{0, 0}, Leste{}, Leste{}, EstadoFim{}}
+# Consome o estado final da tartaruga, chamando a callback para a última posição
+def hilbert.fim(~S: Type, ~f: S -> Vec2 -> Dir -> Dir -> S, t: Tartaruga<S>) -> S:
+  Tartaruga{pos, dir, chegada, acc} = t
+  f(acc, pos, chegada, dir)
 
-def build_tree.char(last: Dir, dir: Dir) -> String:
-  match last, dir:
-    case Leste{}, Leste{}:
-      "─"
-    case Oeste{}, Oeste{}:
-      "─"
-    case Norte{}, Norte{}:
-      "│"
-    case Sul{}, Sul{}:
-      "│"
+# Percorre a curva inteira e devolve o acumulador no final
+def hilbert(~S: Type, ~f: S -> Vec2 -> Dir -> Dir -> S, n: Nat, acc: S) -> S:
+  tart : Tartaruga<S> = Tartaruga{Vec2{0, 0}, Leste{}, Leste{}, acc}
+  tart = iter(~S, ~f, n, True{}, tart)
+  hilbert.fim(~S, ~f, tart)
+
+# -------------------------------------------------
+# Lógica desenho da curva de Hilbert
+# -------------------------------------------------
+
+def dir_to_char(last: Dir, dir: Dir) -> Char:
+  match last dir:
+    case Leste{} Leste{}: '─'
+    case Oeste{} Oeste{}: '─'
+
+    case Norte{} Norte{}: '│'
+    case Sul{} Sul{}:     '│'
     
-    case Norte{}, Leste{}:
-      "┌"
-    case Oeste{}, Sul{}:
-      "┌"
+    case Norte{} Leste{}: '┌'
+    case Oeste{} Sul{}:   '┌'
     
-    case Norte{}, Oeste{}:
-      "┐"
-    case Leste{}, Sul{}:
-      "┐"
+    case Norte{} Oeste{}: '┐'
+    case Leste{} Sul{}:   '┐'
 
-    case Sul{}, Leste{}:
-      "└"
-    case Oeste{}, Norte{}:
-      "└"
+    case Sul{} Leste{}:   '└'
+    case Oeste{} Norte{}: '└'
 
-    case Sul{}, Oeste{}:
-      "┘"
-    case Leste{}, Norte{}:
-      "┘" 
+    case Sul{} Oeste{}:   '┘'
+    case Leste{} Norte{}: '┘'
     
-    case _ _:
-      "?"
+    case _ _:             '?'
 
-type Vec2Char is Data:
-  Vec2Char{pos: Vec2, char: String, liga_esquerda: Bool}
+type CallbackData is Type:
+  CallbackData{grade: Array<Char>, grade_len: U32, largura: U32}
 
-def Vec2Char.cmp(a: Vec2Char, b: Vec2Char) -> Cmp:
-  match a b:
-    case Vec2Char{Vec2{x1, y1}, _, _} Vec2Char{Vec2{x2, y2}, _, _}:
-      +x1 = x1
-      +x2 = x2
-      +y1 = y1
-      +y2 = y2
-      # compara y, mas se é igual compara x
-      pick(Cmp, U32.is_eq(y1, y2),
-        pick(Cmp, U32.is_eq(x1, x2),
-          EQ{},
-          pick(Cmp, (x1 < x2 : U32),
-            LT{},
-            GT{}
-          )
-        ),
-        pick(Cmp, (y1 < y2 : U32),
-          LT{},
-          GT{}
+def callback.conector(x: U32, chegada: Dir, dir: Dir) -> Char:
+  match x:
+    # Se é a primeira coluna, deve ligar com \n (-1 dá a volta e coloca o \n no último índice)
+    case 0: '\n'
+    case _:
+      match chegada dir:
+        # Se deve ligar com o conector da esquerda
+        case Leste{} _: '─'
+        case _ Oeste{}: '─'
+        # Se não deve ligar com o conector da esquerda
+        case _ _:       ' '
+
+def callback(data: CallbackData, pos: Vec2, chegada: Dir, dir: Dir) -> CallbackData:
+  CallbackData{grade, grade_len, +largura} = data
+  Vec2{+x, +y} = pos
+  +chegada = chegada
+  +dir = dir
+
+  +index = Vec2.index(Vec2{(x * 2 : U32), (largura - y - 1 : U32)}, (largura * 2 : U32))
+  grade = Array.set(Char, grade, (index - 1 : U32), callback.conector(x, chegada, dir))
+  grade = Array.set(Char, grade, index, dir_to_char(chegada, dir))
+  
+  CallbackData{grade, grade_len, largura}
+
+def print_linhas.monta(n: Nat, r: Array<Char> & Char, +i: U32, acc: String) -> Array<Char> & String:
+  match n:
+    case 0n:
+      (grade, c) = r
+      (grade, SCon{c, acc})
+    case 1n+p:
+      (grade, c) = r
+      +prev = (i - 1 : U32)
+      print_linhas.monta(p, Array.get(Char, grade, prev), prev, SCon{c, acc})
+
+def print_linhas(n: Nat, buffer: Array<Char> & String, +passo: U32, +fim: U32) -> IO(Unit):
+  match n:
+    case 0n:
+      (grade, s) = buffer
+      IO.write(s)
+    case 1n+p:
+      (grade, s) = buffer
+      +novo_fim = (fim + passo : U32)
+      do IO<Unit>:
+        u : Unit <- IO.write(s)
+        print_linhas(p, 
+          print_linhas.monta(U32.to_nat((passo - 1 : U32)), Array.get(Char, grade, novo_fim), novo_fim, SNil{}), 
+          passo, 
+          novo_fim
         )
-      )
 
-def build_tree(estado: Estado) -> A.Arvore<Vec2Char>:
-  match estado:
-    case EstadoFim{}:
-      A.Vazia{}
-    case Estado{pos, dir, chegada, acc}:
-      +dir = dir
-      +chegada = chegada
-
-      char = build_tree.char(chegada, dir)
-      liga_esquerda = Dir.is_eq(chegada, Leste{}) || Dir.is_eq(dir, Oeste{})
-      A.inserir(~Vec2Char, ~Vec2Char.cmp, 
-        build_tree(acc), 
-        Vec2Char{pos, char, liga_esquerda}
-      )
-
-# liga_esquerda indica se deve ter o traço conectando ou não, para ficar quadrado no terminal
-def draw.tree.char(+valor: Maybe<&2, Vec2Char>, +line: String) -> String:
-  match valor:
-    case None{}:
-      line ++ "?"
-    case Some{Vec2Char{_, char, liga_esquerda}}:
-      match line:
-        case "":
-          char
-        case _:
-          pick(String, liga_esquerda, line ++ "─" ++ char, line ++ " " ++ char)
-
-def draw.tree.line(+n: Nat, +x: U32, +y: U32, +tree: A.Arvore<Vec2Char>, line: String) -> String:
-  match n:
-    case 0n:
-      line
-    case 1n+p:
-      line = draw.tree.line(p, (x - 1 : U32), y, tree, line)
-      draw.tree.char(A.buscar(~Vec2Char, ~Vec2Char.cmp, tree, Vec2Char{Vec2{(x - 1 : U32),(y - 1 : U32)}, "", False{}}), line)
-
-# Trafega y de baixo para cima, e x da esquerda para direita
-def draw.tree(+n: Nat, +y: U32, +largura: U32, +tree: A.Arvore<Vec2Char>, result: String) -> String:
-  match n:
-    case 0n:
-      result
-    case 1n+p:
-      line = draw.tree.line(U32.to_nat(largura), largura, y, tree, "")
-      draw.tree(p, (y - 1 : U32), largura, tree, result ++ line ++ "\n")
-
-def draw.fin(profundidade: U32, tree: A.Arvore<Vec2Char>) -> String:
-  +largura = powerOfTwo(U32.to_nat(profundidade), 1)
-  draw.tree(U32.to_nat(largura), largura, largura, tree, "")
-
-def parse_u32(m: Maybe<&2, U32>, default: U32) -> U32:
-  match m:
-    case None{}: default
-    case Some{val}: val
-
-def get_arg_u32(args: List<String>, default: U32) -> U32:
-  match args:
-    case Nil{}: default
-    case Con{first, rest}:
-      parse_u32(U32.read(first), default)
-
-def run(args: List<String>) -> IO(Unit):
-  +prof = get_arg_u32(args, 3)
-  estado = iter(U32.to_nat(prof), True{}, Estado.inicial())
-  IO.write(draw.fin(prof, build_tree(estado)))
+def callback.print(data: CallbackData) -> IO(Unit):
+  CallbackData{grade, grade_len, +largura} = data
+  +passo = (largura * 2 : U32)
+  +fim = (passo - 1 : U32)
+  print_linhas(
+    U32.to_nat((largura - 1 : U32)), 
+    print_linhas.monta(U32.to_nat(fim), Array.get(Char, grade, fim), fim, SNil{}),
+    passo,
+    fim
+  )
 
 def main() -> IO(Unit):
-  IO.bind(List<String>, Unit, IO.args(), run)
+  do IO<Unit>:
+    args : List<String> <- IO.args()
+    +profundidade : U32 = IOUtils.num_at(IOUtils.numbers(args), 0n, 3)
+    +largura : U32 = U32.shln(1, U32.to_nat(profundidade))
+    +grade_len : U32 = ((largura * 2 : U32) * largura : U32)
+    grade : Array<Char> = Array.new(Char, M.log2_ceil(grade_len), '!')
+
+    callback.print(
+      hilbert(~CallbackData, ~callback, U32.to_nat(profundidade), CallbackData{grade, grade_len, largura})
+    )

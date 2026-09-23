@@ -1,6 +1,6 @@
 # AGENTS.md — Guia de Engenharia e Operação em Bend 2
 
-> Verificado contra o **bend 2.0.22**. Ao atualizar o bend, regenere o GUIDE.md (`bend guide > GUIDE.md`), leia o CHANGELOG (`curl -sL https://raw.githubusercontent.com/bendlang/bend/main/CHANGELOG.md`) e reverifique as armadilhas com sondas curtas compiladas para nativo. A versão instalada sai de `bend version`.
+> Verificado contra o **bend 2.0.26**. Ao atualizar o bend, regenere o GUIDE.md (`bend guide > GUIDE.md`), leia o CHANGELOG (`curl -sL https://raw.githubusercontent.com/bendlang/bend/main/CHANGELOG.md`) e reverifique as armadilhas com sondas curtas compiladas para nativo. A versão instalada sai de `bend version`.
 
 ## 1. Como Orquestrar a Execução do Bend 2 com Segurança
 
@@ -21,7 +21,7 @@ Para aprender sobre o BEND2, leia o GUIDE.md gerado pelo comando `bend guide > G
   timeout 60s ./bin/arquivo --threads 1     # Single core
   timeout 60s ./bin/arquivo --threads 4     # Multi core
   ```
-* **Performance só se mede no NATIVO.** O interpretador (`bend arquivo.bend`) não é um nativo mais lento: ele tem um comportamento fundamentalmente diferente (ex.: `Bool.pick` é preguiçoso nele e estrito no nativo). Nenhum argumento de performance vale se não vier de um binário `-o`. E há erros que **só o backend nativo acusa** (ex.: "an open Array element type") — compile também o que só foi checado.
+* **Performance só se mede no NATIVO.** `bend arquivo.bend` faz duas coisas diferentes conforme o `main`: um `main` que devolve **valor** é *normalizado pelo verificador* (preguiçoso: um `Bool.pick` ali não avalia o ramo descartado); um `main` que devolve **`IO`** roda *compilado*, mas numa trilha muito mais lenta que o binário — e já estrito. Medido no 2.0.26: 10⁹ passos de xorshift levam 57 s com `bend arquivo.bend` e 1,1 s com `-o`. Nenhum argumento de performance vale se não vier de um binário `-o`. E há erros que **só o backend nativo acusa** (ex.: "an open Array element type") — compile também o que só foi checado.
 * **Ao medir código paralelo, varie as threads** (`--threads 1 2 4 8 12`) e compare com o teto real da máquina: um benchmark de tarefas **idênticas e independentes** com trabalho contínuo de CPU (neste i5-1245U de 15 W: 8 tarefas escalam só 1,7×, 64 tarefas 2,6×, nada melhora além de 4 threads). O `pow2` do GUIDE, com tarefas minúsculas, dá 3,2× e é uma referência otimista. Um platô antes do número de tarefas independentes indica parte sequencial ou desbalanceamento; um platô que piora conforme o volume de dados cresce indica limite de banda de memória.
 * **Compilação e Verificação Estática:**
   - Checar sem rodar: `timeout 60s bend <arquivo.bend> --check-only` (checa o arquivo e os imports).
@@ -45,7 +45,8 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 ---
 
 ### 🔴 Armadilha 2: `Bool.pick` é Estrito (*Strict Evaluation*)
-> **Conceito:** Na HVM, `Bool.pick(T, cond, then_branch, else_branch)` avalia **ambos os ramos** incondicionalmente. (No interpretador é lazy, mas no compilado nativo sim.)
+> **Conceito:** Na HVM, `Bool.pick(T, cond, then_branch, else_branch)` avalia **ambos os ramos** incondicionalmente. Só é preguiçoso quando o `main` devolve um valor e o verificador o normaliza (veja 1.1). Reverificado no 2.0.26, no nativo e em `bend arquivo.bend` com `main` de IO: o ramo pesado custa o mesmo tempo com a condição verdadeira ou falsa.
+* **Pega também quem usa árvores:** um `inserir`/`buscar` de árvore binária escrito como `Bool.pick(..., No{v, inserir(esq), dir}, No{v, esq, inserir(dir)})` desce pelos **dois** lados a cada nível, e passa a visitar a árvore inteira: O(n) por operação em vez de O(log n). Medido em `exemplos/hilbert.bend` (que usa `exemplos/arvore.bend`): o tempo cresce 16× por nível da curva (4× mais pontos), ou seja, O(n²) — 2,74 s na profundidade 6. Escreva o desvio com `match` num auxiliar `.step` sobre o `Cmp`.
 
 * **Quando isso é aceitável:** se o ramo recursivo for uma recursão **estrutural sobre um argumento que encolhe**, o `Bool.pick` termina — ele apenas deixa de fazer short-circuit e paga o custo da lista inteira:
   ```bend
@@ -78,7 +79,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
   def find(l: List<&2, U32>, +target: U32) -> U32:
     find.go(l, False{}, target)
   ```
-  A condição do passo **anterior** entra como parâmetro, então o ramo `True{}` retorna sem nunca mencionar a chamada recursiva. Note `Con{h, t}` em vez de `h <> t`: o açúcar `<>` não é aceito em `match` com múltiplos escrutinados.
+  A condição do passo **anterior** entra como parâmetro, então o ramo `True{}` retorna sem nunca mencionar a chamada recursiva. (Versões anteriores recusavam o açúcar `h <> t` em `match` com vários escrutinados; no 2.0.26 `case h <> t True{}:` compila e roda no nativo.)
 
 * **Alternativa mais simples:** quando o resultado é uma lista de mensagens ou um acumulador, dispense o branch — use um auxiliar **não recursivo** que devolve `Nil{}` ou um singleton e concatene com a recursão direta.
 
@@ -121,8 +122,8 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
   ```bend
   b = {Box{[0 : U32*4n]} : Box<Array<U32>>}  # ❌ "expected: Data, observed: Type"
   ```
-  Um campo de registro **`Type`** aceita, sim (veja a Armadilha 3c): `type Individual<-G: Type> is Type` guarda um `Array`. O que não existe é `Array` dentro de `Data`
-* **Genéricos sobre o elemento precisam ser template.** Com `-G: Data` (apagado) o verificador aceita, mas o backend nativo recusa com **"an open Array element type"**: ele precisa do tipo concreto. Use `~G: Data`, que especializa em tempo de compilação. **Revalidado no 2.0.22** (o changelog mexeu no layout da célula, #893, mas isto não mudou): `def first(-T: Data, a: Array<T>) -> Array<T> & T: Array.get(T, a, 0)` dá `All terms check.` no `--check-only` e morre com `an open Array element type` no `-o`. É o exemplo mínimo de por que o passo 3 do checklist (compilar para nativo) não é opcional.
+  Um campo de registro **`Type`** aceita, sim (veja a Armadilha 3c): `type Individual<-G: Type> is Type` guarda um `Array`. O que não existe é `Array` dentro de `Data`.
+* **Genéricos sobre o elemento precisam ser template.** Com `-G: Data` (apagado) o verificador aceita, mas o backend nativo recusa com **"an open Array element type"**: ele precisa do tipo concreto. Use `~G: Data`, que especializa em tempo de compilação. **Revalidado no 2.0.26** (o changelog mexeu no layout da célula no 2.0.22, #893, e nas intrínsecas de array no 2.0.25, #955, mas isto não mudou): `def first(-T: Data, a: Array<T>) -> Array<T> & T: Array.get(T, a, 0)` dá `All terms check.` no `--check-only` e morre com `an open Array element type` no `-o`. É o exemplo mínimo de por que o passo 3 do checklist (compilar para nativo) não é opcional.
 * **Ler um `Array` num laço:** `Array.get` devolve o par `(array, valor)`, e desestruturar o retorno de uma chamada é um `match` proibido; o auxiliar óbvio cairia em recursão mútua. A saída é fazer do par o **estado do laço** e desestruturá-lo como parâmetro, dentro de cada caso:
   ```bend
   def read(k: Nat, r: Array<U32> & U32, +acc: U32, +s: U32) -> U32:
@@ -153,6 +154,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
   | `reduce` antigo em árvore, com `with` por nó | **65 ns** | `match` + closure por elemento |
 
 * **Regra:** percorra sempre por ÍNDICE; nunca com `match` na estrutura. Um `match` estrutural é 20× a 160× mais caro.
+* **`Array.map` da Base segue a regra desde o 2.0.23:** lê cada célula e escreve num array novo, em vez de dividir e remontar a árvore (16M `U32` em 15 ms contra 176 ms, segundo o changelog). O preço é que os elementos agora têm de ser `Data`; um map sobre elemento `Type` continua escrito à mão.
 * **`with`/closure por elemento é veneno:** a mesma travessia custa 1,5 ns por elemento com auxiliar nomeado e **38 ns** com um `with` por elemento (25×). Use `with` só na borda (abrir o `Array.size` no começo, montar o IO no fim) — veja `utils/tuples.bend`.
 * **`U32.shln(1, k)` com `k >= 32` devolve 0, não dá a volta.** Medido: `shln(1,32) = 0` e `shln(1,33) = 0`. Uma máscara de bits usada como conjunto (o truque óbvio para "esta chave já apareceu") portanto **falha em silêncio** assim que o alfabeto passa de 32: toda chave alta responde "ausente" e o algoritmo produz duplicatas sem erro nenhum. Para conjuntos de chaves sem teto, use uma faixa de rascunho do próprio `Array` (uma posição por chave) — é o que `genetic/operators.bend` faz no OX1, ao custo de um `Array.get` (0,55 ns) por consulta.
 * **`[v : T*n]` é CONTAGEM, `[v : T^d]` é PROFUNDIDADE.** A contagem tem de ser potência de 2 ou o compilador responde `a power of two count (^d takes a depth)`. `[0 : U32*8n]` e `[0 : U32^3n]` são o mesmo array de 8 slots; `[0 : U32*20n]` não compila (20 não é potência de 2) — o que se queria ali era `[0 : U32^20n]`, com 2^20 slots.
@@ -208,8 +210,10 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 A solução geralmente está em usar Bool.pick ou criar funções auxiliares que retornam o atributo desejado.
 
 
-### 🔴 Armadilha 5b: chamada local dentro de anotação vira `Tipo.nome` (só quando o módulo é importado)
-> **Conceito:** desde o 2.0.17 o operador pega o tipo da anotação `( .. : T)` em volta dele. O efeito colateral é que um nome LOCAL chamado dentro dessa anotação pode ser resolvido no namespace do tipo.
+### 🟢 Armadilha 5b (corrigida): chamada local dentro de anotação vira `Tipo.nome` (só quando o módulo é importado)
+> **Não reproduz no 2.0.26.** A sonda abaixo (um `unit` local dentro de `(p * unit(seed) : F32)`, importado tanto por `./m.bend` quanto por `./../m.bend`) checa e roda. O changelog do 2.0.22 (#903: "an operator is the name whose only dot leads it") e o do 2.0.23 (#915) mexeram exatamente nisso. A forma de contornar abaixo continua válida e não custa nada; o código do repositório pode ficar como está.
+
+> **Conceito (histórico):** desde o 2.0.17 o operador pega o tipo da anotação `( .. : T)` em volta dele. O efeito colateral era que um nome LOCAL chamado dentro dessa anotação podia ser resolvido no namespace do tipo.
 
 * **O erro:**
   ```bend
@@ -248,6 +252,11 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
   n = {1n : Nat}   # ✔️ CORRETO: funciona para Nat também
   ```
   Anotação com chaves `{valor : Tipo}` é a sintaxe exata reconhecida pelo verificador bidirecional para binders. Alternativamente, em posições de argumento ou dentro de funções nulárias tipadas (`def one() -> U32: 1`), o tipo é inferido normalmente.
+* **Let tipado (desde o 2.0.22):** `x : T = v` é açúcar para `x = {v : T}`, e aceita `+`. É a forma mais legível, dentro e fora de `do`:
+  ```bend
+  +x : U32 = 1        # ✔️ verificado no nativo (2.0.26)
+  ```
+  Um let com padrão não leva tipo: `(a, b) : T = v` não existe; desestruture no corpo.
 
 * **Marcadores `+` diretos nos padrões de `match`:**
   Em desestruturações de `match`, você pode colocar o quantificador `+` diretamente nos binders do padrão, tornando-os reutilizáveis imediatamente e dispensando o antigo padrão de re-ligação local (`+var = var`):
@@ -270,7 +279,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 ### 🔴 Armadilha 7: Restrições dos Parâmetros Template `~`
 > **Conceito:** Um parâmetro `~f` é substituído em tempo de compilação, o que dá abstração de custo zero — mas o preço é que ele não é um valor de primeira classe.
 
-* **Templates vêm ANTES de tudo na assinatura.** Se um `-A: Data` (ou qualquer outro parâmetro) aparecer antes, passar o template numa chamada recursiva falha com `expected: a term, observed: '~'`:
+* **Templates vêm ANTES de tudo na assinatura.** No 2.0.26 a própria declaração é recusada com `expected: a plain binder (only leading binders take ~)` (antes falhava só na chamada recursiva, com `expected: a term, observed: '~'`):
   ```bend
   def cross.go(-A: Data, ~pred: U32 -> Bool, ...)   # ❌ quebra na chamada recursiva
   def cross.go(~pred: U32 -> Bool, -A: Data, ...)   # ✔️
@@ -282,6 +291,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
   def outer(~h: U32 -> U32, x: U32) -> U32: ap(~twice(~h), x)   # ✔️ capturando um template externo
   ```
   Isso permite compor operadores (ex.: um `mutation_combine` que monta uma mutação a partir de outras) sem duplicar código.
+* **Dois binders `~` com o mesmo nome são recusados** (2.0.23): `expected: a fresh ~ binder name`.
 * **Uma instância que chama de volta uma instância em verificação é recusada** (2.0.21): `loop(~k, u) = bounce(~loop(~k), u)` com `bounce(~f, u) = f(u)` é lido como auto-chamada que não decresce. Se precisar desse formato, quebre a recursão num parâmetro comum (não template).
 * **O template exige a assinatura exata, inclusive quantidades.** Uma função com `+` nos parâmetros não serve para um template declarado sem `+`:
   ```bend
@@ -289,6 +299,10 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
   # ~fit: U32 -> U32   ❌ expected @_:U32 -> U32, observed @+x:U32 -> U32
   def fit(g: U32) -> U32: bit_count(g)   # ✔️ envolva antes de passar
   ```
+* **Callback com estado = template + acumulador.** Uma closure não serve para ser chamada várias vezes (Armadilha 1), e um template não captura nada. O estado vai num parâmetro a mais, que a callback recebe e devolve: `~f: S -> Vec2 -> Dir -> Dir -> S`. Três detalhes fazem funcionar (veja `exemplos/hilbert_callback.bend`):
+  - declare `~S: Type` (não `Data`): assim o acumulador pode ser um `Array`, por exemplo uma tela com uma célula por posição;
+  - guarde o acumulador **no mesmo registro** que o resto do estado do laço (`type Tart<-S: Type> is Type: Tart{pos, dir, chegada, acc: S}`), para que cada passo receba e devolva um valor só; com um par `Estado & S` seria preciso desestruturar o retorno de uma chamada (proibido);
+  - a callback de topo usa parâmetros sem `+`, exatamente como o tipo do template; quem precisa de `+` é um auxiliar que ela chama.
 
 ---
 
@@ -296,7 +310,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 > **Conceito:** `match a b:` escrutina vários valores de uma vez, mas é rígido.
 
 * **O coringa é um `_` por escrutinado:** `case _ _:` (dois escrutinados), `case Nil{} _ _:` etc. Um único nome para todos (`case outro:`) é rejeitado com `expected: N patterns (one per scrutinee)` — versões anteriores deste guia concluíram errado, a partir dessa forma, que não havia coringa. Use-o para cortar os casos degenerados de um `match` múltiplo.
-* **Dentro de um `match` múltiplo, desestruturar um parâmetro que NÃO é escrutinado falha só no nativo.** `match k flag:` com `(a, v) = r` num caso passa no verificador (e no `--checkup`), mas `-o` recusa com "a match on a parameter or field (this name is a def or a consumed binder)". Nem pôr o par como escrutinado funciona. A saída: `match` simples no argumento que encolhe, desestruture o par, e só então um `match` aninhado sobre as flags (com `(a, +v) = r` se o valor for usado mais de uma vez):
+* **(Corrigido) Desestruturar, dentro de um `match` múltiplo, um parâmetro que NÃO é escrutinado.** Até o 2.0.22, `match k flag:` com `(a, v) = r` num caso passava no verificador mas o `-o` recusava com "a match on a parameter or field (this name is a def or a consumed binder)". **No 2.0.26 compila e roda no nativo.** O formato antigo de contornar (`match` simples no argumento que encolhe, desestruturar o par e só então um `match` aninhado sobre as flags) continua válido e é o que o motor usa:
   ```bend
   match k:
     case 0n: ...
@@ -337,8 +351,8 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 ### 🔴 Armadilha 10: Ordem dos Parâmetros e dos Bindings
 * **Não há referência para a frente: uma def só enxerga o que já foi definido ACIMA dela no arquivo.** Chamar um auxiliar declarado mais abaixo dá `expected: a defined name, observed: <nome>`. Some isso à falta de recursão mútua (Armadilha 5) e a ordem do arquivo passa a ser parte do projeto: auxiliar primeiro, laço depois.
 * **O tipo de um template não pode citar um tipo declarado depois dele.** `def f(~key: G -> U32, -G: Data, ...)` passa no verificador mas falha no nativo com "expected: a defined name, observed: G". Declare o tipo primeiro, como template: `def f(~G: Data, ~key: G -> U32, ...)`.
-* **Dois nomes que só diferem em maiúsculas COLIDEM no backend nativo.** `def CHECK()` e `def check()` no mesmo arquivo passam no `--check-only` e o `-o` morre com `two names mangle to FID_CHECK`. Vale para qualquer par que normalize igual — mais um caso em que checar não basta.
-* **`match` depois de um `let` é rejeitado** ("this name is a def or a consumed binder"). Faça o `match` primeiro e os `let`s dentro de cada caso — inclusive `(a, v) = par`, que também é um `match`.
+* **(Corrigido no 2.0.26) Dois nomes que só diferem em maiúsculas colidiam no backend nativo.** `def CHECK()` e `def check()` no mesmo arquivo faziam o `-o` morrer com `two names mangle to FID_CHECK`; no 2.0.26 compila e cada um devolve o seu valor.
+* **`match` depois de um `let` é rejeitado** ("this name is a def or a consumed binder"; reverificado no 2.0.26). Faça o `match` primeiro e os `let`s dentro de cada caso — inclusive `(a, v) = par`, que também é um `match`.
 * **`+x = x` dentro de um caso de `match` funciona** (verificado no 2.0.16). O que falha é um `let` seguido de um `match` ou de uma desestruturação `(a, v) = par` no mesmo bloco; nesse caso use o `+` direto no padrão: `case Con{+h, t}:`.
 * **`IO.args` é `List<&1, String>`, afim:** só pode ser percorrida uma vez e não aceita `+`. Converta de uma vez para uma lista `Data` (`utils/io.bend`: `numbers` + `num_at`).
 
