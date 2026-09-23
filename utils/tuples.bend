@@ -74,6 +74,16 @@ def with4(-A: Type, -B: Type, -C: Type, -D: Type, -E: Type, p: ((A & B) & C) & D
   (a, b) = ab
   k(a, b, c, d)
 
+# Com template ~ a função f não permite capturar variáveis do escopo externo, funciona mais otimizado pois o compilador consegue fazer inline?
+def inline_with(~A: Type, ~B: Type, ~C: Type, ~f: A -> B -> C, ab: A & B) -> C:
+    (a, b) = ab
+    f(a, b)
+
+def inline_with3(~A: Type, ~B: Type, ~C: Type, ~D: Type, ~f: A -> B -> C -> D, abc: (A & B) & C) -> D:
+    (ab, c) = abc
+    (a, b) = ab
+    f(a, b, c)
+
 # ----------------------------------------------------------------
 # PROJETAR (o `.0` e o `.1` do Rust)
 # ----------------------------------------------------------------
@@ -109,3 +119,58 @@ def map_snd(~A: Type, ~B: Type, ~C: Type, ~f: B -> C, p: A & B) -> A & C:
 def map(~A: Type, ~B: Type, ~C: Type, ~f: A -> B -> C, p: A & B) -> C:
   (a, b) = p
   f(a, b)
+
+### Monads
+# The `do` notation works for any monad, not just IO.
+
+# ```python
+# import Base
+
+# def add_strs(a: String, b: String) -> Maybe<&2, U32>:
+#   do Maybe<&2, U32>:
+#     x : U32 <- U32.read(a) # a None here ends the block with None
+#     y : U32 <- U32.read(b)
+#     return (x + y : U32)
+
+# def main() -> Maybe<&2, U32>:
+#   add_strs("40", "2")
+# ```
+
+# A `do M<xs.., R>:` block desugars each `x : A <- v` into `M.bind(xs.., A, R, v,
+# x => ..)` and each `return e` into `M.pure(xs.., R, e)`, so any type with those
+# two defs works: `IO`, `Maybe`, `Result`, or your own. The leading arguments
+# (here, the `&2` quantity) are passed along to both.
+
+# Tuple State Monad
+# A ideia é encadear várias operações sobre um mesmo valor S que a cada etapa retorna S & A, e precisamos ler o A
+type State<-S: Type, -A: Type> is Type:
+  State{run: S -> S & A}
+
+def State.run(-S: Type, -B: Type, st: State<S, B>, s: S) -> S & B:
+  State{run} = st
+  run(s)
+
+# do State<S, A>:
+# ...
+# return A   # encerra com State<S, A>
+def State.pure(-S: Type, -A: Type, x: A) -> State<S, A>:
+  State{s => (s, x)}
+
+def State.bind.step(-S: Type, -A: Type, -B: Type, pair: S & A, f: A -> State<S, B>) -> S & B:
+  (s1, a) = pair
+  State.run(S, B, f(a), s1)
+
+def State.bind(
+  -S: Type, -A: Type, -B: Type,
+  run_m: S -> S & A,
+  f: A -> State<S, B>
+) -> State<S, B>:
+  State{s => State.bind.step(S, A, B, run_m(s), f)}
+
+# Recebe um estado que foi construído e um valor inicial, para então executar todas as etapas e por fim devolver o resultado
+def run_state(-S: Type, -A: Type, st: State<S, A>, s: S) -> S & A:
+  State{run} = st
+  run(s)
+
+def run_state_consume(-S: Type, -A: Type, st: State<S, A>, s: S) -> A:
+  snd(S, A, run_state(S, A, st, s))

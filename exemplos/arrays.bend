@@ -1,4 +1,5 @@
 import Base
+import ./../utils/tuples.bend as T
 import ./../utils/arrays.bend as Arr
 import ./../utils/io.bend as IOUtils
 # Arrays em Bend 2
@@ -26,25 +27,26 @@ import ./../utils/io.bend as IOUtils
 #
 
 def demo_basico(quantos: U32) -> IO(Unit):
-  #a = [0 : U32*8n]
-  arr = Array.new(U32, U32.to_nat(quantos), 0)
-  # Chama callback para cada elemento retornando novo valor
-  #arr = Arr.for_each(~U32, ~Unit, ~(x => ctx => i => 
-  #  (i * i : U32)
-  #), arr, Unit{})
+  T.run_state_consume(Array<U32>, IO(Unit),
+    (do T.State<Array<U32>, IO(Unit)>:
+      size : U32  <- arr => Array.size(U32, arr)
 
-  arr_hole = Arr.for_each_hole(~U32, ~Unit, ~(x => ctx => i => 
-    (i * i : U32)
-  ), (arr, 0), Unit{})
+      _: Unit     <- arr => (Arr.for_each(~U32, ~U32, ~(value => size => i => 
+        (size - i : U32)
+      ), arr, size), Unit{})
 
-  Arr.with(U32, U32, IO(Unit), arr_hole, arr => hole =>
-  Arr.with(U32, U32, IO(Unit), Array.size(U32, arr), arr => +n =>
-  do IO<Unit>:
-    u : Unit <- IO.print("== básico ==")
-    # u : Unit <- IO.print(Arr.show(~U32, ~U32.show, arr))
-    # u : Unit <- IO.print("a[5]   = " ++ U32.show(v))
-    IO.print("len    = " ++ U32.show(n))
-  ))
+      sum : U32   <- arr => Arr.reduce(~U32, ~U32, ~(value => acc => i => 
+        (acc + value : U32)
+      ), arr, 0)
+
+      arr_str : String <- arr => Arr.reduce(~U32, ~String, ~(value => acc => i =>
+        acc ++ " " ++ U32.show(value)
+      ), arr, "Array:")
+      
+      return IO.print(arr_str ++ ", sum: " ++ U32.show(sum))
+    ), 
+    Array.new(U32, U32.to_nat(quantos), 0)
+  )
 
 def sum_array(value: U32, arr: Array<U32> & U32) -> Array<U32> & U32:
   (arr, sum) = arr
@@ -66,8 +68,11 @@ def demo_arrays(quantos: U32) -> IO(Unit):
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    u: Unit <- IO.print("== início ==")
     args : List<String> <- IO.args()
-    
-    u : Unit <- demo_basico(IOUtils.arg_u32(args, 10))
-    #u : Unit <- demo_arrays(IOUtils.arg_u32(args, 10))
+    +numbers : List<&2, Maybe<&2, U32>> = IOUtils.numbers(args)
+    +quantos : U32 = IOUtils.num_at(numbers, 0n, 5)
+
+    u: Unit <- demo_basico(quantos)
+    #u : Unit <- demo_arrays(quantos)
     IO.print("== fim ==")
