@@ -33,9 +33,11 @@ def em_ordem(a: U32, b: U32) -> Bool:
 # for maior que os dois vizinhos (as pontas não contam).
 def picos(xs: List<&2, U32>) -> List<&2, U32>:
   match xs:
+    # Caso de três elementos, o do meio vai ser comparado com os vizinhos
     case a <> +b <> +c <> t:
       +resto = picos(b <> c <> t)
       Bool.pick(List<&2, U32>, (b > a : U32) && (b > c : U32), b <> resto, resto)
+    # Caso default, para listas com menos de 3 elementos, não há picos
     case _:
       Nil{}
 
