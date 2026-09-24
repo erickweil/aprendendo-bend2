@@ -18,6 +18,9 @@ import ./math.bend as M
 #   ler_bytes(caminho)                -> IO(Array<U32> & U32)   (bytes, quantidade)
 #   gravar_bytes(caminho, bytes, n)   -> IO(Unit)
 #
+# e inteiros little-endian dentro dos bytes: `byte`, `u16`, `u32` (ler de
+# uma lista) e `set_u16`, `set_u32` (gravar num array).
+#
 # Um byte é um `U32` de 0 a 255, como na Base. O array lido tem 2^k slots
 # (a menor potência de 2 que cabe o arquivo); a quantidade real vem ao lado.
 #
@@ -69,7 +72,9 @@ def ler_texto.leu(r: File & String) -> IO(String):
 
 def ler_texto.tamanho(r: File & U32) -> IO(String):
   (f, n) = r
-  IO.bind(File & String, String, tentar(String, File.read(f, n)), ler_texto.leu)
+  do IO<String>:
+    lido : File & String <- tentar(String, File.read(f, n))
+    ler_texto.leu(lido)
 
 def ler_texto(caminho: String) -> IO(String):
   do IO<String>:
@@ -110,6 +115,31 @@ def array_para_lista(arr: Array<U32>, +ini: U32, +n: U32) -> Array<U32> & List<&
   array_para_lista.go(U32.to_nat((n - 1 : U32)), Array.get(U32, arr, fim), fim, Nil{})
 
 # ----------------------------------------------------------------
+# INTEIROS EM BYTES (little-endian, como em BMP e na maioria dos formatos)
+# ----------------------------------------------------------------
+# Para ler, um cabeçalho curto vira uma lista `Data` (`array_para_lista`) e é
+# consultado com `List.get`: evita encadear dezenas de pares (array, valor).
+# Para gravar, escreve direto no array.
+
+# O byte n da lista (0 se faltar)
+def byte(+bs: List<&2, U32>, n: Nat) -> U32:
+  Maybe.default(&2, U32, List.get(&2, U32, bs, n), 0)
+
+def u16(+bs: List<&2, U32>, +n: Nat) -> U32:
+  U32.or(byte(bs, n), U32.shln(byte(bs, 1n+n), 8n))
+
+def u32(+bs: List<&2, U32>, +n: Nat) -> U32:
+  U32.or(u16(bs, n), U32.shln(u16(bs, 2n+n), 16n))
+
+def set_u16(a: Array<U32>, +i: U32, +v: U32) -> Array<U32>:
+  a = Array.set(U32, a, i, U32.and(v, 255))
+  Array.set(U32, a, (i + 1 : U32), U32.and(U32.shrn(v, 8n), 255))
+
+def set_u32(a: Array<U32>, +i: U32, +v: U32) -> Array<U32>:
+  a = set_u16(a, i, U32.and(v, 65535))
+  set_u16(a, (i + 2 : U32), U32.shrn(v, 16n))
+
+# ----------------------------------------------------------------
 # BYTES: LEITURA
 # ----------------------------------------------------------------
 
@@ -135,9 +165,9 @@ def ler_blocos.go(k: Nat, lido: File & List<&2, U32>, arr: Array<U32>, +bloco: U
       (f, xs) = lido
       +prox = (pos + bloco : U32)
       arr = copia(xs, arr, pos)
-      IO.bind(File & List<&2, U32>, Array<U32>,
-        tentar(List<&2, U32>, File.read_at(f, prox, bloco)),
-        l => ler_blocos.go(p, l, arr, bloco, prox))
+      do IO<Array<U32>>:
+        l : File & List<&2, U32> <- tentar(List<&2, U32>, File.read_at(f, prox, bloco))
+        ler_blocos.go(p, l, arr, bloco, prox)
 
 # Arquivo vazio: `k` abaixo daria a volta (0 - 1), então é tratado à parte.
 def ler_blocos.vazio(f: File) -> IO(Array<U32> & U32):
@@ -148,11 +178,10 @@ def ler_blocos.vazio(f: File) -> IO(Array<U32> & U32):
 def ler_blocos.cheio(f: File, +n: U32, +bloco: U32) -> IO(Array<U32> & U32):
   # blocos = ceil(n / bloco), no mínimo 1; `k` é quantos faltam depois do primeiro
   +k = U32.to_nat(((n + bloco - 1 : U32) / bloco - 1 : U32))
-  IO.bind(File & List<&2, U32>, Array<U32> & U32,
-    tentar(List<&2, U32>, File.read_at(f, 0, bloco)),
-    l => IO.bind(Array<U32>, Array<U32> & U32,
-      ler_blocos.go(k, l, [0 : U32^M.log2_ceil(n)], bloco, 0),
-      arr => IO.pure(Array<U32> & U32, (arr, n))))
+  do IO<Array<U32> & U32>:
+    l : File & List<&2, U32> <- tentar(List<&2, U32>, File.read_at(f, 0, bloco))
+    arr : Array<U32> <- ler_blocos.go(k, l, [0 : U32^M.log2_ceil(n)], bloco, 0)
+    return (arr, n)
 
 def ler_blocos.tamanho(r: File & U32, +bloco: U32) -> IO(Array<U32> & U32):
   (f, +n) = r
@@ -189,16 +218,18 @@ def gravar_blocos.go(k: Nat, fu: File & Unit, r: Array<U32> & List<&2, U32>, +bl
       (f, u) = fu
       (arr, xs) = r
       +prox = (pos + bloco : U32)
-      IO.bind(File & Unit, Unit, tentar(Unit, File.write_bytes(f, xs)), fu2 =>
-        gravar_blocos.go(p, fu2, array_para_lista(arr, prox, U32.min(bloco, (n - prox : U32))), bloco, prox, n))
+      do IO<Unit>:
+        fu2 : File & Unit <- tentar(Unit, File.write_bytes(f, xs))
+        gravar_blocos.go(p, fu2, array_para_lista(arr, prox, U32.min(bloco, (n - prox : U32))), bloco, prox, n)
 
 def par_file(f: File) -> File & Unit:
   (f, Unit{})
 
 def gravar_blocos.cheio(caminho: String, arr: Array<U32>, +n: U32, +bloco: U32) -> IO(Unit):
   +k = U32.to_nat(((n + bloco - 1 : U32) / bloco - 1 : U32))
-  IO.bind(File, Unit, abrir(caminho, "w"), f =>
-    gravar_blocos.go(k, par_file(f), array_para_lista(arr, 0, U32.min(bloco, n)), bloco, 0, n))
+  do IO<Unit>:
+    f : File <- abrir(caminho, "w")
+    gravar_blocos.go(k, par_file(f), array_para_lista(arr, 0, U32.min(bloco, n)), bloco, 0, n)
 
 def gravar_blocos(caminho: String, arr: Array<U32>, +n: U32, +bloco: U32) -> IO(Unit):
   match n:

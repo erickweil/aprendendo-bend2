@@ -8,8 +8,8 @@ import Base
 #
 # Propriedades de Engenharia & Segurança:
 # 1. Zero recursão mútua proibida (evita erros do verificador estático do Bend 2).
-# 2. Tokenizador linear em def único autônomo com modos rasos (TokMode).
-#    ATENÇÃO: marcado @unsafe — sua terminação NÃO é verificada pelo compilador.
+# 2. Tokenizador linear com modos rasos (TokMode), com terminação verificada
+#    pelo compilador (recursão estrutural na string, sem `@unsafe`).
 # 3. Autômato com pilha guiado por fuel indutivo estrutural (fuel: Nat).
 #    O fuel garante terminação de `parse_pda` (e só dele), impossibilitando
 #    loop infinito ou consumo descontrolado de memória (OOM) na fase de parsing.
@@ -52,71 +52,89 @@ type Token is Data:
   TokBool{val: Bool}
   TokNull{}
 
+# O tokenizador lê um caractere por vez, num modo: fora de token, dentro de
+# uma string, dentro de um número, ou pulando o resto de `true`/`false`/`null`.
+# Cada caractere EMITE zero, um ou dois tokens e decide o PRÓXIMO modo, em dois
+# auxiliares não recursivos; a recursão fica só em `tokenize`, que sempre anda
+# um caractere. Assim o verificador de terminação aceita o laço sem `@unsafe`.
 type TokMode is Data:
   TokDefault{}
   TokInStr{acc: String}
   TokInNum{acc: U32}
+  TokSkip{k: U32}
 
-@unsafe def tokenize(mode: TokMode, s: String) -> List<&2, Token>:
+def digito(+c: U32) -> Bool:
+  U32.is_ge(c, 48) && U32.is_le(c, 57)
+
+# Tokens que o caractere `c` fecha no modo padrão
+def emite.padrao(+c: U32) -> List<&2, Token>:
+  match c:
+    case 123: [TokLBrace{}]
+    case 125: [TokRBrace{}]
+    case 91: [TokLBracket{}]
+    case 93: [TokRBracket{}]
+    case 58: [TokColon{}]
+    case 44: [TokComma{}]
+    case 116: [TokBool{True{}}]
+    case 102: [TokBool{False{}}]
+    case 110: [TokNull{}]
+    case _: []
+
+# Próximo modo depois do caractere `c` no modo padrão
+def proximo.padrao(+c: U32) -> TokMode:
+  match c:
+    case 34: TokInStr{""}
+    case 116: TokSkip{3}                # rue
+    case 102: TokSkip{4}                # alse
+    case 110: TokSkip{3}                # ull
+    case _: Bool.pick(TokMode, digito(c), TokInNum{(c - 48 : U32)}, TokDefault{})
+
+def emite.num(fim: Bool, +acc: U32, +c: U32) -> List<&2, Token>:
+  match fim:
+    case False{}: []
+    case True{}: TokNum{acc} <> emite.padrao(c)
+
+def emite(mode: TokMode, +c: U32) -> List<&2, Token>:
   match mode:
-    case TokDefault{}:
-      match s:
-        case SNil{}:
-          Nil{}
-        case SCon{Chr{c}, t}:
-          match c:
-            case 32: tokenize(TokDefault{}, t)
-            case 9:  tokenize(TokDefault{}, t)
-            case 10: tokenize(TokDefault{}, t)
-            case 13: tokenize(TokDefault{}, t)
-            case 123: TokLBrace{} <> tokenize(TokDefault{}, t)
-            case 125: TokRBrace{} <> tokenize(TokDefault{}, t)
-            case 91:  TokLBracket{} <> tokenize(TokDefault{}, t)
-            case 93:  TokRBracket{} <> tokenize(TokDefault{}, t)
-            case 58:  TokColon{} <> tokenize(TokDefault{}, t)
-            case 44:  TokComma{} <> tokenize(TokDefault{}, t)
-            case 34:  tokenize(TokInStr{""}, t)
-            case 48:  tokenize(TokInNum{0}, t)
-            case 49:  tokenize(TokInNum{1}, t)
-            case 50:  tokenize(TokInNum{2}, t)
-            case 51:  tokenize(TokInNum{3}, t)
-            case 52:  tokenize(TokInNum{4}, t)
-            case 53:  tokenize(TokInNum{5}, t)
-            case 54:  tokenize(TokInNum{6}, t)
-            case 55:  tokenize(TokInNum{7}, t)
-            case 56:  tokenize(TokInNum{8}, t)
-            case 57:  tokenize(TokInNum{9}, t)
-            case 116: TokBool{True{}} <> tokenize(TokDefault{}, String.drop(t, 3n))
-            case 102: TokBool{False{}} <> tokenize(TokDefault{}, String.drop(t, 4n))
-            case 110: TokNull{} <> tokenize(TokDefault{}, String.drop(t, 3n))
-            case _:   tokenize(TokDefault{}, t)
+    case TokDefault{}: emite.padrao(c)
+    case TokInStr{acc}:
+      match c:
+        case 34: [TokStr{String.reverse(acc)}]
+        case _: []
+    case TokInNum{acc}: emite.num(Bool.not(digito(c)), acc, c)
+    case TokSkip{k}: []
 
-    case TokInStr{+acc}:
-      match s:
-        case SNil{}:
-          TokStr{String.reverse(acc)} <> Nil{}
-        case SCon{Chr{c}, t}:
-          match c:
-            case 34: TokStr{String.reverse(acc)} <> tokenize(TokDefault{}, t)
-            case _:  tokenize(TokInStr{SCon{Chr{c}, acc}}, t)
+def proximo.num(fim: Bool, +acc: U32, +c: U32) -> TokMode:
+  match fim:
+    case False{}: TokInNum{(acc * 10 + c - 48 : U32)}
+    case True{}: proximo.padrao(c)
 
-    case TokInNum{+acc}:
-      match s:
-        case SNil{}:
-          TokNum{acc} <> Nil{}
-        case SCon{Chr{c}, t}:
-          match c:
-            case 48: tokenize(TokInNum{(acc * 10 + 0 : U32)}, t)
-            case 49: tokenize(TokInNum{(acc * 10 + 1 : U32)}, t)
-            case 50: tokenize(TokInNum{(acc * 10 + 2 : U32)}, t)
-            case 51: tokenize(TokInNum{(acc * 10 + 3 : U32)}, t)
-            case 52: tokenize(TokInNum{(acc * 10 + 4 : U32)}, t)
-            case 53: tokenize(TokInNum{(acc * 10 + 5 : U32)}, t)
-            case 54: tokenize(TokInNum{(acc * 10 + 6 : U32)}, t)
-            case 55: tokenize(TokInNum{(acc * 10 + 7 : U32)}, t)
-            case 56: tokenize(TokInNum{(acc * 10 + 8 : U32)}, t)
-            case 57: tokenize(TokInNum{(acc * 10 + 9 : U32)}, t)
-            case _:  TokNum{acc} <> tokenize(TokDefault{}, SCon{Chr{c}, t})
+def proximo(mode: TokMode, +c: U32) -> TokMode:
+  match mode:
+    case TokDefault{}: proximo.padrao(c)
+    case TokInStr{acc}:
+      match c:
+        case 34: TokDefault{}
+        case _: TokInStr{SCon{Chr{c}, acc}}
+    case TokInNum{acc}: proximo.num(Bool.not(digito(c)), acc, c)
+    case TokSkip{k}:
+      match k:
+        case 1: TokDefault{}
+        case _: TokSkip{(k - 1 : U32)}
+
+# O que sobra aberto quando a entrada acaba
+def fecha(mode: TokMode) -> List<&2, Token>:
+  match mode:
+    case TokInStr{acc}: [TokStr{String.reverse(acc)}]
+    case TokInNum{acc}: [TokNum{acc}]
+    case _: []
+
+def tokenize(s: String, +mode: TokMode) -> List<&2, Token>:
+  match s:
+    case SNil{}:
+      fecha(mode)
+    case SCon{Chr{+c}, t}:
+      List.append(&2, Token, emite(mode, c), tokenize(t, proximo(mode, c)))
 
 # ------------------------------------------------------------------------------
 # 3. PARSER: AUTÔMATO COM PILHA SOBRE TOKENS (TOKEN PDA)
@@ -212,7 +230,7 @@ def parse_pda(fuel: Nat, in_reduce: Bool, toks: List<&2, Token>, stack: TokStack
                 case _: PFail{"Unexpected token in reduce"}
 
 def parse_json(s: String) -> ParseRes:
-  +toks = tokenize(TokDefault{}, s)
+  +toks = tokenize(s, TokDefault{})
   +fuel = Nat.add(List.length(&2, Token, toks), 10n)
   parse_pda(fuel, False{}, toks, TStackNil{}, JNull{})
 

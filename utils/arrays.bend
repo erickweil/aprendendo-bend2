@@ -1,21 +1,30 @@
 import Base
 import ./tuples.bend as T
 
-# Como lidar com um resultado `Array<A> & B`
-# -----------------------------------
-# O jeito óbvio NÃO compila:
+# ================================================================
+# PERCURSOS DE ARRAY (arrays.bend)
+# ================================================================
+# Um `Array<T>` tem um dono só: toda leitura devolve o array junto com o
+# valor, num par `Array<T> & R`. E só se desestrutura um PARÂMETRO:
 #
-#   (a, n) = Array.size(U32, a)   # a match cannot scrutinize a computed value
-# 1. Uma função que recebe o par como parâmetro e o desestrutura:
-#      def mostra_tamanho(r: Array<U32> & U32) -> String:
-#        (a, n) = r
-#        U32.show(n)
+#   (a, n) = Array.size(U32, a)   # ❌ a match cannot scrutinize a computed value
 #
-# por isso temos aqui o `with`, que desestrutura o par e entrega as duas metades a uma lambda.
-# with(U32, U32, String, Array.size(U32, a), a => n => U32.show(n))
-def with(-A: Type, -B: Type, -C: Type, p: Array<A> & B, k: Array<A> -> B -> C) -> C:
-  (a, b) = p
-  k(a, b)
+# Por isso todo laço aqui recebe o par da leitura anterior como parâmetro
+# (`r: Array<T> & T`) e o abre dentro do caso — é o jeito sem custo.
+#
+# Regra de desempenho (AGENTS.md, Armadilha 3c): percorra por ÍNDICE
+# (`Array.get`/`Array.set`/`Array.swap`), nunca com `match ALeaf/ANode`, e
+# nunca com uma closure por elemento. No nativo, n = 2^20:
+#
+#   reduce, fold_rot            0,4 ns por elemento
+#   for_each_rot                0,58 ns
+#   for_each (get + set)        0,78 ns
+#   for_each_hole               1,30 ns
+#   zip_with                    1,5 ns
+#   reduce_consume (árvore)     18,8 ns
+#
+# Na Base também há `Array.map` (elemento `Data`, devolve um array novo) e
+# `Array.to_list`.
 
 def for_each.go(~T: Data, ~C: Data, ~f: T -> @+a: C -> U32 -> T, k: Nat, arr: Array<T> & T, +ctx: C, +i: U32) -> Array<T>:
   match k:
@@ -28,22 +37,26 @@ def for_each.go(~T: Data, ~C: Data, ~f: T -> @+a: C -> U32 -> T, k: Nat, arr: Ar
       +i_next = (i + 1 : U32)
       for_each.go(~T, ~C, ~f, p, Array.get(T, arr, i_next), ctx, i_next)
 
-def for_each(~T: Data, ~C: Data, ~f: T -> @+a: C -> U32 -> T, a: Array<T>, ctx: C) -> Array<T>:
-  with(T, U32, Array<T>, Array.size(T, a), a => n => 
-    for_each.go(~T, ~C, ~f, U32.to_nat((n - 1 : U32)), Array.get(T, a, 0), ctx, 0)
-  )
+def for_each.start(~T: Data, ~C: Data, ~f: T -> @+a: C -> U32 -> T, r: Array<T> & U32, +ctx: C) -> Array<T>:
+  (a, n) = r
+  for_each.go(~T, ~C, ~f, U32.to_nat((n - 1 : U32)), Array.get(T, a, 0), ctx, 0)
+
+# `for (i, x) in a.iter_mut().enumerate() { *x = f(*x, ctx, i) }`
+def for_each(~T: Data, ~C: Data, ~f: T -> @+a: C -> U32 -> T, a: Array<T>, +ctx: C) -> Array<T>:
+  for_each.start(~T, ~C, ~f, Array.size(T, a), ctx)
 
 def from_fn.go(~T: Type, ~f: U32 -> T, d: Nat, +start: U32, +size: U32) -> Array<T>:
   match d:
     case 0n:
       ALeaf{f(start)}
-    case 1n+p:
-      +p = p
+    case 1n+ +p:
       +h = U32.shr(size)
       l r = from_fn.go(~T, ~f, p, start, h) from_fn.go(~T, ~f, p, (start + h : U32), h)
       ANode{l, r}
 
-# Equivalente ao for_each mas a ideia é criar um array já com a função (paralelo)
+# Cria um array de 2^d posições com `f(i)` em cada uma, montando as duas
+# metades em paralelo (`l r = ..`). Serve para elemento `Type` também, que
+# `Array.new` (só `Data`) não constrói.
 def from_fn(~T: Type, ~f: U32 -> T, +d: Nat) -> Array<T>:
   from_fn.go(~T, ~f, d, 0, U32.shln(1, d))
 
@@ -53,7 +66,6 @@ def zip_with.go(~A: Data, ~B: Data, ~f: A -> B -> U32 -> A, k: Nat, a: Array<A> 
       (arr_a, value_a) = a
       (arr_b, value_b) = b
       Array.set(A, arr_a, i, f(value_a, value_b, i))
-      arr_a
     case 1n+p:
       (arr_a, value_a) = a
       (arr_b, value_b) = b
@@ -61,17 +73,25 @@ def zip_with.go(~A: Data, ~B: Data, ~f: A -> B -> U32 -> A, k: Nat, a: Array<A> 
       +i_next = (i + 1 : U32)
       zip_with.go(~A, ~B, ~f, p, Array.get(A, arr_a, i_next), Array.get(B, arr_b, i_next), i_next)
 
-# `a.iter().zip(b).map(|(x, y)| f(x, y))`
-# Consome dois arrays do mesmo tamanho e retorna o primeiro, chamando a função f para cada par de elementos.
-# Se um for menor, irá atravessar o menor e ignorar o resto do maior.
+def zip_with.start(~A: Data, ~B: Data, ~f: A -> B -> U32 -> A, ra: Array<A> & U32, rb: Array<B> & U32) -> Array<A>:
+  (a, +na) = ra
+  (b, +nb) = rb
+  zip_with.go(~A, ~B, ~f, U32.to_nat((U32.min(na, nb) - 1 : U32)), Array.get(A, a, 0), Array.get(B, b, 0), 0)
+
+# `a.iter().zip(b).map(|(x, y)| f(x, y))`: escreve `f(a[i], b[i], i)` em `a`
+# e o devolve (`b` é descartado). Se um for menor, para no fim do menor.
 def zip_with(~A: Data, ~B: Data, ~f: A -> B -> U32 -> A, a: Array<A>, b: Array<B>) -> Array<A>:
-  with(A, U32, Array<A>, Array.size(A, a), a => +size_a =>
-  with(B, U32, Array<A>, Array.size(B, b), b => +size_b =>
-    size_min = Bool.pick(U32, (size_a < size_b : U32), size_a, size_b)
-    zip_with.go(~A, ~B, ~f, U32.to_nat((size_min - 1 : U32)), Array.get(A, a, 0), Array.get(B, b, 0), 0)
-  ))
+  zip_with.start(~A, ~B, ~f, Array.size(A, a), Array.size(B, b))
 
 # ---------------- elemento Data ----------------
+
+def modify.put(~T: Data, ~f: T -> T, r: Array<T> & T, +i: U32) -> Array<T>:
+  (arr, v) = r
+  Array.set(T, arr, i, f(v))
+
+# `a[i] = f(a[i])`: lê e reescreve uma posição (um contador, um histograma)
+def modify(~T: Data, ~f: T -> T, arr: Array<T>, +i: U32) -> Array<T>:
+  modify.put(~T, ~f, Array.get(T, arr, i), i)
 
 def swap_at.put(~T: Data, r: Array<T> & T, +i: U32) -> Array<T>:
   (arr, value_j) = r
@@ -110,7 +130,9 @@ def swap_at_hole(~T: Type, arr: Array<T> & T, +i: U32, +j: U32) -> Array<T> & T:
   (arr, hole) = arr
   swap_at_hole.if(~T, U32.is_eq(i, j), arr, hole, i, j)
 
-# Consome o array chamando a função f para cada elemento (Aparentemente não fica lento, e pode ser T: Type)
+# Consome o array, em ordem, chamando `f` em cada elemento. Serve para elemento
+# `Type`, mas desce a árvore com `match`: ~19 ns por elemento, contra 0,4 do
+# `reduce` (que só aceita `Data`). Para elemento `Type` prefira `fold_rot`.
 def reduce_consume(~A: Type, ~S: Type, ~f: @x: A -> @a: S -> S, arr: Array<A>, acc: S) -> S:
   match arr:
     case ALeaf{x}:
@@ -133,11 +155,14 @@ def reduce.go(~A: Data, ~S: Type, ~f: @+x: A -> @a: S -> U32 -> S, k: Nat, arr: 
       +k_next = (k_prev + 1 : U32)
       reduce.go(~A, ~S, ~f, p, Array.get(A, arr, k_next), k_next, acc)
 
-# Versão do reduce que utiliza apenas operações rápidas e sem desconstruir o array
+def reduce.start(~A: Data, ~S: Type, ~f: @+x: A -> @a: S -> U32 -> S, r: Array<A> & U32, acc: S) -> Array<A> & S:
+  (arr, n) = r
+  reduce.go(~A, ~S, ~f, U32.to_nat((n - 1 : U32)), Array.get(A, arr, 0), 0, acc)
+
+# `a.iter().enumerate().fold(acc, |acc, (i, x)| f(x, acc, i))`, devolvendo o
+# array junto. Só leituras por índice: não desmonta a árvore.
 def reduce(~A: Data, ~S: Type, ~f: @+x: A -> @a: S -> U32 -> S, arr: Array<A>, acc: S) -> Array<A> & S:
-  with(A, U32, Array<A> & S, Array.size(A, arr), arr => size => 
-    reduce.go(~A, ~S, ~f, U32.to_nat((size - 1 : U32)), Array.get(A, arr, 0), 0, acc)
-  )
+  reduce.start(~A, ~S, ~f, Array.size(A, arr), acc)
 
 # recebe (arr, buraco) e devolve (arr, elemento seguinte) — nada de closure
 def for_each_hole.next(~T: Type, r: Array<T> & T, +i_next: U32) -> Array<T> & T:
@@ -320,7 +345,8 @@ def swap_range_hole.go(~T: Type, k: Nat, st: (Array<T> & Array<T>) & T, +i: U32)
 def swap_range_hole(~T: Type, arr_a: Array<T>, arr_b: Array<T>, hole: T, +from: U32, +count: U32) -> (Array<T> & Array<T>) & T:
   swap_range_hole.go(~T, U32.to_nat(count), T.pair3(Array<T>, Array<T>, T, arr_a, arr_b, hole), from)
 
-# Tudo bem, se vai transformar em string é lento mesmo então pode ser usando match
+# Para depurar: "[a, b, c]". Desce a árvore com `match`, que é lento, mas
+# montar texto já é muito mais lento que isso.
 def show.go(~T: Type, ~fn: T -> String, arr: Array<T>) -> String:
   match arr:
     case ALeaf{x}:

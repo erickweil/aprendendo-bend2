@@ -146,20 +146,12 @@ def Dec.bit(d: Dec, +ctx: U32) -> Dec & U32:
   Dec{m, inp, cur, code, range} = d
   Dec.bit.p(Array.get(U32, m, ctx), inp, cur, code, range, ctx)
 
-def byte.ou_zero(m: Maybe<&2, U32>) -> U32:
-  match m:
-    case None{}: 0
-    case Some{v}: v
-
-def byte(+bs: List<&2, U32>, n: Nat) -> U32:
-  byte.ou_zero(List.get(&2, U32, bs, n))
-
 # O primeiro byte da saída é sempre 0 (o `cache` inicial); os 4 seguintes
 # enchem o `code`.
 def Dec.novo.cod(r: Array<U32> & List<&2, U32>, +ini: U32) -> Dec:
   (inp, +bs) = r
-  +code = U32.or(U32.or(U32.shln(byte(bs, 1n), 24n), U32.shln(byte(bs, 2n), 16n)),
-                 U32.or(U32.shln(byte(bs, 3n), 8n), byte(bs, 4n)))
+  +code = U32.or(U32.or(U32.shln(Arq.byte(bs, 1n), 24n), U32.shln(Arq.byte(bs, 2n), 16n)),
+                 U32.or(U32.shln(Arq.byte(bs, 3n), 8n), Arq.byte(bs, 4n)))
   Dec{[1024 : U32^11n], inp, (ini + 5 : U32), code, 4294967295}
 
 def Dec.novo(inp: Array<U32>, +ini: U32) -> Dec:

@@ -84,6 +84,14 @@ def range_except(+seed: U32, +n: U32, +except: U32) -> U32:
 def bool(+seed: U32) -> Bool:
   U32.is_even(U32.shrn(mix(seed), 16n))
 
+# `n` números uniformes em [0, max), a partir da semente
+def list(n: Nat, +seed: U32, +max: U32) -> List<&2, U32>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+p:
+      Con{range(seed, max), list(p, step(seed), max)}
+
 # ----------------------------------------------------------------
 # PROBABILIDADE COMO LIMIAR SOBRE 2^32
 # ----------------------------------------------------------------

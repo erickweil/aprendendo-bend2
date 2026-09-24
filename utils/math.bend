@@ -1,9 +1,11 @@
 import Base
 
-# Limita um valor F32 entre [min_val, max_val]
-def clamp(+val: F32, +min_val: F32, +max_val: F32) -> F32:
-  +val_lo = Bool.pick(F32, F32.is_lt(val, min_val), min_val, val)
-  Bool.pick(F32, F32.is_gt(val_lo, max_val), max_val, val_lo)
+# ================================================================
+# MATEMÁTICA (math.bend)
+# ================================================================
+# O que falta na Base. (A Base já tem `U32.min/max/clamp/pow/log2`,
+# `F32.min/max/clamp/lerp/hypot/round` e as funções de `F32` como
+# `F32.sqrt`, `F32.sin`, `F32.abs`: veja `bend base F32`.)
 
 # Função de ativação Softsign / Fast Tanh: x / (1.0 + |x|)
 # Mapeia (-inf, +inf) para (-1.0, 1.0) de forma contínua e sem overflow

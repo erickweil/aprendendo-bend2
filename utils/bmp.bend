@@ -47,22 +47,7 @@ def azul(+c: U32) -> U32: U32.and(c, 255)
 # CABEÇALHO
 # ----------------------------------------------------------------
 
-# O cabeçalho tem 54 bytes e é lido uma vez: uma lista `Data` e `List.get`
-# bastam, e evitam encadear dezenas de pares `(array, valor)`.
-def byte.ou_zero(m: Maybe<&2, U32>) -> U32:
-  match m:
-    case None{}: 0
-    case Some{v}: v
-
-def byte(+h: List<&2, U32>, n: Nat) -> U32:
-  byte.ou_zero(List.get(&2, U32, h, n))
-
-def u16(+h: List<&2, U32>, +n: Nat) -> U32:
-  U32.or(byte(h, n), U32.shln(byte(h, 1n+n), 8n))
-
-def u32(+h: List<&2, U32>, +n: Nat) -> U32:
-  U32.or(u16(h, n), U32.shln(u16(h, 2n+n), 16n))
-
+# O cabeçalho (54 bytes) vira uma lista e é lido com `Arq.u16`/`Arq.u32`
 # A altura vem com sinal: negativa quer dizer linhas de cima para baixo
 def eh_negativo(+v: U32) -> Bool:
   U32.is_ge(v, 2147483648)
@@ -73,18 +58,18 @@ def modulo(+v: U32, negativo: Bool) -> U32:
     case False{}: v
 
 def formato(+h: List<&2, U32>) -> Formato:
-  +w = u32(h, 18n)
-  +hr = u32(h, 22n)
-  +bpp = u16(h, 28n)
+  +w = Arq.u32(h, 18n)
+  +hr = Arq.u32(h, 22n)
+  +bpp = Arq.u16(h, 28n)
   # (largura * bytes por pixel), arredondado para cima até múltiplo de 4
   +passo = U32.and((w * U32.shrn(bpp, 3n) + 3 : U32), 4294967292)
-  Formato{w, modulo(hr, eh_negativo(hr)), u32(h, 10n), passo, bpp, eh_negativo(hr)}
+  Formato{w, modulo(hr, eh_negativo(hr)), Arq.u32(h, 10n), passo, bpp, eh_negativo(hr)}
 
 def suportado(+h: List<&2, U32>) -> Bool:
-  +bpp = u16(h, 28n)
-  U32.is_eq(byte(h, 0n), 66) && U32.is_eq(byte(h, 1n), 77) &&
+  +bpp = Arq.u16(h, 28n)
+  U32.is_eq(Arq.byte(h, 0n), 66) && U32.is_eq(Arq.byte(h, 1n), 77) &&
     (U32.is_eq(bpp, 24) || U32.is_eq(bpp, 32)) &&
-    U32.is_eq(u32(h, 30n), 0)
+    U32.is_eq(Arq.u32(h, 30n), 0)
 
 # ----------------------------------------------------------------
 # LEITURA
@@ -161,27 +146,19 @@ def ler(caminho: String) -> IO(Imagem):
 # ESCRITA
 # ----------------------------------------------------------------
 
-def set_u16(a: Array<U32>, +i: U32, +v: U32) -> Array<U32>:
-  a = Array.set(U32, a, i, U32.and(v, 255))
-  Array.set(U32, a, (i + 1 : U32), U32.and(U32.shrn(v, 8n), 255))
-
-def set_u32(a: Array<U32>, +i: U32, +v: U32) -> Array<U32>:
-  a = set_u16(a, i, U32.and(v, 65535))
-  set_u16(a, (i + 2 : U32), U32.shrn(v, 16n))
-
 def cabecalho(a: Array<U32>, +w: U32, +h: U32, +passo: U32, +total: U32) -> Array<U32>:
   a = Array.set(U32, a, 0, 66)            # 'B'
   a = Array.set(U32, a, 1, 77)            # 'M'
-  a = set_u32(a, 2, total)                # tamanho do arquivo
-  a = set_u32(a, 10, 54)                  # início dos pixels
-  a = set_u32(a, 14, 40)                  # tamanho do BITMAPINFOHEADER
-  a = set_u32(a, 18, w)
-  a = set_u32(a, 22, h)                   # positiva: de baixo para cima
-  a = set_u16(a, 26, 1)                   # planos
-  a = set_u16(a, 28, 24)                  # bits por pixel
-  a = set_u32(a, 34, (passo * h : U32))   # tamanho dos pixels
-  a = set_u32(a, 38, 2835)                # 72 dpi, em pixels por metro
-  set_u32(a, 42, 2835)
+  a = Arq.set_u32(a, 2, total)                # tamanho do arquivo
+  a = Arq.set_u32(a, 10, 54)                  # início dos pixels
+  a = Arq.set_u32(a, 14, 40)                  # tamanho do BITMAPINFOHEADER
+  a = Arq.set_u32(a, 18, w)
+  a = Arq.set_u32(a, 22, h)                   # positiva: de baixo para cima
+  a = Arq.set_u16(a, 26, 1)                   # planos
+  a = Arq.set_u16(a, 28, 24)                  # bits por pixel
+  a = Arq.set_u32(a, 34, (passo * h : U32))   # tamanho dos pixels
+  a = Arq.set_u32(a, 38, 2835)                # 72 dpi, em pixels por metro
+  Arq.set_u32(a, 42, 2835)
 
 def escreve_px(a: Array<U32>, +i: U32, +c: U32) -> Array<U32>:
   a = Array.set(U32, a, i, azul(c))
