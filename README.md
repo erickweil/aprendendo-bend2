@@ -51,10 +51,11 @@ bend exemplos/ola.bend -o bin/ola
 
 ## Verificando provas
 
-Se o arquivo possui law e provas pode verificar se estão válidas
+`bend arquivo.bend` sempre verifica o arquivo antes de rodar, inclusive as leis e provas
+(veja `exemplos/provas.bend`). Para só verificar, sem rodar:
 
 ```bash
-bend exemplos/ola.bend --checkup
+bend exemplos/provas.bend --check-only
 ```
 
 ## Inspecionando código
@@ -65,3 +66,46 @@ Gera o código nativo sem compilar ou executar
 bend exemplos/ola.bend -o app.c
 bend exemplos/ola.bend -o app.js
 ```
+
+## Exemplos
+
+Cada arquivo em `exemplos/` mostra um recurso da linguagem, do mais simples ao mais
+elaborado. Quase todos aceitam argumentos (tamanho, semente...) e os que medem desempenho
+imprimem o tempo; os números nos comentários foram medidos no binário nativo, variando
+`--threads`.
+
+```bash
+bend exemplos/primos.bend -o bin/primos
+./bin/primos 20000000 --threads 1
+./bin/primos 20000000 --threads 12
+```
+
+| Exemplo | O que mostra |
+|---|---|
+| `ola`, `io` | `main`, o bloco `do`, `IO.print`, `show`, `<-` e `=` dentro do `do` |
+| `bindings`, `tipos` | bindings afins e `+`, os tipos básicos e conversões, anotações |
+| `funcoes`, `condicoes` | defs, `match` (Nat, U32, String, Bool), `Bool.pick` e por que ele é estrito |
+| `repetindo`, `contando` | recursão, terminação com `Nat`, tail call, laço de IO |
+| `lambda` | closures (afins) vs templates `~` |
+| `listas`, `strings` | `List` e `String` com a Base: `foldl`, `filter`, `sort`, `split`, `join`... |
+| `genericos` | tipos genéricos, `-A` vs `~A`, `Kind(a)` |
+| `monad` | `do` com `Maybe`, `Result` e uma mônada própria (sorteios puros) |
+| `mapas` | `Map` e `Set` da Base (contagem de palavras) |
+| `provas` | `law`, provas por indução, reescrita com `%`, `?objetivo` |
+| `sort_insertion` | parar uma recursão no meio sem `Bool.pick` (padrão da condição como parâmetro) |
+| `arvore` | árvore de busca genérica, descer por um lado só, chamadas paralelas |
+| `expressoes` | calculadora RPN: tipos-soma, `match` em String, pilha com `List.foldl` |
+| `pow`, `fibonacci` | a chamada paralela `a b = f(x) g(y)`, `!` para GPU, escala com threads |
+| `primos`, `crivo` | paralelismo e equilíbrio de carga; o algoritmo certo contra o paralelismo |
+| `sort_merge` | merge sort paralelo: granularidade e localidade de memória |
+| `monte_carlo` | aleatoriedade pura com fluxos independentes por tarefa (`utils/random`) |
+| `histograma` | `Array.fork` + `Array.atomic.*` contra um array por tarefa |
+| `arrays`, `arquivos` | `Array` (leitura devolve o array junto), `utils/arrays`, arquivos em blocos |
+| `bmp`, `mandelbrot` | imagens BMP com `utils/bmp`; Mandelbrot paralelo gravado em BMP |
+| `hilbert`, `hilbert_detalhe` | percurso genérico com callback; um codec de imagem pela curva de Hilbert |
+| `json` | `utils/json`: ler, consultar e escrever JSON |
+| `concorrencia` | `IO.fork`/`IO.join`, `IO.sleep`, canais (produtor/consumidor) |
+| `servidor` | um servidor HTTP mínimo com TCP |
+| `janela` | `App.run` (janela animada) e `App.play` (o mesmo App testado sem janela) |
+
+O motor genético em `genetic/` é um projeto maior, com o próprio README.
