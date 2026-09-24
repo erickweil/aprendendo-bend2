@@ -1,159 +1,102 @@
 import Base
+import ./../utils/io.bend as IOU
 
-def List.pop(-A: Data, lista: List<&2, A>) -> Maybe<&2, A>:
-  match lista:
-    case Nil{}:
-      None{}
-    case Con{h, t}:
-      Some{h}
+# CALCULADORA EM NOTAÇÃO POLONESA REVERSA (RPN): "3 4 + 2 *" é (3 + 4) * 2.
+# Mostra tipos com vários construtores, `match` sobre String, uma pilha
+# feita com lista e a avaliação de uma árvore EM PARALELO.
 
-# map_or do Option do Rust
-def Maybe.map_or(-A: Data, -B: Data, maybe: Maybe<&2, A>, f: A -> B, default: B) -> B:
-  match maybe:
-    case None{}:
-      default
-    case Some{valor}:
-      f(valor)
-
-type Operador is Data:
+type Op is Data:
   Soma{}
-  Subtracao{}
-  Multiplicacao{}
-  Divisao{}
+  Sub{}
+  Mul{}
+  Div{}
 
-def Operador.show(+op: Operador) -> String:
-  match op:
-    case Soma{}:
-      "+"
-    case Subtracao{}:
-      "-"
-    case Multiplicacao{}:
-      "*"
-    case Divisao{}:
-      "/"
+type Token is Data:
+  Num{valor: U32}
+  Oper{op: Op}
 
-type ParsedToken is Data:
-  Numero{valor: U32}
-  Operador{op: Operador}
-
-def ParsedToken.is_operador(token: ParsedToken) -> Bool:
-  match token:
-    case Operador{op}:
-      True{}
-    case Numero{v}:
-      False{}
-
-type ArvoreExpr is Data:
+type Expr is Data:
   Valor{valor: U32}
-  Expr{op: Operador, esquerda: ArvoreExpr, direita: ArvoreExpr}
+  Bin{op: Op, esq: Expr, dir: Expr}
 
-def ArvoreExpr.show(+arvore: ArvoreExpr) -> String:
-  match arvore:
-    case Valor{valor}:
-      U32.show(valor)
-    case Expr{op, esquerda, direita}:
-      "(" ++ ArvoreExpr.show(esquerda) ++ Operador.show(op) ++ ArvoreExpr.show(direita) ++ ")"
-
-
-def ArvoreExpr.from_rpn.token(+token: ParsedToken, pilha: List<&2, ArvoreExpr>) -> List<&2, ArvoreExpr>:
-  match token:
-    case Numero{valor}:
-      Con{Valor{valor}, pilha}
-    case Operador{op}:
-      # LIFO, então a direita vem primeiro
-      match pilha:
-        case Con{dir, Con{esq, resto}}:
-          Con{Expr{op, esq, dir}, resto}
-        case outro:
-          outro
-
-def ArvoreExpr.from_rpn.go(parsed: List<&2, ParsedToken>, pilha: List<&2, ArvoreExpr>) -> List<&2, ArvoreExpr>:
-  match parsed:
-    case Nil{}:
-      pilha
-    case Con{token, rest}:
-      ArvoreExpr.from_rpn.go(rest, ArvoreExpr.from_rpn.token(token, pilha))
-
-def ArvoreExpr.from_rpn(parsed: List<&2, ParsedToken>) -> Maybe<&2, ArvoreExpr>:
-  List.pop(ArvoreExpr, ArvoreExpr.from_rpn.go(parsed, []))
-
-def parse.token(+token: String) -> Maybe<&2, ParsedToken>:
-  match token:
-    case SNil{}:
-      None{}
-    case "+":
-      Some{Operador{Soma{}}}
-    case "-":
-      Some{Operador{Subtracao{}}}
-    case "*":
-      Some{Operador{Multiplicacao{}}}
-    case "/":
-      Some{Operador{Divisao{}}}
-    case outro:
-      maybe_num = U32.read(outro)
-      Maybe.map_or(U32, Maybe<&2, ParsedToken>, maybe_num, 
-        valor => Some{Numero{valor}}, 
-        None{}
-      )
-
-def parse(+tokens: List<&2, String>) -> List<&2, ParsedToken>:
-  match tokens:
-    case Nil{}:
-      []
-    case Con{token, rest}:
-      +parsed_token = parse.token(token)
-      Maybe.map_or(ParsedToken, List<&2, ParsedToken>, parsed_token, 
-        t => Con{t, parse(rest)}, 
-        parse(rest)
-      )
-
-def avaliar.op(+op: Operador, +esquerda: U32, +direita: U32) -> U32:
+def Op.show(op: Op) -> String:
   match op:
-    case Soma{}:
-      (esquerda + direita : U32)
-    case Subtracao{}:
-      (esquerda - direita : U32)
-    case Multiplicacao{}:
-      (esquerda * direita : U32)
-    case Divisao{}:
-      (esquerda / direita : U32)
+    case Soma{}: "+"
+    case Sub{}: "-"
+    case Mul{}: "*"
+    case Div{}: "/"
 
-def avaliar(+arvore: ArvoreExpr) -> U32:
-  match arvore:
-    case Valor{valor}:
-      valor
-    case Expr{op, esquerda, direita}:
-      # Avaliação paralela
-      a b = avaliar(esquerda) avaliar(direita)
-      avaliar.op(op, a, b)
+def Expr.show(e: Expr) -> String:
+  match e:
+    case Valor{v}: U32.show(v)
+    case Bin{op, a, b}: "(" ++ Expr.show(a) ++ " " ++ Op.show(op) ++ " " ++ Expr.show(b) ++ ")"
 
-      # Avaliação sequencial
-      # +esquerda_valor = avaliar(esquerda)
-      # +direita_valor = avaliar(direita)
-      # avaliar.op(op, esquerda_valor, direita_valor)
+# --- 1. texto -> tokens ---
 
-# Expressão escrita em notação polonesa reversa (RPN)
-def expressao(args: List<String>) -> List<&2, String>:
-  match args:
-    case Nil{}:
-      []
-    case Con{+first, rest}:
-      Con{first, expressao(rest)}
+# Um `match` compara Strings inteiras com literais
+def token(s: String) -> Maybe<&2, Token>:
+  match s:
+    case "+": Some{Oper{Soma{}}}
+    case "-": Some{Oper{Sub{}}}
+    case "*": Some{Oper{Mul{}}}
+    case "/": Some{Oper{Div{}}}
+    case outro: Maybe.map(&2, U32, Token, (v => Num{v}), U32.read(outro))
 
-def run(args: List<String>) -> IO(Unit):
-  # Expressão escrita em notação polonesa reversa (RPN)
-  tokens = expressao(args)
-  parsed_tokens = parse(tokens)
+# Auxiliar não recursivo: põe o token na frente, se ele existir
+def poe(m: Maybe<&2, Token>, resto: List<&2, Token>) -> List<&2, Token>:
+  match m:
+    case None{}: resto
+    case Some{t}: t <> resto
 
-  +arvore = ArvoreExpr.from_rpn(parsed_tokens)
-  msg = Maybe.map_or(ArvoreExpr, String, arvore,
-    +a =>
-      ArvoreExpr.show(a) ++ "\n" ++ U32.show(avaliar(a))
-    ,
-    "Erro ao construir árvore"
-  )
+def tokens(palavras: List<&2, String>) -> List<&2, Token>:
+  match palavras:
+    case Nil{}: []
+    case p <> resto: poe(token(p), tokens(resto))
 
-  IO.print(msg)
+# --- 2. tokens -> árvore, com uma pilha ---
 
+# Um número entra na pilha; um operador tira dois e põe a combinação.
+# A assinatura `pilha -> token -> pilha` é a que `List.foldl` espera. Os
+# `match` seguem a ordem dos parâmetros (`pilha` antes de `t`), então os
+# dois são abertos juntos, num `match` múltiplo.
+def empilha(pilha: List<&2, Expr>, t: Token) -> List<&2, Expr>:
+  match pilha t:
+    case p Num{v}: Valor{v} <> p
+    case b <> a <> resto Oper{op}: Bin{op, a, b} <> resto
+    case p Oper{op}: p
+
+# --- 3. avaliar, em paralelo ---
+
+def aplica(op: Op, +a: U32, +b: U32) -> U32:
+  match op:
+    case Soma{}: (a + b : U32)
+    case Sub{}: (a - b : U32)
+    case Mul{}: (a * b : U32)
+    case Div{}: (a / b : U32)
+
+# Os dois lados de um nó são independentes: `a b = f(x) f(y)` os avalia ao
+# mesmo tempo (em expressões pequenas não compensa; é só para mostrar).
+def avaliar(e: Expr) -> U32:
+  match e:
+    case Valor{v}: v
+    case Bin{op, esq, dir}:
+      a b = avaliar(esq) avaliar(dir)
+      aplica(op, a, b)
+
+def resultado(pilha: List<&2, Expr>) -> String:
+  match pilha:
+    case [+e]: Expr.show(e) ++ " = " ++ U32.show(avaliar(e))
+    case _: "expressão inválida"
+
+def nao_vazia(s: String) -> Bool:
+  Bool.not(String.is_empty(s))
+
+# Uso: expressoes "3 4 + 2 *"      (ou cada token num argumento)
 def main() -> IO(Unit):
-  IO.bind(List<String>, Unit, IO.args(), run)
+  do IO<Unit>:
+    args : List<String> <- IO.args()
+    +ts : List<&2, String> = IOU.texts(args)
+    +texto : String = Bool.pick(String, List.is_empty(&2, String, ts), "3 4 + 10 2 - *", String.join(ts, " "))
+    palavras : List<&2, String> = List.filter(~String, ~nao_vazia, String.split(texto, ' '))
+    IO.print(texto)
+    IO.print(resultado(List.foldl(~&2, ~Token, ~List<&2, Expr>, ~empilha, tokens(palavras), [])))

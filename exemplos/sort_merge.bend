@@ -1,109 +1,94 @@
 import Base
+import ./../utils/io.bend as IOU
+import ./../utils/random.bend as R
+import ./../utils/math.bend as M
 
-def pick(-A: Type, c: Bool, a: A, b: A) -> A:
-  match c:
-    case True{}:
-      a
-    case False{}:
-      b
+# MERGE SORT PARALELO: divide a lista em duas metades, ordena as duas AO
+# MESMO TEMPO (`x y = f(a) g(b)`, a chamada paralela) e junta.
+#
+# Duas lições medidas no nativo (1 milhão de números, i5-1245U):
+#
+# 1. GRANULARIDADE. Dividir até sobrar um elemento cria um milhão de tarefas
+#    minúsculas. Aqui só os 5 níveis de cima são paralelos (32 tarefas), e
+#    cada folha ordena o seu pedaço com o `List.sort` da Base.
+#
+# 2. LOCALIDADE. Uma lista é uma cadeia de células espalhadas pelo heap, e
+#    percorrê-la fora da cache custa caro. Dividir ALTERNANDO os elementos
+#    ([a,c,e] e [b,d]) entrelaça as células das duas metades: numa medição
+#    isolada (gerar e ordenar), 2,4 s. Dividir em prefixo e sufixo mantém
+#    cada metade junta: 0,96 s, contra 1,5 s do `List.sort` sozinho.
+#
+# Este programa leva ~1,35 s com 1 thread e ~1,18 s com 2; mais threads não
+# ajudam: com listas encadeadas o limite passa a ser a memória, não a CPU.
+# Compare com `pow.bend`, que não toca na memória e escala 4,4×.
 
-def tamanho(lista: List<&2, U32>) -> U32:
-  match lista:
-    case Nil{}:
-      0
-    case Con{head, tail}:
-      (tamanho(tail) + 1 : U32)
+# Separa os k primeiros elementos: ([k primeiros], resto). A recursão devolve
+# um PAR, e quem o abre é um auxiliar não recursivo que o recebe como
+# parâmetro (só se desestrutura parâmetro, nunca o retorno de uma chamada).
+def partir.poe(h: U32, r: List<&2, U32> & List<&2, U32>) -> List<&2, U32> & List<&2, U32>:
+  (a, b) = r
+  (h <> a, b)
 
-type Metades is Data:
-  Metades{a: List<&2, U32>, b: List<&2, U32>}
+def partir(k: Nat, l: List<&2, U32>) -> List<&2, U32> & List<&2, U32>:
+  match k l:
+    case 0n resto: ([], resto)
+    case _ Nil{}: ([], [])
+    case 1n+p h <> t: partir.poe(h, partir(p, t))
 
-def metade.a(metades: Metades) -> List<&2, U32>:
-  Metades{a, b} = metades
-  a
+def em_ordem(a: U32, b: U32) -> Bool:
+  (a <= b : U32)
 
-def metade.b(metades: Metades) -> List<&2, U32>:
-  Metades{a, b} = metades
-  b
+# Junta duas listas ordenadas (`List.merge.go` da Base; `n` limita os passos)
+def juntar(+n: Nat, a: List<&2, U32>, b: List<&2, U32>) -> List<&2, U32>:
+  List.merge.go(~U32, ~em_ordem, n, (Nil{}, a, b))
 
-# Irá dividir uma lista em duas metades, onde a metade.a irá ficar com k elementos e a metade.b irá ficar com o restante da lista
-def dividir.go(k: Nat, lista: List<&2, U32>) -> Metades:
-  match k:
+# Recebe as duas metades já separadas (com os tamanhos), ordena cada uma e
+# junta. `prof` diz quantos níveis ainda dividem em paralelo.
+def ordenar(prof: Nat, metades: List<&2, U32> & List<&2, U32>, +na: U32, +nb: U32, +n: Nat) -> List<&2, U32>:
+  match prof:
     case 0n:
-      Metades{Nil{}, lista}
-    case 1n+p:
-      match lista:
-        case Nil{}:
-          Metades{Nil{}, Nil{}}
-        case Con{h, t}:
-          +resto = dividir.go(p, t)
-          Metades{Con{h, metade.a(resto)}, metade.b(resto)}
+      (a, b) = metades
+      x y = List.sort(~U32, ~em_ordem, a) List.sort(~U32, ~em_ordem, b)
+      juntar(n, x, y)
+    case 1n+ +p:
+      (a, b) = metades
+      +ha = (na / 2 : U32)
+      +hb = (nb / 2 : U32)
+      x y =
+        ordenar(p, partir(U32.to_nat(ha), a), ha, (na - ha : U32), n)
+        ordenar(p, partir(U32.to_nat(hb), b), hb, (nb - hb : U32), n)
+      juntar(n, x, y)
 
-# def dividir(+lista: List<&2, U32>) -> Metades:
-#   dividir.go(U32.to_nat((tamanho(lista) / 2 : U32)), lista)
+def merge_sort(+l: List<&2, U32>) -> List<&2, U32>:
+  +n = List.length(&2, U32, l)
+  +len = U32.from_nat(n)
+  +h = (len / 2 : U32)
+  ordenar(Nat.min(5n, M.log2_ceil(len)), partir(U32.to_nat(h), l), h, (len - h : U32), n)
 
-# Recebe duas metades em ordem e retorna-as unidas em ordem
-# n deve ser o tamanho da lista original, que é a soma do tamanho das duas metades
-def merge(n: Nat, +metades: Metades) -> List<&2, U32>:
-  match n:
-    # Chegou no final da lista, então não deveria haver mais elementos a serem unidos
-    case 0n:
-      Nil{}
-    case 1n+p:
-      match metades:
-        case Metades{Nil{}, Nil{}}:
-          Nil{}
-        case Metades{Nil{}, Con{h, t}}:
-          Con{h, t}
-        case Metades{Con{h, t}, Nil{}}:
-          Con{h, t}
-        case Metades{Con{ha, ta}, Con{hb, tb}}:
-          # resto agora está em ordem e ha > ta e hb > tb, mas não sabemos a relação entre ha e tb ou hb e ta
-          # ha, ta[3, 5, ...]   hb, tb[14, 16, ...]
-          # Pega o menor entre ha e hb e chama merge com o resto da lista que sobrou
-          +menor = pick(U32, (ha < hb : U32), ha, hb)
-          +resto = pick(Metades, (ha < hb : U32), Metades{ta, Con{hb, tb}}, Metades{Con{ha, ta}, tb})
-          Con{menor, merge(p, resto)}
+def ordenada(+l: List<&2, U32>) -> Bool:
+  match l:
+    case a <> +b <> t: (a <= b : U32) && ordenada(b <> t)
+    case _: True{}
 
-def merge_sort.go(+n: Nat, lista: List<&2, U32>, +len: U32) -> List<&2, U32>:
-  match n:
-    # Inalcançável
-    case 0n:
-      Nil{}
-    case 1n+p:
-      match lista:
-        case Nil{}:
-          Nil{}
-        case Con{h, Nil{}}:
-          Con{h, Nil{}}
-        case Con{h, Con{h2, t}}:
-          +len2 = (len / 2 : U32)
-          +metades = dividir.go(U32.to_nat(len2), Con{h, Con{h2, t}})
-          # Execução paralela das duas metades
-          a b = 
-            merge_sort.go(p, metade.a(metades), len2)
-            merge_sort.go(p, metade.b(metades), (len - len2 : U32))
+def mostrar(+l: List<&2, U32>) -> String:
+  Bool.pick(String, Nat.is_le(List.length(&2, U32, l), 20n),
+    List.show(~&2, ~U32, ~U32.show, l), "(lista grande: não mostrada)")
 
-          merge(U32.to_nat(len), Metades{a, b})
-
-def merge_sort(+lista: List<&2, U32>) -> List<&2, U32>:
-  +len = tamanho(lista)
-  merge_sort.go(U32.to_nat(len), lista, len)
-
-def mostrar(lista: List<&2, U32>) -> String:
-  match lista:
-    case Nil{}:
-      ""
-    case Con{h, t}:
-      U32.show(h) ++ ", " ++ mostrar(t)
-
-def valores() -> List<&2, U32>:
-  [5, 777, 8, 1, 4, 7, 2, 6, 9, 666, 3]
-
+# Uso: sort_merge [n=12] [semente=0: aleatória]
+#   bend sort_merge.bend -o ../bin/sort_merge
+#   ../bin/sort_merge 1000000 7 --threads 1     (compare com --threads 2, 4)
 def main() -> IO(Unit):
-  +lista = valores()
-  ordenada = merge_sort(lista)
-  IO.print(
-    "Lista original: " ++ mostrar(lista) ++ "\n" ++
-    "Lista em ordem: " ++ mostrar(ordenada) ++ "\n" ++
-    ""
-  )
+  do IO<Unit>:
+    args : List<String> <- IO.args()
+    +ns : List<&2, Maybe<&2, U32>> = IOU.numbers(args)
+    +n : U32 = IOU.num_at(ns, 0n, 12)
+    +s : U32 <- IOU.semente(IOU.num_at(ns, 1n, 0))
+    # duas cópias: uma para mostrar e uma só do merge_sort (uma lista `+`
+    # compartilhada pagaria contagem de referência a cada célula)
+    lista : List<&2, U32> = R.list(U32.to_nat(n), s, 1000000)
+    IO.print("original: " ++ mostrar(R.list(U32.to_nat(n), s, 1000000)))
+    t0 : Nat <- IO.now()
+    +ord : List<&2, U32> = merge_sort(lista)
+    IO.print("ordenada: " ++ mostrar(ord) ++ " (em ordem? " ++ Bool.show(ordenada(ord)) ++ ")")
+    dt : String <- IOU.tempo_desde(t0)
+    IO.print(U32.show(n) ++ " números em " ++ dt)

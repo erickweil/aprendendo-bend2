@@ -1,5 +1,5 @@
 import Base
-import ./../utils/io.bend as IOUtils
+import ./../utils/io.bend as IOU
 import ./../utils/math.bend as M
 import ./../utils/arquivos.bend as Arq
 import ./../utils/bmp.bend as Bmp
@@ -104,12 +104,6 @@ def satura(+v: U32) -> U32:
 # `grava` confere no fim.
 def capacidade(+np: U32) -> U32:
   (np * 4 + 1024 : U32)
-
-def u32_le(a: Array<U32>, +i: U32, +v: U32) -> Array<U32>:
-  a = Array.set(U32, a, i, U32.and(v, 255))
-  a = Array.set(U32, a, (i + 1 : U32), U32.and(U32.shrn(v, 8n), 255))
-  a = Array.set(U32, a, (i + 2 : U32), U32.and(U32.shrn(v, 16n), 255))
-  Array.set(U32, a, (i + 3 : U32), U32.shrn(v, 24n))
 
 # ----------------------------------------------------------------
 # PERCURSO: Hilbert (ordem 0) ou linha a linha (1), com a mesma callback
@@ -331,8 +325,8 @@ def cabecalho(a: Array<U32>, +ordem: U32, +salto: U32, +faixa: U32, +textura: U3
   a = Array.set(U32, a, 5, salto)
   a = Array.set(U32, a, 6, faixa)
   a = Array.set(U32, a, 7, textura)
-  a = u32_le(a, 8, w)
-  u32_le(a, 12, h)
+  a = Arq.set_u32(a, 8, w)
+  Arq.set_u32(a, 12, h)
 
 def codifica(img: Bmp.Imagem, +salto: U32, +faixa: U32, +textura: U32, +ordem: U32) -> (Array<U32> & U32) & U32:
   Bmp.Imagem{+w, +h, px} = img
@@ -526,9 +520,9 @@ def dco.fim(s: Dco, +raio: U32) -> Bmp.Imagem:
   Bmp.Imagem{w, h, filtro(raio, img, w, h)}
 
 def decodifica.imagem(inp: Array<U32>, +hd: List<&2, U32>, +raio: U32) -> Bmp.Imagem:
-  +w = Bmp.u32(hd, 8n)
-  +h = Bmp.u32(hd, 12n)
-  dco.fim(percorre(~Dco, ~dco, Bmp.byte(hd, 4n), w, h,
+  +w = Arq.u32(hd, 8n)
+  +h = Arq.u32(hd, 12n)
+  dco.fim(percorre(~Dco, ~dco, Arq.byte(hd, 4n), w, h,
     Dco{Cfg{w, h, 0, 0, 0}, [0 : U32^M.log2_ceil((w * h : U32))], A.Dec.novo(inp, Cab.tamanho()), 0, 0, 0, 0, 0}), raio)
 
 def decodifica.valida(ok: Bool, inp: Array<U32>, +hd: List<&2, U32>, +raio: U32) -> IO(Bmp.Imagem):
@@ -539,8 +533,8 @@ def decodifica.valida(ok: Bool, inp: Array<U32>, +hd: List<&2, U32>, +raio: U32)
 def decodifica.cab(r: Array<U32> & List<&2, U32>, +raio: U32) -> IO(Bmp.Imagem):
   (inp, +hd) = r
   decodifica.valida(
-    U32.is_eq(Bmp.byte(hd, 0n), 72) && U32.is_eq(Bmp.byte(hd, 1n), 73) &&
-      U32.is_eq(Bmp.byte(hd, 2n), 76) && U32.is_eq(Bmp.byte(hd, 3n), 52),
+    U32.is_eq(Arq.byte(hd, 0n), 72) && U32.is_eq(Arq.byte(hd, 1n), 73) &&
+      U32.is_eq(Arq.byte(hd, 2n), 76) && U32.is_eq(Arq.byte(hd, 3n), 52),
     inp, hd, raio)
 
 def decodifica(r: Array<U32> & U32, +raio: U32) -> IO(Bmp.Imagem):
@@ -591,19 +585,19 @@ def cmd.codifica(img: Bmp.Imagem, destino: String, +salto: U32, +faixa: U32, +te
   grava(codifica(Bmp.Imagem{w, h, px}, salto, faixa, textura, ordem), destino, w, h)
 
 def cmd.codifica_args(+ts: List<&2, String>) -> IO(Unit):
-  +saida = IOUtils.text_at(ts, 2n, "saida.hil4")
-  +salto = U32.min(IOUtils.text_num(IOUtils.text_at(ts, 3n, "24"), 24), 255)
-  +faixa = U32.min(IOUtils.text_num(IOUtils.text_at(ts, 4n, "48"), 48), 255)
-  +textura = U32.min(IOUtils.text_num(IOUtils.text_at(ts, 5n, "6"), 6), 255)
-  +ordem = IOUtils.text_num(IOUtils.text_at(ts, 6n, "0"), 0)
-  IO.bind(Bmp.Imagem, Unit, Bmp.ler(IOUtils.text_at(ts, 1n, "entrada.bmp")), img =>
-    cmd.codifica(img, saida, salto, faixa, textura, ordem))
+  do IO<Unit>:
+    img : Bmp.Imagem <- Bmp.ler(IOU.text_at(ts, 1n, "entrada.bmp"))
+    cmd.codifica(img, IOU.text_at(ts, 2n, "saida.hil4"),
+      U32.min(IOU.text_num_at(ts, 3n, 24), 255),     # salto
+      U32.min(IOU.text_num_at(ts, 4n, 48), 255),     # faixa
+      U32.min(IOU.text_num_at(ts, 5n, 6), 255),      # textura
+      IOU.text_num_at(ts, 6n, 0))                    # ordem
 
 def cmd.decodifica_args(+ts: List<&2, String>) -> IO(Unit):
-  +saida = IOUtils.text_at(ts, 2n, "saida.bmp")
-  +raio = U32.min(IOUtils.text_num(IOUtils.text_at(ts, 3n, "2"), 2), 16)
-  IO.bind(Array<U32> & U32, Unit, Arq.ler_bytes(IOUtils.text_at(ts, 1n, "entrada.hil4")), r =>
-    IO.bind(Bmp.Imagem, Unit, decodifica(r, raio), img => Bmp.gravar(saida, img)))
+  do IO<Unit>:
+    r : Array<U32> & U32 <- Arq.ler_bytes(IOU.text_at(ts, 1n, "entrada.hil4"))
+    img : Bmp.Imagem <- decodifica(r, U32.min(IOU.text_num_at(ts, 3n, 2), 16))
+    Bmp.gravar(IOU.text_at(ts, 2n, "saida.bmp"), img)
 
 def cmd(modo: String, +ts: List<&2, String>) -> IO(Unit):
   match modo:
@@ -617,5 +611,5 @@ def cmd(modo: String, +ts: List<&2, String>) -> IO(Unit):
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
-    +ts : List<&2, String> = IOUtils.texts(args)
-    cmd(IOUtils.text_at(ts, 0n, ""), ts)
+    +ts : List<&2, String> = IOU.texts(args)
+    cmd(IOU.text_at(ts, 0n, ""), ts)

@@ -1,33 +1,46 @@
-# Todo código deve importar Base
 import Base
+import ./../utils/io.bend as IOU
 
-# Função que retorna se o valor de um Nat é zero ou maior que zero
-# O match é uma forma de executar apenas um caminho do código, 
-# Só pode ser usado apenas com parâmetros ou valores extraídos deles, nunca valores computados ou chamada de função
+# Não existe `if`. Há três formas de decidir.
+
+# 1. `match` sobre um PARÂMETRO: só o caso escolhido é executado.
+#    Em Nat, `2n+p` casa com "2 ou mais" (e p é o que passa de 2).
 def descrever(v: Nat) -> String:
   match v:
-    case 0n:
-      "zero"
-    case 1n+p:
-      "maior que zero"
+    case 0n: "zero"
+    case 1n: "um"
+    case 2n+p: "mais que um"
 
-def run(args: List<String>) -> IO(Unit):
-  +valor_u32 = { 1 : U32 }
-  +valor_nat = U32.to_nat(valor_u32)
-  
-  # Com o número Nat, é possível criar uma função que usa o match diretamente
-  msg = descrever(valor_nat) ++ "\n"
+# `match` também compara literais de U32, Char e String; `_` pega o resto.
+def dia(d: U32) -> String:
+  match d:
+    case 0: "domingo"
+    case 6: "sábado"
+    case _: "dia útil"
 
-  # Mas também existe o Nat.cmp que permite comparar dois Nat e retorna um Cmp
-  # Usando então o Cmp.is_gt que retorna um Bool apenas caso seja GT{}
-  msg = msg ++ Bool.pick(String, Cmp.is_gt(Nat.cmp(valor_nat, 0n)), "Maior que Zero", "Zero") ++ "\n"
+# 2. `match` sobre um Bool CALCULADO. O `match` só olha parâmetros, então
+#    `match (x > 10 : U32):` não compila: calcule a condição e passe para
+#    um auxiliar, onde ela vira parâmetro.
+def tamanho.step(grande: Bool) -> String:
+  match grande:
+    case True{}: "grande"
+    case False{}: "pequeno"
 
-  # Com o número U32 não é útil usar match diretamente (é decomposto em 32 bits, não ajuda comparação)
-  # Aqui faz o teste lógica com o operador > e então usa pick para fazer match com o Bool
-  msg = msg ++ Bool.pick(String, (valor_u32 > 0 : U32), "Maior que Zero", "Zero")
+def tamanho(+x: U32) -> String:
+  tamanho.step((x > 10 : U32))
 
-  IO.print(msg)
+# 3. `Bool.pick(T, cond, se_sim, se_nao)`: uma expressão, mas ESTRITA — os
+#    dois lados são SEMPRE calculados. Ótimo para escolher entre valores
+#    prontos; nunca ponha uma recursão cara num dos lados (veja
+#    sort_insertion.bend e AGENTS.md, Armadilha 2).
+def paridade(+x: U32) -> String:
+  Bool.pick(String, U32.is_even(x), "par", "ímpar")
 
 def main() -> IO(Unit):
-  IO.bind(List<String>, Unit, IO.args(), run)
-
+  do IO<Unit>:
+    args : List<String> <- IO.args()
+    +x : U32 = IOU.num_at(IOU.numbers(args), 0n, 7)
+    IO.print(U32.show(x) ++ " é " ++ descrever(U32.to_nat(x)) ++ ", " ++ tamanho(x) ++ " e " ++ paridade(x))
+    IO.print("O dia " ++ U32.show(x) ++ " (mod 7) é " ++ dia((x % 7 : U32)))
+    # Operadores lógicos: &&, || e Bool.not
+    IO.print("Está entre 5 e 10? " ++ Bool.show((x >= 5 : U32) && (x <= 10 : U32)))

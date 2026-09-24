@@ -1,80 +1,61 @@
 import Base
-import ./../utils/io.bend as IOUtils
+import ./../utils/io.bend as IOU
 
-# Uma String é uma lista encadeada de caracteres apontando para os próximos da frente
-# type Char is Data:
-#   Chr{code: U32}
+# Uma String é uma lista encadeada de caracteres:
 #
-# type String is Data:
-#   SNil{}
-#   SCon{head: Char, tail: String}
+#   type Char is Data:
+#     Chr{code: U32}
 #
-# Veja o que é um 'ola'
-#          o              l              a
-# SCon{Chr{111}, SCon{Chr{108}, SCon{Chr{97}, SNil{}}}}
-# Portanto pode ser decomposto em primeiro caractere e resto
-# E verificar o tamanho é um processo de atravessar todos os nós da lista encadeada
+#   type String is Data:
+#     SNil{}
+#     SCon{head: Char, tail: String}
+#
+# "ola" é SCon{Chr{111}, SCon{Chr{108}, SCon{Chr{97}, SNil{}}}}: pode ser
+# aberta em primeiro caractere e resto, e medir o tamanho é percorrê-la.
+
+# Percorrendo à mão (a Base já tem `String.length`, que devolve um Nat)
 def tamanho(s: String) -> U32:
   match s:
-    case SNil{}:
-      0
-    case SCon{head, tail}:
-      (tamanho(tail) + 1 : U32)
+    case SNil{}: 0
+    case SCon{c, resto}: (1 + tamanho(resto) : U32)
 
-# Inverter uma string, extrai cada caractere e junta ao contrário
-def inverter(+s: String, acc: String) -> String:
+# Um `match` compara Char com literais ('a'); `_` pega o resto
+def vogal(c: Char) -> Bool:
+  match c:
+    case 'a': True{}
+    case 'e': True{}
+    case 'i': True{}
+    case 'o': True{}
+    case 'u': True{}
+    case _: False{}
+
+def vogais(s: String) -> U32:
   match s:
-    # Caso base, quando não há mais caracteres, retorna o acumulador
-    case SNil{}:
-      acc
-    # Caso recursivo, extrai o primeiro caractere e chama a função recursivamente com o resto
-    case SCon{head, tail}:
-      inverter(tail, SCon{head, acc})
+    case SNil{}: 0
+    case SCon{c, resto}: (Bool.to_u32(vogal(Char.to_lower(c))) + vogais(resto) : U32)
 
+def nao_vazia(s: String) -> Bool:
+  Bool.not(String.is_empty(s))
 
-# Char é Chr{code: U32}, então comparar caractere é comparar número
-def Char.eq(a: Char, b: Char) -> Bool:
-  match a b:
-    case Chr{x} Chr{y}:
-      U32.is_eq(x, y)
+def aspas(s: String) -> String:
+  "\"" ++ s ++ "\""
 
-def split.push(partes: List<String>, is_sep: Bool, c: Char) -> List<String>:
-  match partes is_sep:
-    # Primeiro push vai criar
-    case Nil{} False{}:
-      Con{SCon{c, SNil{}}, Nil{}}
-    # Adiciona o caractere à string
-    case Con{h, t} False{}:
-      Con{SCon{c, h}, t}
-    # Se é separador, cria uma nova string vazia
-    case partes True{}:
-      Con{SNil{}, partes}
+def mostrar(xs: List<&2, String>) -> String:
+  List.show(~&2, ~String, ~aspas, xs)
 
-# Recursivo primeiro, reconstrói na volta, para manter ordem
-def split(+s: String, +sep: Char) -> List<String>:
-  match s:
-    case SNil{}:
-      Con{SNil{}, Nil{}}
-    case SCon{c, t}:
-      split.push(split(t, sep), Char.eq(c, sep), c)
-
-def show_list(list: List<String>) -> String:
-  match list:
-    case Nil{}:
-      ""
-    case Con{h, Nil{}}:
-      h
-    case Con{h, t}:
-      h ++ ", " ++ show_list(t)
-
+# Uso: strings [texto...]   (as palavras são juntadas com espaço)
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
-    +txt : String = IOUtils.pop_or(&1, String, args, "Subi no Ônibus Arara em Roma")
-    splitted : List<String> = split(txt, Chr{32})
-    u : Unit <- IO.print("frase:     " ++ txt)
-    u : Unit <- IO.print("separada:  " ++ show_list(splitted))
-    u : Unit <- IO.print("invertida: " ++ inverter(txt, ""))
-    u : Unit <- IO.print("tamanho:   " ++ U32.show(tamanho(txt)))
-    
-    IO.print("")
+    +ts : List<&2, String> = IOU.texts(args)
+    +txt : String = Bool.pick(String, List.is_empty(&2, String, ts), "Subi no onibus em Marrocos", String.join(ts, " "))
+    +palavras : List<&2, String> = List.filter(~String, ~nao_vazia, String.split(txt, ' '))
+    IO.print("frase:      " ++ txt)
+    IO.print("tamanho:    " ++ U32.show(tamanho(txt)) ++ " (String.length: " ++ Nat.show(String.length(txt)) ++ ")")
+    IO.print("vogais:     " ++ U32.show(vogais(txt)))
+    IO.print("palavras:   " ++ mostrar(palavras))
+    IO.print("com |:      " ++ String.join(palavras, " | "))
+    IO.print("invertida:  " ++ String.reverse(txt))
+    IO.print("maiúsculas: " ++ String.to_upper(txt))
+    IO.print("tem \"em\"?   " ++ Bool.show(String.contains(txt, "em")))
+    IO.print("1ª letra:   " ++ Maybe.show(~&2, ~Char, ~Char.show, String.get(txt, 0n)))

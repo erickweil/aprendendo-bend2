@@ -1,11 +1,13 @@
 import Base
-import ./../utils/io.bend as IOUtils
+import ./../utils/io.bend as IOU
 import ./../utils/bmp.bend as Bmp
 
 # Lê uma BMP, aplica um efeito a cada pixel e grava o resultado.
 #
 #   bend bmp.bend -o ../bin/bmp
 #   ../bin/bmp entrada.bmp saida.bmp [efeito]
+#
+# (Sem uma BMP à mão? `../bin/mandelbrot 9 256 entrada.bmp` gera uma.)
 #
 # efeito: copia (padrão), negativo, cinza, sepia
 
@@ -39,8 +41,8 @@ def aplica(efeito: String, img: Bmp.Imagem) -> Bmp.Imagem:
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
-    +ts : List<&2, String> = IOUtils.texts(args)
-    +efeito : String = IOUtils.text_at(ts, 2n, "copia")
-    img : Bmp.Imagem <- Bmp.ler(IOUtils.text_at(ts, 0n, "entrada.bmp"))
-    Bmp.gravar(IOUtils.text_at(ts, 1n, "saida.bmp"), aplica(efeito, img))
+    +ts : List<&2, String> = IOU.texts(args)
+    +efeito : String = IOU.text_at(ts, 2n, "copia")
+    img : Bmp.Imagem <- Bmp.ler(IOU.text_at(ts, 0n, "entrada.bmp"))
+    Bmp.gravar(IOU.text_at(ts, 1n, "saida.bmp"), aplica(efeito, img))
     IO.print("efeito " ++ efeito ++ " aplicado")

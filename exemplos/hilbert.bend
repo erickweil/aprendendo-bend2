@@ -1,6 +1,17 @@
 import Base
-import ./../utils/io.bend as IOUtils
+import ./../utils/io.bend as IOU
 import ./../utils/math.bend as M
+
+# CURVA DE HILBERT, desenhada no terminal por uma "tartaruga" que segue o
+# L-system  A -> +BF-AFA-FB+   B -> -AF+BFB+FA-  (F anda, + e - viram).
+#
+# Mostra um percurso GENÉRICO com callback: `hilbert(~S, ~f, n, acc)` visita
+# cada posição da curva chamando `f(acc, posição, chegada, saída)`. O
+# acumulador `S` é um `Type`, então pode ser um Array (aqui, a tela de
+# caracteres). `hilbert_detalhe.bend` reusa o mesmo percurso para comprimir
+# imagens.
+#
+#   bend hilbert.bend -o ../bin/hilbert && ../bin/hilbert [profundidade=3]
 
 # -------------------------------------------------
 # Tipos, Direção e Posição 2D
@@ -12,7 +23,7 @@ type Dir is Data:
   Sul{}
   Oeste{}
 
-# -
+# vira à direita (-)
 def Dir.horario(dir: Dir) -> Dir:
   match dir:
     case Norte{}:
@@ -24,7 +35,7 @@ def Dir.horario(dir: Dir) -> Dir:
     case Oeste{}:
       Norte{}
 
-# +
+# vira à esquerda (+)
 def Dir.anti_horario(dir: Dir) -> Dir:
   match dir:
     case Norte{}:
@@ -36,23 +47,10 @@ def Dir.anti_horario(dir: Dir) -> Dir:
     case Oeste{}:
       Sul{}
 
-def Dir.is_eq(a: Dir, b: Dir) -> Bool:
-  match a, b:
-    case Norte{}, Norte{}:
-      True{}
-    case Leste{}, Leste{}:
-      True{}
-    case Sul{}, Sul{}:
-      True{}
-    case Oeste{}, Oeste{}:
-      True{}
-    case _ _:
-      False{}
-
 type Vec2 is Data:
   Vec2{x: U32, y: U32}
 
-# F
+# anda um passo (F)
 def Vec2.andar(vec: Vec2, dir: Dir) -> Vec2:
   Vec2{x, y} = vec
   match dir:
@@ -88,7 +86,8 @@ def frente(~S: Type, ~f: S -> Vec2 -> Dir -> Dir -> S, t: Tartaruga<S>) -> Tarta
   Tartaruga{+pos, +dir, chegada, acc} = t
   Tartaruga{Vec2.andar(pos, dir), dir, dir, f(acc, pos, chegada, dir)}
 
-# iter_a e iter_b se chamam mutuamente, mas no Bend2 não dá para fazer (sem usar @unsafe), então por isso um função só
+# As regras A e B se chamam mutuamente, e Bend não tem recursão mútua: vira
+# UMA função, com um parâmetro (`a_lado`) que diz qual regra aplicar.
 def iter(~S: Type, ~f: S -> Vec2 -> Dir -> Dir -> S, +n: Nat, a_lado: Bool, t: Tartaruga<S>) -> Tartaruga<S>:
   match n:
     case 0n:
@@ -161,78 +160,52 @@ def dir_to_char(last: Dir, dir: Dir) -> Char:
     
     case _ _:             '?'
 
-type CallbackData is Type:
-  CallbackData{grade: Array<Char>, grade_len: U32, largura: U32}
+# A tela: 2 caracteres por posição (o conector à esquerda e a curva), com
+# y = 0 embaixo. O conector da coluna 0 cai na última posição da linha de
+# cima (o índice dá a volta), e ali vai o '\n': a grade inteira já é o texto.
+type Tela is Type:
+  Tela{grade: Array<Char>, largura: U32}
 
-def callback.conector(x: U32, chegada: Dir, dir: Dir) -> Char:
+def conector(x: U32, chegada: Dir, dir: Dir) -> Char:
   match x:
-    # Se é a primeira coluna, deve ligar com \n (-1 dá a volta e coloca o \n no último índice)
     case 0: '\n'
     case _:
       match chegada dir:
-        # Se deve ligar com o conector da esquerda
         case Leste{} _: '─'
         case _ Oeste{}: '─'
-        # Se não deve ligar com o conector da esquerda
-        case _ _:       ' '
+        case _ _: ' '
 
-def callback(data: CallbackData, pos: Vec2, chegada: Dir, dir: Dir) -> CallbackData:
-  CallbackData{grade, grade_len, +largura} = data
+# A callback: recebe e devolve o acumulador. Um template exige a assinatura
+# exata (sem `+`), então os valores reusados são religados com `+x = x`.
+def desenha(t: Tela, pos: Vec2, chegada: Dir, dir: Dir) -> Tela:
+  Tela{grade, +largura} = t
   Vec2{+x, +y} = pos
   +chegada = chegada
   +dir = dir
+  +i = Vec2.index(Vec2{(x * 2 : U32), (largura - y - 1 : U32)}, (largura * 2 : U32))
+  grade = Array.set(Char, grade, (i - 1 : U32), conector(x, chegada, dir))
+  Tela{Array.set(Char, grade, i, dir_to_char(chegada, dir)), largura}
 
-  +index = Vec2.index(Vec2{(x * 2 : U32), (largura - y - 1 : U32)}, (largura * 2 : U32))
-  grade = Array.set(Char, grade, (index - 1 : U32), callback.conector(x, chegada, dir))
-  grade = Array.set(Char, grade, index, dir_to_char(chegada, dir))
-  
-  CallbackData{grade, grade_len, largura}
-
-def print_linhas.monta(n: Nat, r: Array<Char> & Char, +i: U32, acc: String) -> Array<Char> & String:
-  match n:
+# O texto da grade, lido do fim para o começo (assim cada caractere entra na
+# frente com SCon, sem inverter no final)
+def texto(k: Nat, r: Array<Char> & Char, +i: U32, acc: String) -> String:
+  match k:
     case 0n:
-      (grade, c) = r
-      (grade, SCon{c, acc})
+      (g, c) = r
+      SCon{c, acc}
     case 1n+p:
-      (grade, c) = r
-      +prev = (i - 1 : U32)
-      print_linhas.monta(p, Array.get(Char, grade, prev), prev, SCon{c, acc})
+      (g, c) = r
+      texto(p, Array.get(Char, g, (i - 1 : U32)), (i - 1 : U32), SCon{c, acc})
 
-def print_linhas(n: Nat, buffer: Array<Char> & String, +passo: U32, +fim: U32) -> IO(Unit):
-  match n:
-    case 0n:
-      (grade, s) = buffer
-      IO.write(s)
-    case 1n+p:
-      (grade, s) = buffer
-      +novo_fim = (fim + passo : U32)
-      do IO<Unit>:
-        u : Unit <- IO.write(s)
-        print_linhas(p, 
-          print_linhas.monta(U32.to_nat((passo - 1 : U32)), Array.get(Char, grade, novo_fim), novo_fim, SNil{}), 
-          passo, 
-          novo_fim
-        )
-
-def callback.print(data: CallbackData) -> IO(Unit):
-  CallbackData{grade, grade_len, +largura} = data
-  +passo = (largura * 2 : U32)
-  +fim = (passo - 1 : U32)
-  print_linhas(
-    U32.to_nat((largura - 1 : U32)), 
-    print_linhas.monta(U32.to_nat(fim), Array.get(Char, grade, fim), fim, SNil{}),
-    passo,
-    fim
-  )
+def Tela.show(t: Tela) -> String:
+  Tela{grade, +largura} = t
+  +fim = (2 * largura * largura - 1 : U32)
+  texto(U32.to_nat(fim), Array.get(Char, grade, fim), fim, "")
 
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
-    +profundidade : U32 = IOUtils.num_at(IOUtils.numbers(args), 0n, 3)
-    +largura : U32 = U32.shln(1, U32.to_nat(profundidade))
-    +grade_len : U32 = ((largura * 2 : U32) * largura : U32)
-    grade : Array<Char> = Array.new(Char, M.log2_ceil(grade_len), '!')
-
-    callback.print(
-      hilbert(~CallbackData, ~callback, U32.to_nat(profundidade), CallbackData{grade, grade_len, largura})
-    )
+    +prof : U32 = U32.min(IOU.num_at(IOU.numbers(args), 0n, 3), 12)
+    +largura : U32 = U32.shln(1, U32.to_nat(prof))
+    tela : Tela = Tela{Array.new(Char, M.log2_ceil((2 * largura * largura : U32)), ' '), largura}
+    IO.write(Tela.show(hilbert(~Tela, ~desenha, U32.to_nat(prof), tela)))

@@ -1,30 +1,29 @@
-# Todo código deve importar Base
 import Base
 
-# Função para retornar o valor inicial
-# U32 é um valor inteiro sem sinal com 32 bits.
-def valor_u32() -> U32:
-  20
-  
-# Já o Nat (Natural) é um tipo diferente de número,
-# Usado para contagens e outras situações que é necessário ter certeza que o programa irá parar eventualmente
-def valor_nat() -> Nat:
-  7n
-
+# Os tipos básicos da Base. Um literal precisa saber o próprio tipo: em
+# argumento ou retorno de função ele vem do contexto; num binding solto,
+# escreva o tipo com o let tipado `x : T = valor` (ou anote: `{20 : U32}`).
 def main() -> IO(Unit):
-  # Por padrão, é como se os valores fossem sem Clone e Copy do Rust, mas aqui a variável decide isso
-  # Se você quer poder reusar uma variável mais de uma vez, precisa marcar com +, ou irá dar erro 'consumed more than once'
-  +quanto = valor_u32()
+  +a : U32 = 20            # inteiro sem sinal, 32 bits; dá a volta: 0 - 1 = 4294967295
+  +n : Nat = 7n            # natural: é o que garante que um laço termina
+  +x : F32 = 1.5           # real de 32 bits
+  c : Char = 'B'           # um caractere (o código Unicode dentro de um U32)
+  s : String = "texto"     # uma lista encadeada de Char
+  b : Bool = True{}        # um tipo como outro qualquer: True{} ou False{}
 
-  # então em seguida podemos usar mais de uma vez a variável
-  # Redeclarar é como no Rust, estamos criando uma NOVA variável e vira shadow da anterior
-  quanto = (quanto + quanto + quanto : U32)
-  
-  # Fazer isso denovo daria erro pois a variável quanto anterior foi criada sem o +
-  # quanto = (quanto + quanto : U32);
-  
-  # Não é possível somar valores U32 com Nat, primeiro precisamos converter para Nat
-  # E aqui a variável quanto foi redeclarada com OUTRO TIPO, o tipo Nat
-  quanto = (U32.to_nat(quanto) + valor_nat() : Nat)
+  # Operadores pegam o tipo da anotação em volta: (a + b : T)
+  +soma = (a + a + a : U32)
+  +raiz = F32.sqrt((x * 8.0 : F32))
 
-  IO.print(Nat.show(quanto))
+  # Tipos diferentes não se misturam: converta com T.to_x / T.from_x.
+  # Aqui `total` passa a ser um Nat; o nome pode ser reusado com outro tipo.
+  +total = (U32.to_nat(soma) + n : Nat)
+  total = Nat.show(total)
+
+  do IO<Unit>:
+    IO.print("U32:    " ++ U32.show(soma) ++ "   (0 - 1 dá " ++ U32.show((0 - 1 : U32)) ++ ")")
+    IO.print("Nat:    " ++ total)
+    IO.print("F32:    " ++ F32.show(raiz) ++ "   (" ++ U32.show(soma) ++ " como F32: " ++ F32.show(U32.to_f32(soma)) ++ ")")
+    IO.print("Char:   " ++ Char.show(c) ++ " tem código " ++ U32.show(Char.to_u32('B')))
+    IO.print("String: \"" ++ s ++ "\" tem " ++ Nat.show(String.length("texto")) ++ " letras")
+    IO.print("Bool:   " ++ Bool.show(b))

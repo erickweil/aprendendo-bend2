@@ -1,68 +1,66 @@
-# Pior jeito que existe de verificar primo em Bend2, pois não é lazy e o pick executa os dois lados
 import Base
-import ./../utils/io.bend as IOUtils
+import ./../utils/io.bend as IOU
 
-def eh_divisivel(n: U32, d: U32) -> Bool:
+# CONTAR PRIMOS EM PARALELO, por divisão por tentativa.
+
+def divide(+n: U32, +d: U32) -> Bool:
   U32.is_zero((n % d : U32))
 
-def eh_primo.go(n: Nat, cond: Bool, +i: U32, +num: U32) -> Bool:
-  match n cond:
-    case 0n _: 
-      True{}
-    case 1n+p True{}:
-      # Deve parar pois é divisível, então não é primo
-      False{}
-    case 1n+p False{}:
-      match i:
-        case 0:
-          # Deve parar pois i*i > num, então não é divisível por nenhum número menor que a raiz, então é primo
-          True{}
-        case i:
-          # Manda 0 para sinalizar que i > sqrt(num)
-          next = Bool.pick(U32, (i > num / i : U32), 0, (i + 2 : U32))
-          eh_primo.go(p, eh_divisivel(num, i), next, num)
+# Testa os divisores ímpares 3, 5, 7, ... até a raiz de n. Parar no PRIMEIRO
+# divisor exige cuidado: `Bool.pick(Bool, divide(n, d), False{}, primo.go(..))`
+# calcularia a recursão de qualquer jeito (é estrito). Então a condição do
+# passo ANTERIOR entra como parâmetro (`achou`), e o caso `True{}` devolve
+# sem recursão (AGENTS.md, Armadilha 2). `k` é quantos divisores faltam.
+def primo.go(k: Nat, achou: Bool, +d: U32, +n: U32) -> Bool:
+  match k achou:
+    case _ True{}: False{}
+    case 0n False{}: True{}
+    case 1n+p False{}: primo.go(p, divide(n, d), (d + 2 : U32), n)
 
-def eh_primo(+num: U32) -> Bool:
-  match num:
-    # Menores que 2 não são primos
-    case 0:
-      False{}
-    case 1:
-      False{}
-    # 2 é primo
-    case 2:
-      True{}
-    case num:
-      eh_primo.go(U32.to_nat((num / 2 : U32)), eh_divisivel(num, 2), 3, num)
+# Raiz quadrada inteira via F32 (+1 de folga para o arredondamento)
+def raiz(+n: U32) -> U32:
+  (F32.to_u32(F32.sqrt(U32.to_f32(n))) + 1 : U32)
 
-# Irá contar quantos números primos existem
-def contar_primos.go(n: Nat, +i: U32, acc: U32) -> U32:
+def primo(+n: U32) -> Bool:
   match n:
-    case 0n:
-      acc
-    case 1n+p:
-      # Sequencial
-      # Soma + 1 se o número for primo, ou + 0 se não for
-      # acc = (acc + Bool.pick(U32, eh_primo(i), 1, 0) : U32)
-      # contar_primos.go(p, (i + 1 : U32), acc)
+    case 0: False{}
+    case 1: False{}
+    case 2: True{}
+    case 3: True{}
+    case _: primo.go(U32.to_nat((raiz(n) / 2 : U32)), divide(n, 2), 3, n)
 
-      # Paralelo (A FAZER)
-      a b = 
-        contar_primos.go(p, (i + 1 : U32), 0) 
-        contar_primos.go(p, (i + 1 : U32), 0)
-      
-      (acc + a + b : U32)
+# Conta os primos em [i, i + k), um por vez
+def contar.seq(k: Nat, +i: U32, +acc: U32) -> U32:
+  match k:
+    case 0n: acc
+    case 1n+p: contar.seq(p, (i + 1 : U32), (acc + Bool.to_u32(primo(i)) : U32))
 
-def contar_primos(+inicio: U32, fim: U32) -> U32:
-  contar_primos.go(U32.to_nat((fim - inicio : U32)), inicio, 0)
+# Divide o intervalo [lo, hi) ao meio `prof` vezes e conta as partes em
+# paralelo: 2^prof tarefas. Os números altos custam mais (a raiz é maior),
+# então mais tarefas que núcleos ajudam a equilibrar a carga. Medido no
+# nativo, primos abaixo de 20 milhões (i5-1245U, 12 threads):
+#
+#   prof = 0  (1 tarefa)     4,07 s
+#   prof = 3  (8 tarefas)    1,64 s   2,5×
+#   prof = 6  (64 tarefas)   1,03 s   4,0×   <- o teto desta máquina
+#   prof = 10 (1024)         1,01 s
+def contar(prof: Nat, +lo: U32, +hi: U32) -> U32:
+  match prof:
+    case 0n: contar.seq(U32.to_nat((hi - lo : U32)), lo, 0)
+    case 1n+ +p:
+      +meio = (lo + (hi - lo) / 2 : U32)
+      a b = contar(p, lo, meio) contar(p, meio, hi)
+      (a + b : U32)
 
+# Uso: primos [n=100000] [prof=6]
+#   bend primos.bend -o ../bin/primos
+#   ../bin/primos 10000000 --threads 1      (compare com --threads 4, 8, 12)
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
-    +n : U32 = IOUtils.num_at(IOUtils.numbers(args), 0n, 100)
-    u : Unit <- IO.print("Contando primos de 0 até " ++ U32.show(n) ++ "...")
-    IO.print("Encontrados: " ++ U32.show(contar_primos(0, n)))
-    # IO.print(Bool.pick(String, eh_primo(n), 
-    #   "Primo", 
-    #   "Não é primo"
-    # ))
+    +ns : List<&2, Maybe<&2, U32>> = IOU.numbers(args)
+    +n : U32 = IOU.num_at(ns, 0n, 100000)
+    t0 : Nat <- IO.now()
+    IO.print("primos abaixo de " ++ U32.show(n) ++ ": " ++ U32.show(contar(U32.to_nat(IOU.num_at(ns, 1n, 6)), 0, n)))
+    dt : String <- IOU.tempo_desde(t0)
+    IO.print("  " ++ dt)

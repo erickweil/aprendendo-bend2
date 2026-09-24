@@ -1,33 +1,45 @@
 import Base
-import ./../utils/io.bend as IOUtils
+import ./../utils/io.bend as IOU
 
-# Usando recursividade podemos sim ter uma repetição, mas loop infinito não compila
-# Experimenta descomentar isso aqui:
+# Não há `for` nem `while`: repetição é recursão. E toda recursão precisa
+# TERMINAR — o compilador verifica. Descomente e veja o erro:
 # def infinito(n: Nat) -> Nat:
 #   infinito(n)
 
-# Só é possível ter recursividade se o compilador consegue provar que a função irá parar eventualmente
-# O tipo Nat (Natural) é usado aqui de forma a cada chamada ser um pedaço p (1n+p) da chamada anterior, que eventualmente chegará em 0n
-def repetir(+n: Nat) -> IO(Unit):
+# Como o compilador sabe que termina: a chamada recursiva recebe um PEDAÇO
+# menor do parâmetro. `1n+p` separa n em "um mais p", e p é menor que n.
+# (Aqui `+p` no padrão deixa usar p duas vezes.)
+#
+# A soma só acontece DEPOIS que a chamada recursiva volta, então cada chamada
+# fica pendente na memória: medido no nativo, ~16 bytes por chamada
+# (`repetindo 100000000` usa 1,5 GB).
+def soma_ate(n: Nat) -> U32:
   match n:
-    case 0n:
-      IO.print("Fim da repetição")
-    case 1n+p:
-      IO.bind(Unit, Unit, IO.print(Nat.show(1n+p)), _ => repetir(p))
-      
-# A parte da contagem de repetição TEM que ser Nat, mas o resto das operações pode ser U32
-def somar_todos(+n: Nat, acc: U32) -> U32:
+    case 0n: 0
+    case 1n+ +p: (U32.from_nat(p) + 1 + soma_ate(p) : U32)
+
+# Com acumulador, a chamada recursiva é a ÚLTIMA coisa feita (tail call) e
+# vira um laço simples no binário: memória constante, qualquer que seja n.
+def fatorial(n: Nat, +i: U32, +acc: U32) -> U32:
   match n:
-    case 0n:
-      acc
+    case 0n: acc
+    case 1n+p: fatorial(p, (i + 1 : U32), (acc * i : U32))
+
+# Quando o número de passos não é conhecido, o Nat vira COMBUSTÍVEL: um
+# limite que garante o fim, enquanto o trabalho de verdade é feito em U32.
+# (`U32.to_nat` custa O(1) no binário: lá um Nat é uma palavra de máquina.)
+def collatz(combustivel: Nat, +x: U32, +passos: U32) -> U32:
+  match combustivel:
+    case 0n: passos
     case 1n+p:
-      n_u32 = U32.from_nat(p)
-      somar_todos(p, (acc + n_u32 + 1 : U32))
+      match x:
+        case 1: passos
+        case _: collatz(p, Bool.pick(U32, U32.is_even(x), (x / 2 : U32), (3 * x + 1 : U32)), (passos + 1 : U32))
 
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
-    +v : U32 = IOUtils.num_at(IOUtils.numbers(args), 0n, 10)
-    u : Unit <- repetir(U32.to_nat(v))
-    IO.print("A soma de todos é:" ++ U32.show(somar_todos(U32.to_nat(v), 0)))
-  
+    +n : U32 = IOU.num_at(IOU.numbers(args), 0n, 10)
+    IO.print("1 + 2 + ... + " ++ U32.show(n) ++ " = " ++ U32.show(soma_ate(U32.to_nat(n))))
+    IO.print(U32.show(n) ++ "! = " ++ U32.show(fatorial(U32.to_nat(n), 1, 1)) ++ " (dá a volta acima de 12!)")
+    IO.print("Collatz de " ++ U32.show(n) ++ " chega a 1 em " ++ U32.show(collatz(1000n, n, 0)) ++ " passos")

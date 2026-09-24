@@ -1,42 +1,46 @@
 import Base
+import ./../utils/io.bend as IOU
+import ./../utils/arrays.bend as Arr
 import ./../utils/arquivos.bend as Arq
+import ./../utils/math.bend as M
 
-# Escreve e lê de volta um arquivo de texto e um de bytes.
+# Escreve e lê de volta um arquivo de texto e um de bytes, com
+# utils/arquivos.bend (que lê e grava em blocos; veja lá o porquê).
 #
-#   bend arquivos.bend -o ../bin/arquivos && ../bin/arquivos
+#   bend arquivos.bend -o ../bin/arquivos && ../bin/arquivos [n=1000]
 
-# Soma dos `k + 1` primeiros bytes, para conferir o que foi lido.
-# O par `(array, valor)` do `Array.get` é o estado do laço.
-def soma(k: Nat, r: Array<U32> & U32, +i: U32, acc: U32) -> U32:
-  match k:
-    case 0n:
-      (arr, v) = r
-      (acc + v : U32)
-    case 1n+p:
-      (arr, v) = r
-      +prox = (i + 1 : U32)
-      soma(p, Array.get(U32, arr, prox), prox, (acc + v : U32))
+# 0, 1, 2, ..., 255, 0, 1, ... (o byte da posição i é i mod 256)
+def byte_de(v: U32, +ctx: U32, i: U32) -> U32:
+  U32.and(i, 255)
 
-def mostra_bytes(r: Array<U32> & U32) -> IO(Unit):
-  (arr, +n) = r
-  IO.print("lidos " ++ U32.show(n) ++ " bytes, soma " ++
-    U32.show(soma(U32.to_nat((n - 1 : U32)), Array.get(U32, arr, 0), 0, 0)))
+def mais(+x: U32, acc: U32, +k: U32) -> U32:
+  (acc + x : U32)
 
-# 0, 1, 2, ..., 255, 0, 1, ... (o byte de índice i é i mod 256)
-def bytes_teste.go(k: Nat, arr: Array<U32>, +i: U32) -> Array<U32>:
-  match k:
-    case 0n:
-      Array.set(U32, arr, i, U32.and(i, 255))
-    case 1n+p:
-      bytes_teste.go(p, Array.set(U32, arr, i, U32.and(i, 255)), (i + 1 : U32))
+def soma(r: Array<U32> & U32) -> U32:
+  (a, s) = r
+  s
+
+# `ler_bytes` devolve (array, quantidade): o array tem 2^k posições, e só as
+# `n` primeiras são o arquivo
+def mostra(r: Array<U32> & U32) -> String:
+  (a, +n) = r
+  "lidos " ++ U32.show(n) ++ " bytes, soma " ++ U32.show(soma(Arr.fold_range(~U32, ~U32, ~mais, a, 0, 0, n)))
+
+# Soma de i mod 256 para i < n, para conferir
+def esperado(+n: U32) -> U32:
+  +voltas = (n / 256 : U32)
+  +resto = (n % 256 : U32)
+  (voltas * 32640 + resto * (resto - 1) / 2 : U32)
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    args : List<String> <- IO.args()
+    +n : U32 = IOU.num_at(IOU.numbers(args), 0n, 1000)
     Arq.gravar_texto("/tmp/bend_teste.txt", "Olá, arquivo!\nSegunda linha: ação, ç, ã, ✓\n")
     texto : String <- Arq.ler_texto("/tmp/bend_teste.txt")
     IO.write("texto lido:\n" ++ texto)
 
-    # 1000 bytes (0..255 repetindo), gravados e lidos de volta
-    Arq.gravar_bytes("/tmp/bend_teste.bin", bytes_teste.go(999n, [0 : U32^10n], 0), 1000)
+    bytes : Array<U32> = Arr.for_each(~U32, ~U32, ~byte_de, [0 : U32^M.log2_ceil(n)], 0)
+    Arq.gravar_bytes("/tmp/bend_teste.bin", bytes, n)
     lido : Array<U32> & U32 <- Arq.ler_bytes("/tmp/bend_teste.bin")
-    mostra_bytes(lido)
+    IO.print(mostra(lido) ++ " (esperado " ++ U32.show(esperado(n)) ++ ")")

@@ -1,78 +1,71 @@
 import Base
-import ./../utils/tuples.bend as T
+import ./../utils/io.bend as IOU
 import ./../utils/arrays.bend as Arr
-import ./../utils/io.bend as IOUtils
-# Arrays em Bend 2
-# ================
+
+# ARRAYS: memória contínua com leitura e escrita O(1) no lugar.
 #
-# Um Array<T> é um `Type`, não um `Data`: ele tem exatamente UM dono e não
-# aceita `+` pois só pode ser consumido UMA vez, mas tem performance O(1)
-# 
-# a[i] <- v é a mesma coisa que `a = Array.set(T, a, i, v)` (Rebinding)
-# 
-# O preço é que toda operação que só quer LER o array precisa devolvê-lo
-# junto com a resposta, num par `Array<T> & R`:
+# Um `Array<T>` é um `Type`, não um `Data`: tem exatamente UM dono e não
+# aceita `+`. É isso que permite escrever no lugar sem cópia. O preço: uma
+# operação que só LÊ precisa devolver o array junto com a resposta:
 #
-#   a[5]                  -> Array<U32> & U32
-#   Array.size(U32, a)    -> Array<U32> & U32
-#   Array.clone(U32, a)   -> Array<U32> & Array<U32>
+#   a[5]                     -> Array<U32> & U32
+#   Array.get(T, a, i)       -> Array<T> & T
+#   Array.size(T, a)         -> Array<T> & U32
+#   Array.clone(T, a)        -> Array<T> & Array<T>
 #
-# Por dentro (veja base.bend) o Array é uma árvore binária completa, por isso
-# o tamanho é sempre uma potência de 2 ([0 : U32*8n] ou [0 : U32^3n]) e os
-# índices dão a volta (a[8] é a[0] num array de 8):
-#
-#   type Array<-T: Type> is Type:
-#     ALeaf{value: T}
-#     ANode{xs: Array<T>, ys: Array<T>}
-#
+# O tamanho é sempre potência de 2 e os índices dão a volta (a[8] é a[0]
+# num array de 8 posições). `a[i]` e `a[i] <- v` só existem para U32; para
+# outros tipos, `Array.get` e `Array.set`.
 
-def demo_basico(quantos: U32) -> IO(Unit):
-  T.run_state_consume(Array<U32>, IO(Unit),
-    (do T.State<Array<U32>, IO(Unit)>:
-      size : U32  <- arr => Array.size(U32, arr)
+# O laço clássico, escrito à mão: o par da leitura anterior é o ESTADO do
+# laço, e é aberto dentro de cada caso. Soma a[0] + ... + a[k].
+def soma(k: Nat, r: Array<U32> & U32, +i: U32, +acc: U32) -> U32:
+  match k:
+    case 0n:
+      (a, v) = r
+      (acc + v : U32)
+    case 1n+p:
+      (a, v) = r
+      soma(p, Array.get(U32, a, (i + 1 : U32)), (i + 1 : U32), (acc + v : U32))
 
-      _: Unit     <- arr => (Arr.for_each(~U32, ~U32, ~(value => size => i => 
-        (size - i : U32)
-      ), arr, size), Unit{})
+# O mesmo com utils/arrays.bend: a callback recebe (elemento, contexto, índice)
+def quadrado(x: U32, +ctx: U32, i: U32) -> U32:
+  +j = i
+  (j * j % ctx : U32)
 
-      sum : U32   <- arr => Arr.reduce(~U32, ~U32, ~(value => acc => i => 
-        (acc + value : U32)
-      ), arr, 0)
+def mais(+x: U32, acc: U32, i: U32) -> U32:
+  (acc + x : U32)
 
-      arr_str : String <- arr => Arr.reduce(~U32, ~String, ~(value => acc => i =>
-        acc ++ " " ++ U32.show(value)
-      ), arr, "Array:")
-      
-      return IO.print(arr_str ++ ", sum: " ++ U32.show(sum))
-    ), 
-    Array.new(U32, U32.to_nat(quantos), 0)
-  )
+def fecha_soma(r: Array<U32> & U32) -> U32:
+  (a, s) = r
+  s
 
-def sum_array(value: U32, arr: Array<U32> & U32) -> Array<U32> & U32:
-  (arr, sum) = arr
-  Arr.reduce(~U32, ~U32, ~(x => sum => i => (x + sum : U32)), arr, sum)
+def dobro(x: U32) -> U32:
+  (2 * x : U32)
 
-def demo_arrays(quantos: U32) -> IO(Unit):
-  # Gera um array com 2^10 = 1024 elementos, cada um valendo 1
-  arr = Array.new(U32, U32.to_nat(quantos), 1)
-  arr_copy = Array.clone(U32, arr)
-  Arr.with(U32, Array<U32>, IO(Unit), arr_copy, arr => copy =>
-    # Isso é um for com outro for dentro. 1024 * 1024 = 1M
-    copy_sum = Arr.reduce_consume(~U32, ~(Array<U32> & U32), ~sum_array, arr, (copy, 0))
-    Arr.with(U32, U32, IO(Unit), copy_sum, copy => +sum =>
-      do IO<Unit>:
-        u : Unit <- IO.print("== arrays ==")
-        IO.print("soma: " ++ U32.show(sum))
-    )
-  )
+# Um par `(array, valor)` só pode ser aberto como PARÂMETRO. O array volta
+# junto com o valor lido, e pode seguir sendo usado.
+def basico.fim(r: Array<U32> & U32) -> IO(Unit):
+  (a, v) = r
+  IO.print("a[5] = " ++ U32.show(v) ++ ", soma de tudo = " ++ U32.show(soma(7n, Array.get(U32, a, 0), 0, 0)))
 
+def basico() -> IO(Unit):
+  a = [0 : U32*8n]            # 8 posições com 0 (também: [0 : U32^3n])
+  a[5] <- 42                  # escreve no lugar (a = Array.set(U32, a, 5, 42))
+  a[1] <- 7
+  basico.fim(a[5])            # lê: devolve (a, 42)
+
+# Uso: arrays [profundidade=20]   (um array de 2^profundidade posições)
 def main() -> IO(Unit):
   do IO<Unit>:
-    u: Unit <- IO.print("== início ==")
     args : List<String> <- IO.args()
-    +numbers : List<&2, Maybe<&2, U32>> = IOUtils.numbers(args)
-    +quantos : U32 = IOUtils.num_at(numbers, 0n, 5)
-
-    u: Unit <- demo_basico(quantos)
-    #u : Unit <- demo_arrays(quantos)
-    IO.print("== fim ==")
+    +d : U32 = IOU.num_at(IOU.numbers(args), 0n, 20)
+    basico()
+    t0 : Nat <- IO.now()
+    a : Array<U32> = Array.new(U32, U32.to_nat(d), 0)
+    a : Array<U32> = Arr.for_each(~U32, ~U32, ~quadrado, a, 1000)   # a[i] = i² mod 1000
+    a : Array<U32> = Array.map(~U32, ~U32, ~dobro, a)              # da Base: um array novo
+    IO.print("soma de 2·(i² mod 1000) em 2^" ++ U32.show(d) ++ " posições: " ++
+      U32.show(fecha_soma(Arr.reduce(~U32, ~U32, ~mais, a, 0))))
+    dt : String <- IOU.tempo_desde(t0)
+    IO.print("  " ++ dt)
