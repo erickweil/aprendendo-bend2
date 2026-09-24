@@ -178,6 +178,14 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 * **Custos do gerador puro** (`utils/random.bend`, 50M sorteios): `R.step` (xorshift) **2,0 ns**; `R.range` (step + `mix` + mod) **3,6 ns**; `R.hash32` (lowbias32 completo) 3,0 ns.
 ---
 
+### 🔴 Armadilha 3e: arquivos — a Base troca bytes como `List`, um nó por byte
+> **Conceito:** `File.read_bytes`, `File.read_at` e `File.write_bytes` recebem e devolvem `List<&2, U32>` (um byte por elemento). Todo efeito sobre um `File` devolve `IO(File & Result<.., A>)`: o handle afim volta junto com o resultado.
+
+* **Leia e grave em blocos, nunca o arquivo inteiro numa lista.** Medido (64 MB, nativo, 2.0.26): a lista inteira custa **1,8 GB** de pico (~28 bytes por byte do arquivo) e 1,15 s; em blocos de 1 MB via `read_at`, **290 MB** e 0,78 s. Gravar: ~1,1 s e 1,9 GB contra ~0,55 s e 290 MB. O custo fica em ~10 ns por byte, dominado pela construção da lista na Base. Pronto em `utils/arquivos.bend` (`ler_bytes`/`gravar_bytes` usam blocos de 1 MB).
+* **`File.read_*` fazem UMA syscall `read()`**: num arquivo regular vem tudo, mas não há laço de leitura parcial por baixo.
+* **Um arquivo vazio pede tratamento à parte:** a conta de blocos `ceil(n / bloco) - 1` dá a volta para 4 bilhões com `n = 0`.
+* **Imagens:** não há decodificador de PNG/JPEG. `utils/bmp.bend` lê BMP de 24/32 bits sem compressão (de baixo para cima ou de cima para baixo) e grava 24 bits; `exemplos/hilbert_imagem.bend` é um codec que usa isso.
+
 ### 🔴 Armadilha 4: `Nat` NÃO é caro no nativo (corrigido)
 > **Conceito:** `Nat` é Peano no nível dos tipos e das provas, mas no binário nativo é uma palavra de máquina (o próprio GUIDE diz: "a `Nat` is still a machine word at runtime").
 
@@ -354,7 +362,11 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 * **(Corrigido no 2.0.26) Dois nomes que só diferem em maiúsculas colidiam no backend nativo.** `def CHECK()` e `def check()` no mesmo arquivo faziam o `-o` morrer com `two names mangle to FID_CHECK`; no 2.0.26 compila e cada um devolve o seu valor.
 * **`match` depois de um `let` é rejeitado** ("this name is a def or a consumed binder"; reverificado no 2.0.26). Faça o `match` primeiro e os `let`s dentro de cada caso — inclusive `(a, v) = par`, que também é um `match`.
 * **`+x = x` dentro de um caso de `match` funciona** (verificado no 2.0.16). O que falha é um `let` seguido de um `match` ou de uma desestruturação `(a, v) = par` no mesmo bloco; nesse caso use o `+` direto no padrão: `case Con{+h, t}:`.
-* **`IO.args` é `List<&1, String>`, afim:** só pode ser percorrida uma vez e não aceita `+`. Converta de uma vez para uma lista `Data` (`utils/io.bend`: `numbers` + `num_at`).
+* **`IO.args` é `List<&1, String>`, afim:** só pode ser percorrida uma vez e não aceita `+`. Converta de uma vez para uma lista `Data` (`utils/io.bend`: `numbers` + `num_at` para números, `texts` + `text_at` para caminhos e nomes).
+* **Uma lambda não desestrutura o próprio parâmetro.** `r => (a, b) = r ...` é recusado ("a match on a parameter or field"). Num laço de IO, onde o bind entrega um `File & X`, torne esse par um **parâmetro da próxima chamada** do laço e abra-o lá (`gravar_blocos.go` em `utils/arquivos.bend`). Um auxiliar que abre o par e chama o laço de volta seria recursão mútua.
+* **Dentro de `do` não há `match` nem desestruturação.** Um `match` solto dá "a match heads a def body, not a term", e `K{a, b} = x` dá "expected: a pattern". Leve a decisão para uma def e chame-a do bloco.
+* **Anotação como argumento pede parênteses duplos:** `U32.show(pm / 10 : U32)` falha com `expected: a term, observed: ':'`; escreva `U32.show((pm / 10 : U32))`.
+* **`parte * 1000` estoura o `U32` em silêncio** (acima de ~4,3M). Contas de porcentagem sobre tamanhos de arquivo precisam de outra ordem de operações (veja `permil` em `exemplos/hilbert_imagem.bend`).
 
 ---
 
@@ -379,6 +391,8 @@ aprendendo-bend2/
 ├── utils/                     # Helpers gerais:
 │   ├── arrays.bend            #   percursos e trocas de Array (custos na Armadilha 3c)
 │   ├── tuples.bend            #   `A & B`: pair/with/fst/snd/map_* (leia o aviso sobre closure)
+│   ├── arquivos.bend          #   ler/gravar texto e bytes, em blocos (Armadilha 3e)
+│   ├── bmp.bend               #   BMP 24/32 bits <-> `Imagem` (um `0xRRGGBB` por pixel)
 │   └── random, math, vec4, io, json
 └── genetic/                   # Motor genético (veja genetic/README.md)
 ```

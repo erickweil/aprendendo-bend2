@@ -47,3 +47,26 @@ def num_at(l: List<&2, Maybe<&2, U32>>, k: Nat, default: U32) -> U32:
       unwrap_or(U32, first, default)
     case Con{first, rest} 1n+p:
       num_at(rest, p, default)
+
+# Os argumentos como lista `Data` de textos, para consultar mais de uma vez
+# (caminhos de arquivo, nomes de modo). Para números, veja `numbers`.
+def texts(args: List<String>) -> List<&2, String>:
+  match args:
+    case Nil{}:
+      Nil{}
+    case Con{first, rest}:
+      Con{first, texts(rest)}
+
+# O k-ésimo texto (a partir de 0), ou o default se faltar
+def text_at(l: List<&2, String>, k: Nat, default: String) -> String:
+  match l k:
+    case Nil{} _:
+      default
+    case Con{first, rest} 0n:
+      first
+    case Con{first, rest} 1n+p:
+      text_at(rest, p, default)
+
+# Um texto como número, ou o default se não for número
+def text_num(s: String, default: U32) -> U32:
+  unwrap_or(U32, U32.read(s), default)
