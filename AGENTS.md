@@ -184,7 +184,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 * **Leia e grave em blocos, nunca o arquivo inteiro numa lista.** Medido (64 MB, nativo, 2.0.26): a lista inteira custa **1,8 GB** de pico (~28 bytes por byte do arquivo) e 1,15 s; em blocos de 1 MB via `read_at`, **290 MB** e 0,78 s. Gravar: ~1,1 s e 1,9 GB contra ~0,55 s e 290 MB. O custo fica em ~10 ns por byte, dominado pela construção da lista na Base. Pronto em `utils/arquivos.bend` (`ler_bytes`/`gravar_bytes` usam blocos de 1 MB).
 * **`File.read_*` fazem UMA syscall `read()`**: num arquivo regular vem tudo, mas não há laço de leitura parcial por baixo.
 * **Um arquivo vazio pede tratamento à parte:** a conta de blocos `ceil(n / bloco) - 1` dá a volta para 4 bilhões com `n = 0`.
-* **Imagens:** não há decodificador de PNG/JPEG. `utils/bmp.bend` lê BMP de 24/32 bits sem compressão (de baixo para cima ou de cima para baixo) e grava 24 bits; `exemplos/hilbert_imagem.bend` é um codec que usa isso.
+* **Imagens:** não há decodificador de PNG/JPEG. `utils/bmp.bend` lê BMP de 24/32 bits sem compressão (de baixo para cima ou de cima para baixo) e grava 24 bits; `exemplos/hilbert_detalhe.bend` é um codec com perdas que usa isso, percorrendo a imagem pela curva de Hilbert.
 
 ### 🔴 Armadilha 4: `Nat` NÃO é caro no nativo (corrigido)
 > **Conceito:** `Nat` é Peano no nível dos tipos e das provas, mas no binário nativo é uma palavra de máquina (o próprio GUIDE diz: "a `Nat` is still a machine word at runtime").
@@ -307,9 +307,9 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
   # ~fit: U32 -> U32   ❌ expected @_:U32 -> U32, observed @+x:U32 -> U32
   def fit(g: U32) -> U32: bit_count(g)   # ✔️ envolva antes de passar
   ```
-* **Callback com estado = template + acumulador.** Uma closure não serve para ser chamada várias vezes (Armadilha 1), e um template não captura nada. O estado vai num parâmetro a mais, que a callback recebe e devolve: `~f: S -> Vec2 -> Dir -> Dir -> S`. Três detalhes fazem funcionar (veja `exemplos/hilbert_callback.bend`):
+* **Callback com estado = template + acumulador.** Uma closure não serve para ser chamada várias vezes (Armadilha 1), e um template não captura nada. O estado vai num parâmetro a mais, que a callback recebe e devolve: `~f: S -> Vec2 -> Dir -> Dir -> S`. Três detalhes fazem funcionar (veja `hilbert`/`Tartaruga` em `exemplos/hilbert.bend`, usado por `exemplos/hilbert_detalhe.bend`):
   - declare `~S: Type` (não `Data`): assim o acumulador pode ser um `Array`, por exemplo uma tela com uma célula por posição;
-  - guarde o acumulador **no mesmo registro** que o resto do estado do laço (`type Tart<-S: Type> is Type: Tart{pos, dir, chegada, acc: S}`), para que cada passo receba e devolva um valor só; com um par `Estado & S` seria preciso desestruturar o retorno de uma chamada (proibido);
+  - guarde o acumulador **no mesmo registro** que o resto do estado do laço (`type Tartaruga<-S: Type> is Type: Tartaruga{pos, dir, chegada, acc: S}`), para que cada passo receba e devolva um valor só; com um par `Estado & S` seria preciso desestruturar o retorno de uma chamada (proibido);
   - a callback de topo usa parâmetros sem `+`, exatamente como o tipo do template; quem precisa de `+` é um auxiliar que ela chama.
 
 ---
@@ -366,7 +366,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 * **Uma lambda não desestrutura o próprio parâmetro.** `r => (a, b) = r ...` é recusado ("a match on a parameter or field"). Num laço de IO, onde o bind entrega um `File & X`, torne esse par um **parâmetro da próxima chamada** do laço e abra-o lá (`gravar_blocos.go` em `utils/arquivos.bend`). Um auxiliar que abre o par e chama o laço de volta seria recursão mútua.
 * **Dentro de `do` não há `match` nem desestruturação.** Um `match` solto dá "a match heads a def body, not a term", e `K{a, b} = x` dá "expected: a pattern". Leve a decisão para uma def e chame-a do bloco.
 * **Anotação como argumento pede parênteses duplos:** `U32.show(pm / 10 : U32)` falha com `expected: a term, observed: ':'`; escreva `U32.show((pm / 10 : U32))`.
-* **`parte * 1000` estoura o `U32` em silêncio** (acima de ~4,3M). Contas de porcentagem sobre tamanhos de arquivo precisam de outra ordem de operações (veja `permil` em `exemplos/hilbert_imagem.bend`).
+* **`parte * 1000` estoura o `U32` em silêncio** (acima de ~4,3M). Contas de porcentagem sobre tamanhos de arquivo precisam de outra ordem de operações (veja `permil` em `exemplos/hilbert_detalhe.bend`).
 
 ---
 
@@ -392,6 +392,7 @@ aprendendo-bend2/
 │   ├── arrays.bend            #   percursos e trocas de Array (custos na Armadilha 3c)
 │   ├── tuples.bend            #   `A & B`: pair/with/fst/snd/map_* (leia o aviso sobre closure)
 │   ├── arquivos.bend          #   ler/gravar texto e bytes, em blocos (Armadilha 3e)
+│   ├── aritmetico.bend        #   codificador aritmético binário adaptativo (range coder do LZMA, em U32)
 │   ├── bmp.bend               #   BMP 24/32 bits <-> `Imagem` (um `0xRRGGBB` por pixel)
 │   └── random, math, vec4, io, json
 └── genetic/                   # Motor genético (veja genetic/README.md)
