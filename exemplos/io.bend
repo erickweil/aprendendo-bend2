@@ -30,5 +30,9 @@ def main() -> IO(Unit):
     args : List<String> <- IO.args()
     IO.print(Nat.show(List.length(&1, String, args)) ++ " argumento(s)")
 
+    # Quantas threads o binário usa (`--threads N`, ou os núcleos da máquina)
+    n : U32 <- IO.thread_count()
+    IO.print(U32.show(n) ++ " thread(s)")
+
     # A saída de erro
     IO.print_err("(isto vai para a saída de erro)")

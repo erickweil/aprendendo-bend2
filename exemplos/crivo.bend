@@ -45,9 +45,9 @@ def primos_abaixo(+n: U32) -> U32:
   a = crivo(U32.to_nat(r), [0 : U32^M.log2_ceil(n)], 2, n)
   total(Arr.fold_range(~U32, ~U32, ~conta, a, 0, 2, (n - 2 : U32)))
 
-# Medido no nativo: primos abaixo de 20 milhões em 0,23 s, num núcleo só. O
-# `primos.bend` (divisão por tentativa) leva 1,0 s com 12 threads: o
-# algoritmo certo vale mais que o paralelismo. O custo é memória: 4 bytes por
+# Medido no nativo (na bateria): primos abaixo de 20 milhões em 0,37 s,
+# num núcleo só. O `primos.bend` (divisão por tentativa) leva 1,77 s com 12
+# threads: o algoritmo certo vale mais que o paralelismo. O custo é memória: 4 bytes por
 # número (100 milhões pedem um array de 2^27 posições, 512 MB).
 #
 # Uso: crivo [n=100000]

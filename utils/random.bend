@@ -131,10 +131,10 @@ def unit(+seed: U32) -> F32:
   +m = U32.to_f32(U32.shrn(mix(seed), 8n))
   ((m + {1.0 : F32}) / {16777216.0 : F32} : F32)
 
-# Amostra uniforme em [lo, hi] com 10000 níveis discretos
-def rnd_range_f32(+seed: U32, +lo: F32, +hi: F32) -> F32:
-  +norm = (U32.to_f32(U32.mod(seed, 10000)) / {10000.0 : F32} : F32)
-  (lo + ((hi - lo) * norm) : F32)
+# Uniforme em (lo, hi], com a precisão do `unit`
+def range_f32(+seed: U32, +lo: F32, +hi: F32) -> F32:
+  +u = unit(seed)
+  (lo + (hi - lo) * u : F32)
 
 # ----------------------------------------------------------------
 # POISSON (poisson_knuth_iterator.rs)

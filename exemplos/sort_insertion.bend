@@ -42,9 +42,15 @@ def ordenada(+l: List<&2, U32>) -> Bool:
     case a <> +b <> t: (a <= b : U32) && ordenada(b <> t)
     case _: True{}
 
+# Um `match`, não um `Bool.pick`: o pick montaria o texto da lista inteira
+# mesmo quando ele não vai ser mostrado (AGENTS.md, Armadilha 2)
+def mostrar.se(pequena: Bool, l: List<&2, U32>) -> String:
+  match pequena:
+    case True{}: List.show(~&2, ~U32, ~U32.show, l)
+    case False{}: "(lista grande: não mostrada)"
+
 def mostrar(+l: List<&2, U32>) -> String:
-  Bool.pick(String, Nat.is_le(List.length(&2, U32, l), 20n),
-    List.show(~&2, ~U32, ~U32.show, l), "(lista grande: não mostrada)")
+  mostrar.se(Nat.is_le(List.length(&2, U32, l), 20n), l)
 
 # Uso: sort_insertion [n=12] [semente=0: aleatória]
 def main() -> IO(Unit):

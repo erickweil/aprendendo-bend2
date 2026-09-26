@@ -42,6 +42,12 @@ def paralelo(prof: Nat, +s: U32, +n: U32) -> U32:
 # Medido no nativo (256 milhões de pontos): 1,31 s com 1 thread, 0,45 s com
 # 4 e 0,24 s com 8 ou 12 (5,4×). Nenhuma memória compartilhada, trabalho
 # igual em cada tarefa: é o melhor caso de paralelismo desta máquina.
+#
+# É também o trabalho que a GPU faz bem (numérico e uniforme), então a
+# chamada leva `!`. Uma GPU roda 16384 tarefas de uma vez, e por isso são
+# 2^14 tarefas, não 64: com 64 quase toda a GPU ficaria parada. Na CPU (sem
+# GPU o `!` roda nela) as tarefas a mais não custam nada; com 12 threads o
+# equilíbrio entre núcleos P e E até melhora um pouco (~8%).
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
@@ -49,9 +55,9 @@ def main() -> IO(Unit):
     +milhoes : U32 = U32.max(IOU.num_at(ns, 0n, 16), 1)
     s : U32 <- IOU.semente(IOU.num_at(ns, 1n, 0))
     +t0 : Nat <- IO.now()
-    # 64 tarefas de (milhões / 64) milhões de pontos cada
+    # 2^14 tarefas de milhões · 64 pontos cada
     +total : U32 = (milhoes * 1048576 : U32)
-    +dentro : U32 = paralelo(6n, s, (total / 64 : U32))
+    +dentro : U32 = paralelo!(14n, s, (total / 16384 : U32))
     +pi : F32 = (4.0 * U32.to_f32(dentro) / U32.to_f32(total) : F32)
     IO.print("π ≈ " ++ F32.show(pi) ++ " com " ++ U32.show(total) ++ " pontos (erro " ++ F32.show(F32.abs((pi - F32.pi() : F32))) ++ ")")
     dt : String <- IOU.tempo_desde(t0)

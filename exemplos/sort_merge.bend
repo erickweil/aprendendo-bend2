@@ -18,9 +18,10 @@ import ./../utils/math.bend as M
 #    isolada (gerar e ordenar), 2,4 s. Dividir em prefixo e sufixo mantém
 #    cada metade junta: 0,96 s, contra 1,5 s do `List.sort` sozinho.
 #
-# Este programa leva ~1,35 s com 1 thread e ~1,18 s com 2; mais threads não
-# ajudam: com listas encadeadas o limite passa a ser a memória, não a CPU.
-# Compare com `pow.bend`, que não toca na memória e escala 4,4×.
+# Na bateria, este programa leva 2,2 s com 1 thread, 1,9 s com 2 e 1,7 s
+# com 4 ou 8; mais threads não ajudam: com listas encadeadas o limite passa a
+# ser a memória, não a CPU. Compare com `pow.bend`, que não toca na memória e
+# escala 4×.
 
 # Separa os k primeiros elementos: ([k primeiros], resto). A recursão devolve
 # um PAR, e quem o abre é um auxiliar não recursivo que o recebe como
@@ -70,9 +71,15 @@ def ordenada(+l: List<&2, U32>) -> Bool:
     case a <> +b <> t: (a <= b : U32) && ordenada(b <> t)
     case _: True{}
 
+# Um `match`, não um `Bool.pick`: o pick montaria o texto da lista inteira
+# mesmo quando ele não vai ser mostrado (AGENTS.md, Armadilha 2)
+def mostrar.se(pequena: Bool, l: List<&2, U32>) -> String:
+  match pequena:
+    case True{}: List.show(~&2, ~U32, ~U32.show, l)
+    case False{}: "(lista grande: não mostrada)"
+
 def mostrar(+l: List<&2, U32>) -> String:
-  Bool.pick(String, Nat.is_le(List.length(&2, U32, l), 20n),
-    List.show(~&2, ~U32, ~U32.show, l), "(lista grande: não mostrada)")
+  mostrar.se(Nat.is_le(List.length(&2, U32, l), 20n), l)
 
 # Uso: sort_merge [n=12] [semente=0: aleatória]
 #   bend sort_merge.bend -o ../bin/sort_merge
