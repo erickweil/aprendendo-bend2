@@ -198,11 +198,14 @@ def Tr.estende(+tr: Tr, +p: U32, +c: U32, +ruido: U32) -> Tr:
   Tr.estende.soma(tr, c, sig, inv, (Bmp.vermelho(c) - Bmp.vermelho(p) : U32),
     (Bmp.verde(c) - Bmp.verde(p) : U32), (Bmp.azul(c) - Bmp.azul(p) : U32))
 
-# Corta antes de `c`? Um trecho vazio nunca corta.
+# Corta antes de `c`? Um trecho vazio nunca corta. (`maximo` é ligado antes
+# do `||`: no 2.0.29 uma comparação com def constante dentro de um `||` sai
+# sempre `True` no nativo, e todo pixel virava um trecho; Armadilha 12.)
 def corta(+cfg: Cfg, +tr: Tr, +p: U32, +c: U32) -> Bool:
   +n = Tr.n(tr)
+  +maximo = Trecho.maximo()
   U32.is_ne(n, 0) && (
-    U32.is_ge(n, Trecho.maximo()) ||
+    U32.is_ge(n, maximo) ||
     longe(p, c, Cfg.salto(cfg)) ||
     longe(Tr.anc(tr), c, Cfg.faixa(cfg)) ||
     (significativo(p, c, Cfg.textura(cfg)) && inverte(tr, p, c) && U32.is_ge(Tr.inv(tr), 1)))

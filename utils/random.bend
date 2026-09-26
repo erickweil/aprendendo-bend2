@@ -108,9 +108,12 @@ def per(+num: U32, +den: U32) -> U32:
     U32.mul(U32.div(MAX(), U32.max(den, 1)), num))
 
 # Probabilidade `threshold / 2^32`, com os extremos exatos: limiar 0 nunca
-# acerta, limiar máximo sempre acerta
+# acerta, limiar máximo sempre acerta. (`MAX()` é ligado antes: no 2.0.29,
+# um `||` com uma comparação contra uma def constante sai sempre `True` no
+# nativo; veja a Armadilha 12 do AGENTS.md.)
 def hit(+seed: U32, +threshold: U32) -> Bool:
-  Bool.or(U32.is_eq(threshold, MAX()), U32.is_lt(mix(seed), threshold))
+  +max = MAX()
+  U32.is_eq(threshold, max) || U32.is_lt(mix(seed), threshold)
 
 # Limiar como F32 em [0, 1]
 def prob(+threshold: U32) -> F32:
