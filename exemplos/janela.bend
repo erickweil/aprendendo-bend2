@@ -1,145 +1,190 @@
 import Base
 import ./../utils/io.bend as IOU
+import ./../utils/math.bend as M
 
-# UMA JANELA ANIMADA com `App.run`: uma bola quica pela tela; qualquer tecla
-# troca a cor e um clique leva a bola até o mouse.
+# UMA ESFERA QUICANDO numa janela: ela anda em linha reta e, ao tocar uma
+# borda, a velocidade daquele eixo troca de sinal. Sem teclado nem mouse.
 #
-# Gráficos em Bend são PUROS: um quadro é uma `Image`, e o App só diz como
-# o estado vira imagem (`view`) e como os eventos mudam o estado (`tick`):
+#   bend janela.bend -o ../bin/janela        (no Linux precisa de libx11-dev)
+#   ../bin/janela [largura=640] [altura=480] [quadros=0: até fechar]
+#
+# Gráficos em Bend são PUROS. Um quadro é uma `Image`, uma árvore de
+# quadrantes, e o App só diz como o estado vira imagem e como ele avança:
 #
 #   type Image is Data:
-#     Pix{color: U32}                               # um quadrado de uma cor
+#     Pix{color: U32}                                  # um quadrado de uma cor
 #     Qua{tl: Image, tr: Image, bl: Image, br: Image}  # dividido em quatro
 #
 #   App{view: S -> (S, Image), tick: List<Event> -> S -> IO(Maybe<S>)}
 #
-# `tick` devolve `None` para fechar. `App.play` roda o mesmo App SEM janela,
-# com eventos escritos à mão: é assim que se testa um App.
+# A raiz da árvore é um quadrado de lado 2^k que cobre a janela, com o canto
+# no topo à esquerda; o que passa da largura ou da altura não aparece. A
+# janela mostra no máximo 60 quadros por segundo.
 #
-#   bend janela.bend -o ../bin/janela        (no Linux precisa de libx11-dev)
-#   ../bin/janela [quadros=0: até fechar]
-#   ../bin/janela teste                      (sem janela, com App.play)
+# Medido no nativo (i5-1245U, sem GPU, 2.0.29): 640x480 fica nos 60 quadros
+# por segundo; 1280x720 dá ~50 e 1920x1080 ~35, com 1 ou 12 threads. Montar
+# a árvore custa só ~4,6 ms por quadro em 1080p; o que pesa é o
+# `Window.frame` no Linux, que desce a árvore uma vez POR PIXEL da janela,
+# numa thread só (uma imagem fixa de um nível já o deixa em ~48 em 1080p).
 
-def Tela.lado() -> U32: 256
-def Bola.lado() -> U32: 32
-
+# ----------------------------------------------------------------
+# ESTADO
+# ----------------------------------------------------------------
+# Posição do centro e velocidade em pixels por quadro, em F32 para o
+# movimento ser suave; o raio; e o tamanho da janela. Só números: o estado
+# inteiro viaja em registradores de chamada em chamada.
 type Bola is Data:
-  Bola{x: U32, y: U32, dx: U32, dy: U32, cor: U32, quadros: U32, limite: U32}
+  Bola{x: F32, y: F32, vx: F32, vy: F32, r: F32, w: U32, h: U32}
 
-# Uma cor por índice (0..3)
-def cores(i: U32) -> U32:
-  match i:
-    case 0: 16739179      # laranja
-    case 1: 5025616       # verde
-    case 2: 4367861       # azul
-    case _: 16761095      # amarelo
-
-# ----------------------------------------------------------------
-# VIEW: o estado vira uma quadtree
-# ----------------------------------------------------------------
-def fundo() -> U32: 1315860
-
-# O quadrado [x0, x0 + t) x [y0, y0 + t) está todo fora da bola? Todo dentro?
-def fora(+x0: U32, +y0: U32, +t: U32, +bx: U32, +by: U32) -> Bool:
-  (x0 + t <= bx : U32) || (bx + Bola.lado() <= x0 : U32) || (y0 + t <= by : U32) || (by + Bola.lado() <= y0 : U32)
-
-def dentro(+x0: U32, +y0: U32, +t: U32, +bx: U32, +by: U32) -> Bool:
-  (bx <= x0 : U32) && (x0 + t <= bx + Bola.lado() : U32) && (by <= y0 : U32) && (y0 + t <= by + Bola.lado() : U32)
-
-# Todo fora: um `Pix` de fundo. Todo dentro: um `Pix` da cor. Senão divide
-# em quatro, e os quadrantes saem de dois pares de chamadas paralelas. Como
-# `desenha` não pode chamar um auxiliar que a chame de volta, quem calcula
-# `fora`/`dentro` de cada quadrante é quem o pede (padrão da Armadilha 2).
-def desenha(k: Nat, e_fora: Bool, e_dentro: Bool, +x0: U32, +y0: U32, +t: U32, +bx: U32, +by: U32, +cor: U32) -> Image:
-  match k e_fora e_dentro:
-    case _ True{} _: Pix{fundo()}
-    case _ False{} True{}: Pix{cor}
-    case 0n False{} False{}: Pix{cor}
-    case 1n+ +p False{} False{}:
-      +h = (t / 2 : U32)
-      +x1 = (x0 + h : U32)
-      +y1 = (y0 + h : U32)
-      tl tr =
-        desenha(p, fora(x0, y0, h, bx, by), dentro(x0, y0, h, bx, by), x0, y0, h, bx, by, cor)
-        desenha(p, fora(x1, y0, h, bx, by), dentro(x1, y0, h, bx, by), x1, y0, h, bx, by, cor)
-      bl br =
-        desenha(p, fora(x0, y1, h, bx, by), dentro(x0, y1, h, bx, by), x0, y1, h, bx, by, cor)
-        desenha(p, fora(x1, y1, h, bx, by), dentro(x1, y1, h, bx, by), x1, y1, h, bx, by, cor)
-      Qua{tl, tr, bl, br}
-
-def view(b: Bola) -> Image:
-  Bola{+x, +y, dx, dy, c, q, l} = b
-  desenha(8n, False{}, False{}, 0, 0, Tela.lado(), x, y, cores((c % 4 : U32)))
+# O raio é 1/8 do menor lado; a velocidade depende do tamanho da janela
+# (atravessa a largura em ~3 s), com proporções diferentes em x e em y para
+# a esfera não repetir sempre a mesma diagonal.
+def inicio(+w: U32, +h: U32) -> Bola:
+  +fw = U32.to_f32(w)
+  +fh = U32.to_f32(h)
+  Bola{(fw / 3.0 : F32), (fh / 4.0 : F32), (fw / 180.0 : F32), (fh / 140.0 : F32),
+    U32.to_f32((U32.min(w, h) / 8 : U32)), w, h}
 
 # ----------------------------------------------------------------
-# TICK: os eventos do quadro mudam o estado
+# MOVIMENTO
 # ----------------------------------------------------------------
-# Rebate na parede: se o próximo passo sai da tela, inverte a direção
-# (a direção é +1 ou -1, que em U32 é 4294967295)
-def rebate(+p: U32, +d: U32) -> U32:
-  Bool.pick(U32, ((p + d : U32) > (Tela.lado() - Bola.lado()) : U32), (0 - d : U32), d)
 
-# Um passo de animação; `None` fecha a janela quando chega no limite
-def anda(b: Bola) -> Maybe<&1, Bola>:
-  Bola{+x, +y, dx, dy, c, +q, +lim} = b
-  +dx2 = rebate(x, dx)
-  +dy2 = rebate(y, dy)
-  Bool.pick(Maybe<&1, Bola>, U32.is_ne(lim, 0) && (q + 1 >= lim : U32), None{},
-    Some{Bola{(x + dx2 : U32), (y + dy2 : U32), dx2, dy2, c, (q + 1 : U32), lim}})
+# Um seletor tipado: com `match`, só o valor escolhido é usado, e ele não
+# "encaixota" o F32 como o `Bool.pick` genérico faz (bend guide shaders).
+def escolhe(c: Bool, a: F32, b: F32) -> F32:
+  match c:
+    case True{}: a
+    case False{}: b
 
-def troca_cor(b: Bola) -> Bola:
-  Bola{x, y, dx, dy, c, q, l} = b
-  Bola{x, y, dx, dy, (c + 1 : U32), q, l}
+# A nova velocidade num eixo, depois de andar até `q`: se passou da parede
+# de baixo (0), vai para o lado positivo; se passou da de cima (lim), para o
+# negativo; senão continua a mesma. Refletir é só isso.
+def reflete(+q: F32, +v: F32, +r: F32, +lim: F32) -> F32:
+  escolhe((q < r : F32), F32.abs(v),
+    escolhe((q > lim - r : F32), (0.0 - F32.abs(v) : F32), v))
 
-def leva_para(b: Bola, +mx: U32, +my: U32) -> Bola:
-  Bola{x, y, dx, dy, c, q, l} = b
-  +m = (Tela.lado() - Bola.lado() : U32)
-  Bola{U32.min(mx, m), U32.min(my, m), dx, dy, c, q, l}
+# Um quadro de animação: anda, prende a esfera dentro da janela e reflete
+def anda(b: Bola) -> Bola:
+  Bola{+x, +y, +vx, +vy, +r, +w, +h} = b
+  +fw = U32.to_f32(w)
+  +fh = U32.to_f32(h)
+  +nx = (x + vx : F32)
+  +ny = (y + vy : F32)
+  Bola{F32.clamp(nx, r, (fw - r : F32)), F32.clamp(ny, r, (fh - r : F32)),
+    reflete(nx, vx, r, fw), reflete(ny, vy, r, fh), r, w, h}
 
-def tick(eventos: List<Event>, b: Bola) -> IO(Maybe<&1, Bola>):
+# ----------------------------------------------------------------
+# DESENHO: o estado vira uma árvore de quadrantes
+# ----------------------------------------------------------------
+
+def Cor.fundo() -> U32: 1579040    # 0x181820
+
+def rgb(+r: U32, +g: U32, +b: U32) -> U32:
+  U32.or(U32.or(U32.shln(r, 16n), U32.shln(g, 8n)), b)
+
+# Um canal: a cor base vezes a luz difusa, mais o brilho branco (até 255)
+def canal(+base: F32, +difusa: F32, +brilho: F32) -> U32:
+  F32.to_u32(F32.min((base * difusa + 255.0 * brilho : F32), 255.0))
+
+# A cor de um ponto da esfera, com (dx, dy) em unidades de raio a partir do
+# centro. A normal ali é (dx, dy, dz), com dz = raiz(1 - dx² - dy²). A luz vem
+# de cima à esquerda, da direção (-0,45; -0,55; 0,70): o brilho difuso é o
+# cosseno entre ela e a normal, e o reflexo é esse cosseno elevado a 40 (uma
+# mancha pequena e forte).
+def sombreia(+dx: F32, +dy: F32) -> U32:
+  +dz = F32.sqrt(F32.max((1.0 - dx * dx - dy * dy : F32), 0.0))
+  +luz = F32.max((0.70 * dz - 0.45 * dx - 0.55 * dy : F32), 0.0)
+  +difusa = (0.15 + 0.85 * luz : F32)
+  +brilho = F32.pow(luz, 40.0)
+  rgb(canal(255.0, difusa, brilho), canal(110.0, difusa, brilho), canal(40.0, difusa, brilho))
+
+def pixel.cor(dentro: Bool, +dx: F32, +dy: F32) -> U32:
+  match dentro:
+    case True{}: sombreia(dx, dy)
+    case False{}: Cor.fundo()
+
+# Um pixel: o centro dele cai dentro do disco?
+def pixel(+x: U32, +y: U32, +cx: F32, +cy: F32, +r: F32) -> U32:
+  +dx = ((U32.to_f32(x) + 0.5 - cx) / r : F32)
+  +dy = ((U32.to_f32(y) + 0.5 - cy) / r : F32)
+  pixel.cor((dx * dx + dy * dy < 1.0 : F32), dx, dy)
+
+# O quadrado de lado `t` em (x0, y0) fica todo fora do disco? Compara o raio
+# com a distância do centro até o ponto do quadrado mais perto dele. O que
+# está fora da janela também fica fora do disco, então é cortado aqui.
+def fora(+x0: U32, +y0: U32, +t: U32, +cx: F32, +cy: F32, +r: F32) -> Bool:
+  +ax = U32.to_f32(x0)
+  +ay = U32.to_f32(y0)
+  +bx = (ax + U32.to_f32(t) : F32)
+  +by = (ay + U32.to_f32(t) : F32)
+  +dx = (F32.clamp(cx, ax, bx) - cx : F32)
+  +dy = (F32.clamp(cy, ay, by) - cy : F32)
+  (dx * dx + dy * dy >= r * r : F32)
+
+# Um quadrado de lado 2^n. Todo fora: um `Pix` só, com a cor do fundo, sem
+# descer mais. Senão divide em quatro, calculados em paralelo, até chegar a
+# um pixel. Por isso o custo de um quadro é proporcional ao tamanho da
+# esfera, não ao da janela. Quem pede cada quadrante já calcula se ele está
+# `vazio` (a condição vira parâmetro: `desenha` não pode chamar um auxiliar
+# que a chame de volta).
+def desenha(n: Nat, vazio: Bool, +x0: U32, +y0: U32, +cx: F32, +cy: F32, +r: F32) -> Image:
+  match n vazio:
+    case _ True{}:
+      Pix{Cor.fundo()}
+    case 0n False{}:
+      Pix{pixel(x0, y0, cx, cy, r)}
+    case 1n+ +p False{}:
+      +t = U32.shln(1, p)
+      +x1 = (x0 + t : U32)
+      +y1 = (y0 + t : U32)
+      a b c d = desenha(p, fora(x0, y0, t, cx, cy, r), x0, y0, cx, cy, r)
+        desenha(p, fora(x1, y0, t, cx, cy, r), x1, y0, cx, cy, r)
+        desenha(p, fora(x0, y1, t, cx, cy, r), x0, y1, cx, cy, r)
+        desenha(p, fora(x1, y1, t, cx, cy, r), x1, y1, cx, cy, r)
+      Qua{a, b, c, d}
+
+# O `view` devolve o estado ao lado da imagem (o estado é afim: quem o
+# recebe precisa devolvê-lo). O `!` entrega o desenho à GPU; sem GPU ele roda
+# em paralelo na CPU.
+def view(b: Bola) -> Bola & Image:
+  Bola{+x, +y, vx, vy, +r, +w, +h} = b
+  +k = M.log2_ceil(U32.max(w, h))
+  (Bola{x, y, vx, vy, r, w, h}, desenha!(k, fora(0, 0, U32.shln(1, k), x, y, r), 0, 0, x, y, r))
+
+# ----------------------------------------------------------------
+# O APP
+# ----------------------------------------------------------------
+
+# Os eventos do quadro: só o fechar da janela interessa. `None` encerra.
+def tick(eventos: List<Event>, b: Bola) -> IO(Maybe<Bola>):
   match eventos:
     case Nil{}:
-      IO.pure(Maybe<&1, Bola>, anda(b))
+      IO.pure(Maybe<Bola>, Some{anda(b)})
     case Close{} <> resto:
-      IO.pure(Maybe<&1, Bola>, None{})
-    case Key{codigo, True{}} <> resto:
-      tick(resto, troca_cor(b))
-    case Mouse{mx, my, botao, True{}} <> resto:
-      tick(resto, leva_para(b, mx, my))
+      IO.pure(Maybe<Bola>, None{})
     case e <> resto:
       tick(resto, b)
 
 def app() -> App<Bola>:
-  App{+b => (b, view(b)), tick}
+  App{view, tick}
 
-def inicio(+limite: U32) -> Bola:
-  Bola{10, 50, 3, 2, 0, 0, limite}
-
-# ----------------------------------------------------------------
-# SEM JANELA: App.play com eventos escritos à mão
-# ----------------------------------------------------------------
-def roteiro() -> List<&1, List<&1, Event>>:
-  [[], [Key{32, True{}}], [], [Mouse{200, 10, 1, True{}}], [], []]
-
-def mostra(m: Maybe<&1, Bola>) -> String:
-  match m:
-    case None{}: "a janela teria fechado"
-    case Some{b}:
-      match b:
-        case Bola{x, y, dx, dy, c, q, l}:
-          "depois de " ++ U32.show(q) ++ " quadros: bola em (" ++ U32.show(x) ++ ", " ++ U32.show(y) ++ "), cor " ++ U32.show(c)
-
-def executa(modo: String, +quadros: U32) -> IO(Unit):
-  match modo:
-    case "teste":
-      do IO<Unit>:
-        final : Maybe<&1, Bola> <- App.play(~Bola, ~app(), roteiro(), inicio(0))
-        IO.print(mostra(final))
-    case _:
-      App.run(~Bola, ~app(), "Bend: bola quicando", Tela.lado(), Tela.lado(), inicio(quadros))
+# `App.run` é `Window.open` seguido de `App.loop` com um combustível de 2^32
+# quadros (~2 anos a 60 por segundo). Aqui o `App.loop` é chamado direto
+# para aceitar um número de quadros; 0 é "até fechar".
+def quadros(n: U32) -> Nat:
+  match n:
+    case 0: U32.to_nat(4294967295)
+    case k: U32.to_nat(k)
 
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
-    +ts : List<&2, String> = IOU.texts(args)
-    executa(IOU.text_at(ts, 0n, ""), IOU.text_num_at(ts, 0n, 0))
+    +ns : List<&2, Maybe<&2, U32>> = IOU.numbers(args)
+    +w : U32 = U32.clamp(IOU.num_at(ns, 0n, 640), 32, 4096)
+    +h : U32 = U32.clamp(IOU.num_at(ns, 1n, 480), 32, 4096)
+    +n : U32 = IOU.num_at(ns, 2n, 0)
+    janela : Window <- IO.try(Window, Window.open("Bend: esfera", w, h))
+    t0 : Nat <- IO.now()
+    App.loop(~Bola, ~app(), quadros(n), janela, inicio(w, h))
+    dt : String <- IOU.tempo_desde(t0)
+    IO.print(U32.show(n) ++ " quadros de " ++ U32.show(w) ++ "x" ++ U32.show(h) ++ " em " ++ dt)
