@@ -405,7 +405,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 > **Conceito:** regressão do 2.0.29, na área da correção #1026 ("a boxed Bool from a generic pick reaches Bool.or as a flat tag on C"). Quando um operando de `||` (ou `Bool.or`) é uma comparação contra uma **def nullária** (`U32.is_eq(t, MAX())`, `U32.is_ge(n, Trecho.maximo())`), o C gerado testa o resultado, que já é 0 ou 1, como se fosse um termo (`term_aux(_u) == CID_FALSE`), e esse operando vira sempre `True`.
 
 * **Só no nativo.** `bend arquivo.bend` responde certo e o `--check-only` passa: só um teste rodado no binário pega.
-* **Só no `||`.** Saem certos: `&&`, `Bool.not`, `Bool.pick` e `match` sobre a mesma comparação; um `||` cujo operando chama uma def COM argumentos (`f(x) || ..`); e a comparação com um literal.
+* **Só no `||` (`Bool.or`) e no `Bool.xor`**, os dois intrínsecos que a PR #1038 mudou, em qualquer posição. Saem certos: `&&`, `Bool.not`, `Bool.pick` e `match` sobre a mesma comparação; um operando que chama uma def COM argumentos (`f(x) || ..`); e a comparação com um literal. Causa provável: o valor da comparação fica rotulado como `Bool` encaixotado embora a palavra seja o 0/1 plano do `U32_BIN`, e a conversão da #1038 o testa com `term_aux(..) == CID_FALSE`. Reprodução e rascunho de issue em `bugs/2.0.29-bool-or/`.
 * **O que já mordeu:** `R.hit` acertava sempre (`R.per(1, 2)` virava 100%: o `random_test` e o cruzamento uniforme do `arena_test` falharam), e o `hilbert_detalhe` cortava um trecho por pixel (185 KB em vez de 84 KB, sem erro nenhum).
 * **A saída:** ligue a constante num binder local antes do `||`:
   ```bend
@@ -413,7 +413,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
     +max = MAX()                                                  # ✔️
     U32.is_eq(threshold, max) || U32.is_lt(mix(seed), threshold)
   ```
-* **Sonda para reverificar ao atualizar** (deve imprimir `F`; o 2.0.29 imprime `T`): `def K() -> U32: 100` e `def h(+x: U32) -> Bool: U32.is_eq(x, K()) || U32.is_eq(x, 50)`, com `x = 9` vindo de runtime (do tamanho de `IO.args`, por exemplo, para o compilador não dobrar a conta).
+* **Sonda para reverificar ao atualizar** (deve imprimir `False`; o 2.0.29 imprime `True` no nativo): `bugs/2.0.29-bool-or/repro.bend`, que é só `def K() -> U32: 1` e `IO.print(Bool.show(U32.is_eq(0, K()) || False{}))`.
 
 ---
 
@@ -424,6 +424,10 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 * **Desenhe só onde há detalhe.** Um quadrado todo de uma cor vira um `Pix` na hora, sem descer; só divida onde a figura corta o quadrado. Assim o custo é proporcional à figura, não à janela. A condição "este quadrante é liso?" é calculada por quem pede o quadrante e entra como parâmetro (o padrão da Armadilha 2; os demos `app_pong_game_2d` e `app_triangle_2d` fazem igual).
 * **`App.run` é `Window.open` seguido de `App.loop` com 2^32 quadros de combustível.** Chamar `App.loop(~S, ~app, U32.to_nat(n), janela, estado)` direto roda `n` quadros e deixa medir o tempo. O `tick` precisa responder `None{}` ao `Close{}`, senão o botão de fechar não fecha.
 * **Estado só de escalares** (`F32`, `U32`), que anda em registradores. Para escolher um `F32`, use um seletor tipado com `match` (`def escolhe(c: Bool, a: F32, b: F32) -> F32`), não o `Bool.pick` genérico, que encaixota a palavra.
+* **Guardar a `Image` no estado não a recalcula.** `Image` é `Data`: o `view` pode devolver `(Tela{v, img}, img)` com `+img`, e a imagem é calculada uma vez e compartilhada. Medido em `exemplos/mandelbrot_janela.bend` (640x480): calcular custa ~40 ms, e cada `view` a mais só ~2 ms (percorrer a árvore). É o jeito de mostrar algo caro que só muda com um evento: recalcule no `tick` e guarde.
+* **O laço de 60 Hz ocupa ~80-100% de um núcleo mesmo com a imagem parada** (medido com `top` na `janela` e na `mandelbrot_janela`), por causa do preenchimento por pixel e da espera do runtime.
+* **Um `match` múltiplo aceita nomes no caso coringa** (`case qa qb qc qd: Qua{qa, qb, qc, qd}`), além de `_`: dá para devolver os valores escrutinados sem reconstruí-los.
+* **Simular cliques:** a `libXtst` está instalada; por `ctypes`, `XTestFakeMotionEvent` + `XTestFakeButtonEvent` (botão 1 é o esquerdo, 3 o direito; no `Event`, esquerdo = 0 e direito = 1). O `xwininfo -name` mede a janela COM a moldura do GNOME: some ~14 px em x e ~49 px em y para cair na área desenhada.
 * **Testar sem olhar a tela:** `xwd -name "<título>" -silent -out q.xwd` captura a janela em execução. O XWD daqui tem pixels de 3 bytes (BGR) em linhas de `bytes_per_line` bytes (o campo 12 do cabeçalho); com o PIL: `Image.frombytes('RGB', (w, h), dados, 'raw', 'BGR', bpl)`.
 
 ---

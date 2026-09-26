@@ -103,11 +103,12 @@ bend exemplos/primos.bend -o bin/primos
 | `monte_carlo` | aleatoriedade pura com fluxos independentes por tarefa (`utils/random`); `!` com tarefas para uma GPU |
 | `histograma` | `Array.fork` + `Array.atomic.*` contra um array por tarefa |
 | `arrays`, `arquivos` | `Array` (leitura devolve o array junto), `utils/arrays`, arquivos em blocos |
-| `bmp`, `mandelbrot` | imagens BMP com `utils/bmp`; Mandelbrot paralelo (com zoom e `!`) gravado em BMP |
+| `bmp`, `mandelbrot` | imagens BMP com `utils/bmp`; Mandelbrot paralelo (zoom, `!`, cor suave com estimativa de distância) gravado em BMP |
 | `hilbert`, `hilbert_detalhe` | percurso genérico com callback; um codec de imagem pela curva de Hilbert |
 | `json` | `utils/json`: ler, consultar e escrever JSON |
 | `concorrencia` | `IO.fork`/`IO.join`, `IO.sleep`, canais (produtor/consumidor) |
 | `servidor` | um servidor HTTP mínimo com TCP |
 | `janela` | uma esfera quicando numa janela de largura x altura: `Image` em quadrantes, `App.loop` |
+| `mandelbrot_janela` | importa `mandelbrot.bend` e desenha numa janela; clique esquerdo aproxima 2×, direito afasta |
 
 O motor genético em `genetic/` é um projeto maior, com o próprio README.
