@@ -405,7 +405,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 > **Conceito:** regressão do 2.0.29, na área da correção #1026 ("a boxed Bool from a generic pick reaches Bool.or as a flat tag on C"). Quando um operando de `||` (ou `Bool.or`) é uma comparação contra uma **def nullária** (`U32.is_eq(t, MAX())`, `U32.is_ge(n, Trecho.maximo())`), o C gerado testa o resultado, que já é 0 ou 1, como se fosse um termo (`term_aux(_u) == CID_FALSE`), e esse operando vira sempre `True`.
 
 * **Só no nativo.** `bend arquivo.bend` responde certo e o `--check-only` passa: só um teste rodado no binário pega.
-* **Só no `||` (`Bool.or`) e no `Bool.xor`**, os dois intrínsecos que a PR #1038 mudou, em qualquer posição. Saem certos: `&&`, `Bool.not`, `Bool.pick` e `match` sobre a mesma comparação; um operando que chama uma def COM argumentos (`f(x) || ..`); e a comparação com um literal. Causa provável: o valor da comparação fica rotulado como `Bool` encaixotado embora a palavra seja o 0/1 plano do `U32_BIN`, e a conversão da #1038 o testa com `term_aux(..) == CID_FALSE`. Reprodução e rascunho de issue em `bugs/2.0.29-bool-or/`.
+* **Só no `||` (`Bool.or`) e no `Bool.xor`**, os dois intrínsecos que a PR #1038 mudou, em qualquer posição. Saem certos: `&&`, `Bool.not`, `Bool.pick` e `match` sobre a mesma comparação; um operando que chama uma def COM argumentos (`f(x) || ..`); e a comparação com um literal. Causa provável: o valor da comparação fica rotulado como `Bool` encaixotado embora a palavra seja o 0/1 plano do `U32_BIN`, e a conversão da #1038 o testa com `term_aux(..) == CID_FALSE`.
 * **O que já mordeu:** `R.hit` acertava sempre (`R.per(1, 2)` virava 100%: o `random_test` e o cruzamento uniforme do `arena_test` falharam), e o `hilbert_detalhe` cortava um trecho por pixel (185 KB em vez de 84 KB, sem erro nenhum).
 * **A saída:** ligue a constante num binder local antes do `||`:
   ```bend
@@ -413,7 +413,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
     +max = MAX()                                                  # ✔️
     U32.is_eq(threshold, max) || U32.is_lt(mix(seed), threshold)
   ```
-* **Sonda para reverificar ao atualizar** (deve imprimir `False`; o 2.0.29 imprime `True` no nativo): `bugs/2.0.29-bool-or/repro.bend`, que é só `def K() -> U32: 1` e `IO.print(Bool.show(U32.is_eq(0, K()) || False{}))`.
+* **Sonda para reverificar ao atualizar** (deve imprimir `False`; o 2.0.29 imprime `True` no nativo): `def K() -> U32: 1` e `def main() -> IO(Unit): IO.print(Bool.show(U32.is_eq(0, K()) || False{}))`.
 
 ---
 
