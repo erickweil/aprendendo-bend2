@@ -356,6 +356,7 @@ def show.go(~T: Type, ~fn: T -> String, arr: Array<T>) -> String:
 
 def show(~T: Type, ~fn: T -> String, arr: Array<T>) -> String:
   "[" ++ show.go(~T, ~fn, arr) ++ "]"
+
 # ----------------------------------------------------------------
 # fold_idx: dobra sobre uma SEQUÊNCIA DE ÍNDICES
 # ----------------------------------------------------------------

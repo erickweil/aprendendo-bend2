@@ -238,16 +238,22 @@ def parse_json(s: String) -> ParseRes:
 # 4. CONSULTA ERGONÔMICA NO AST JSON
 # ------------------------------------------------------------------------------
 
-def Json.find_key(keys: List<&2, String>, vals: List<&2, Json>, +target: String) -> Maybe<&2, Json>:
-  match keys:
-    case Nil{}:
+# Procura `target` nas chaves e devolve o valor da mesma posição, parando na
+# primeira chave igual. A comparação da chave ANTERIOR entra como parâmetro
+# (`achou`, junto com o valor `v` dela), e o caso `True{}` responde sem
+# recursão; um `Bool.pick` percorreria o objeto inteiro (AGENTS.md,
+# Armadilha 2).
+def Json.find_key.go(keys: List<&2, String>, vals: List<&2, Json>, achou: Bool, v: Json, +target: String) -> Maybe<&2, Json>:
+  match keys vals achou:
+    case _ _ True{}:
+      Some{v}
+    case +k <> kt v2 <> vt False{}:
+      Json.find_key.go(kt, vt, String.eq(k, target), v2, target)
+    case _ _ False{}:
       None{}
-    case +k <> kt:
-      match vals:
-        case Nil{}:
-          None{}
-        case +v <> vt:
-          Bool.pick(Maybe<&2, Json>, String.eq(k, target), Some{v}, Json.find_key(kt, vt, target))
+
+def Json.find_key(keys: List<&2, String>, vals: List<&2, Json>, +target: String) -> Maybe<&2, Json>:
+  Json.find_key.go(keys, vals, False{}, JNull{}, target)
 
 def Json.get(j: Json, target: String) -> Maybe<&2, Json>:
   match j:
