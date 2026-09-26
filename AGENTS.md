@@ -1,6 +1,6 @@
 # AGENTS.md — Guia de Engenharia e Operação em Bend 2
 
-> Verificado contra o **bend 2.0.27**. Ao atualizar o bend, regenere o GUIDE.md (`bend guide > GUIDE.md`), leia o CHANGELOG (`curl -sL https://raw.githubusercontent.com/bendlang/bend/main/CHANGELOG.md`) e reverifique as armadilhas com sondas curtas compiladas para nativo. A versão instalada sai de `bend version`.
+> Verificado contra o **bend 2.0.29**. Ao atualizar o bend, regenere o GUIDE.md (`bend guide > GUIDE.md`), leia o CHANGELOG (`curl -sL https://raw.githubusercontent.com/bendlang/bend/main/CHANGELOG.md`) e reverifique as armadilhas com sondas curtas compiladas para nativo. A versão instalada sai de `bend version`.
 
 ## 1. Como Orquestrar a Execução do Bend 2 com Segurança
 
@@ -20,24 +20,29 @@ Para aprender sobre o BEND2, leia o GUIDE.md gerado pelo comando `bend guide > G
   timeout 60s bend arquivo.bend -o ./bin/arquivo
   timeout 60s ./bin/arquivo --threads 1     # Single core
   timeout 60s ./bin/arquivo --threads 4     # Multi core
+  timeout 60s ./bin/arquivo --bend-help     # as opções do runtime
   ```
+  Desde o 2.0.29 um `--help` vai para o programa (aparece em `IO.args`); a ajuda do runtime é `--bend-help`. As opções do runtime (`--threads`, `--gpu`) saem de `IO.args`, e um `--` encerra as opções. Dentro do programa, `IO.thread_count()` (2.0.28) diz quantas threads o binário usa.
 * **Performance só se mede no NATIVO.** `bend arquivo.bend` faz duas coisas diferentes conforme o `main`: um `main` que devolve **valor** é *normalizado pelo verificador* (preguiçoso: um `Bool.pick` ali não avalia o ramo descartado); um `main` que devolve **`IO`** roda *compilado*, mas numa trilha muito mais lenta que o binário — e já estrito. Medido no 2.0.26: 10⁹ passos de xorshift levam 57 s com `bend arquivo.bend` e 1,1 s com `-o`. Nenhum argumento de performance vale se não vier de um binário `-o`. E há erros que **só o backend nativo acusa** (ex.: "an open Array element type") — compile também o que só foi checado.
-* **Ao medir código paralelo, varie as threads** (`--threads 1 2 4 8 12`) e compare com o teto real da máquina. Referência medida no 2.0.27 com os exemplos deste repositório (i5-1245U de 15 W, 2 núcleos P + 8 E, 12 threads; ganho de 12 threads sobre 1):
+* **Ao medir código paralelo, varie as threads** (`--threads 1 2 4 8 12`) e compare com o teto real da máquina. Referência medida no 2.0.29 com os exemplos deste repositório (i5-1245U de 15 W, 2 núcleos P + 8 E, 12 threads; ganho de 12 threads sobre 1):
 
   | exemplo | tarefas | ganho |
   |---|---|---|
-  | `monte_carlo 256` (só CPU, sem memória compartilhada) | 64 | **5,4×** |
-  | `pow 28` (o `pow2` do GUIDE) | 2^28 | 4,1× |
+  | `monte_carlo 256` (só CPU, sem memória compartilhada) | 2^14 | **5,6×** |
+  | `pow 28` (o `pow2` do GUIDE) | 2^28 | 3,9× |
   | `fibonacci 40` | ~1,6^40 | 4,0× |
-  | `mandelbrot 11 1000` (inclui gravar o BMP) | 4M pixels | 4,0× |
-  | `primos 20000000 6` (carga desigual) | 64 | 3,8× (8 tarefas: 2,5×) |
-  | `sort_merge 1000000` (listas encadeadas) | 32 | ~1,15× — limitado pela memória |
+  | `mandelbrot 11 1000` (inclui gravar o BMP) | 4M pixels | 3,8× |
+  | `primos 20000000 6` (carga desigual) | 64 | 3,2× (8 tarefas: 2,1×) |
+  | `sort_merge 1000000` (listas encadeadas) | 32 | ~1,3× — limitado pela memória |
+
+  **Notebook na bateria: os tempos absolutos dobram** (perfil "balanced", CPU a ~650 MHz em repouso; confira `cat /sys/class/power_supply/BAT*/status`). Os ganhos da tabela quase não mudam, mas não compare um tempo medido na bateria com um medido na tomada: meça as duas versões na mesma sessão. Os números absolutos nos comentários dos exemplos dizem quando foram medidos na bateria.
 
   Quase todos já chegam ao platô com 8 threads. Um platô antes do número de tarefas independentes indica parte sequencial ou desbalanceamento; um platô que piora conforme o volume de dados cresce indica limite de banda de memória.
 * **Para medir DENTRO do programa, use `IO.now()`** (milissegundos; `IOU.tempo_desde(t0)` em `utils/io.bend`). O código puro só é calculado quando alguém precisa do valor: imprima o resultado ANTES de ler o relógio de novo, senão o cálculo cai fora do intervalo.
-* **`!` (GPU) compila aqui** mesmo com o clang 18 e sem CUDA (o GUIDE pede clang 19+): o binário roda a chamada `f!(x)` na CPU, em paralelo. Verificado no 2.0.27 com `pow.bend` e `mandelbrot.bend`.
+* **`!` (GPU) compila aqui** mesmo com o clang 18 e sem CUDA (o GUIDE pede clang 19+): o binário roda a chamada `f!(x)` na CPU, em paralelo. Verificado no 2.0.29 com `pow`, `mandelbrot`, `monte_carlo` e `janela`: **sem GPU o `!` não custa nada mensurável** (`pow 28`: 401 ms sem, 397 ms com; `monte_carlo`: igual). Então use `!` onde o trabalho é numérico e uniforme, e dê a ele tarefas suficientes para uma GPU: ~4^7 = 16384 folhas por `!` (o `bend guide shaders`); com 64 tarefas quase todas as lanes ficariam paradas. Na CPU, as tarefas a mais não pesam (o `monte_carlo` com 2^14 ficou ~8% MAIS rápido que com 64, por equilibrar melhor os núcleos P e E).
+* **O LSP do editor pode estar atrás do `bend` instalado.** No 2.0.29 o `bend2-lsp` acusava `IO.thread_count` como nome indefinido e o let tipado fora do `do` como erro de sintaxe, e os dois checam e rodam. Quem decide é `bend arquivo.bend --check-only`.
 * **Compilação e Verificação Estática:**
-  - Checar sem rodar: `timeout 60s bend <arquivo.bend> --check-only` (checa o arquivo e os imports).
+  - Checar sem rodar: `timeout 60s bend <arquivo.bend> --check-only` (checa o arquivo e os imports). Desde o 2.0.29 o erro sublinha o trecho exato (`^^^`), e parte das mensagens vem como `- message : ...` em vez do par `expected`/`observed`; o texto delas é o mesmo citado neste guia.
   - Verificação de provas e teoremas: `timeout 60s bend PROOF.bend` (veja a seção 4 sobre o par LAWS/PROOF).
   - Inspeção do código gerado: `timeout 60s bend <arquivo.bend> -o saida.c` (emite o fonte C sem compilar).
 
@@ -58,7 +63,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 ---
 
 ### 🔴 Armadilha 2: `Bool.pick` é Estrito (*Strict Evaluation*)
-> **Conceito:** Na HVM, `Bool.pick(T, cond, then_branch, else_branch)` avalia **ambos os ramos** incondicionalmente. Só é preguiçoso quando o `main` devolve um valor e o verificador o normaliza (veja 1.1). Reverificado no 2.0.27, no nativo: o ramo pesado (3·10⁸ passos) custa os mesmos ~140 ms com a condição verdadeira ou falsa.
+> **Conceito:** Na HVM, `Bool.pick(T, cond, then_branch, else_branch)` avalia **ambos os ramos** incondicionalmente. Só é preguiçoso quando o `main` devolve um valor e o verificador o normaliza (veja 1.1). Reverificado no 2.0.29, no nativo: o ramo pesado (3·10⁸ passos) custa os mesmos ~75 ms com a condição verdadeira ou falsa.
 * **Pega também quem usa árvores:** um `inserir`/`buscar` de árvore binária escrito como `Bool.pick(..., No{v, inserir(esq), dir}, No{v, esq, inserir(dir)})` desce pelos **dois** lados a cada nível, e passa a visitar a árvore inteira: O(n) por operação em vez de O(log n). Medido em `exemplos/arvore.bend` (2.0.27): 4000 inserções aleatórias em 777 ms com o `pick`, 4 ms com o desvio certo — que é o padrão abaixo: quem desce já leva a comparação com a raiz do filho como parâmetro (`inserir.go(a, lado: Cmp, novo)`) e o `match a lado:` escolhe o caminho.
 * **Pega também quem só MOSTRA:** `IO.print(Bool.pick(String, pequena, texto_da_arvore_inteira(a), ""))` monta o texto mesmo quando ele não vai ser impresso. Se o texto é feito com `++` aninhado à esquerda, isso é O(n²): no `arvore.bend`, 10 mil valores custavam 1,8 s e 20 mil, 8 s — tudo depois da última linha útil do programa. Use um `match` num auxiliar.
 
@@ -74,7 +79,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 
 * **Como obter short-circuit de verdade.** É preciso que o `match` recaia sobre um **parâmetro**, e o Bend 2 impõe três restrições simultâneas que eliminam quase todas as alternativas óbvias:
 
-  1. **Não existe recursão mútua em código seguro.** `f.step` não pode chamar `f` — no 2.0.27 o compilador responde `expected: a filled definition (an unfilled law is a dead claim: live code cannot use it)`, porque toda def ainda não escrita conta como uma lei em aberto. (Desde o 2.0.27, defs `@unsafe` — ou `def f?(..)`, o açúcar novo — podem se chamar mutuamente e chamar defs de baixo; mas o checklist não permite `@unsafe` explícito.)
+  1. **Não existe recursão mútua em código seguro.** `f.step` não pode chamar `f` — desde o 2.0.27 (igual no 2.0.29) o compilador responde `expected: a filled definition (an unfilled law is a dead claim: live code cannot use it)`, porque toda def ainda não escrita conta como uma lei em aberto. (Desde o 2.0.27, defs `@unsafe` — ou `def f?(..)`, o açúcar novo — podem se chamar mutuamente e chamar defs de baixo; mas o checklist não permite `@unsafe` explícito.)
   2. **`match` não escrutina binder local.** `+c = U32.is_eq(...)` seguido de `match c:` é rejeitado com *"a match cannot scrutinize a local binder: give it its own def"*.
   3. **Escrutínio segue a ordem dos binders** e o verificador de terminação **lê os argumentos da esquerda para a direita**, exigindo que um deles encolha antes que qualquer outro mude.
 
@@ -138,7 +143,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
   b = {Box{[0 : U32*4n]} : Box<Array<U32>>}  # ❌ "expected: Data, observed: Type"
   ```
   Um campo de registro **`Type`** aceita, sim (veja a Armadilha 3c): `type Individual<-G: Type> is Type` guarda um `Array`. O que não existe é `Array` dentro de `Data`.
-* **Genéricos sobre o elemento precisam ser template.** Com `-G: Data` (apagado) o verificador aceita, mas o backend nativo recusa com **"an open Array element type"**: ele precisa do tipo concreto. Use `~G: Data`, que especializa em tempo de compilação. **Revalidado no 2.0.27**, com uma mudança: a def de uma linha `def first(-T: Data, a: Array<T>) -> Array<T> & T: Array.get(T, a, 0)` agora compila (é especializada no ponto de uso), mas um **laço recursivo** genérico continua morrendo: `def go(-T: Data, k: Nat, r: Array<T> & T, ..)` que chama `Array.get(T, ..)` dá `All terms check.` no `--check-only` e `an open Array element type` no `-o`. É o exemplo mínimo de por que o passo 3 do checklist (compilar para nativo) não é opcional.
+* **Genéricos sobre o elemento precisam ser template.** Com `-G: Data` (apagado) o verificador aceita, mas o backend nativo recusa com **"an open Array element type"**: ele precisa do tipo concreto. Use `~G: Data`, que especializa em tempo de compilação. **Revalidado no 2.0.29** (igual ao 2.0.27), com uma mudança em relação às versões anteriores: a def de uma linha `def first(-T: Data, a: Array<T>) -> Array<T> & T: Array.get(T, a, 0)` agora compila (é especializada no ponto de uso), mas um **laço recursivo** genérico continua morrendo: `def go(-T: Data, k: Nat, r: Array<T> & T, ..)` que chama `Array.get(T, ..)` dá `All terms check.` no `--check-only` e `an open Array element type` no `-o`. É o exemplo mínimo de por que o passo 3 do checklist (compilar para nativo) não é opcional.
 * **Ler um `Array` num laço:** `Array.get` devolve o par `(array, valor)`, e desestruturar o retorno de uma chamada é um `match` proibido; o auxiliar óbvio cairia em recursão mútua. A saída é fazer do par o **estado do laço** e desestruturá-lo como parâmetro, dentro de cada caso:
   ```bend
   def read(k: Nat, r: Array<U32> & U32, +acc: U32, +s: U32) -> U32:
@@ -372,11 +377,12 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 ---
 
 ### 🔴 Armadilha 10: Ordem dos Parâmetros e dos Bindings
-* **Não há referência para a frente entre defs: uma def só enxerga o que já foi definido ACIMA dela no arquivo.** No 2.0.27 chamar um auxiliar declarado mais abaixo dá `expected: a filled definition (an unfilled law is a dead claim: live code cannot use it), observed: <nome>` (até o 2.0.26 era `expected: a defined name`). Some isso à falta de recursão mútua (Armadilha 5) e a ordem do arquivo passa a ser parte do projeto: auxiliar primeiro, laço depois.
+* **Não há referência para a frente entre defs: uma def só enxerga o que já foi definido ACIMA dela no arquivo.** Desde o 2.0.27 (igual no 2.0.29) chamar um auxiliar declarado mais abaixo dá `expected: a filled definition (an unfilled law is a dead claim: live code cannot use it), observed: <nome>` (até o 2.0.26 era `expected: a defined name`). Some isso à falta de recursão mútua (Armadilha 5) e a ordem do arquivo passa a ser parte do projeto: auxiliar primeiro, laço depois.
+* **Nomes não colidem (2.0.28):** um nome declarado duas vezes, um nome da Base redeclarado, um alias de import que colide com outro ou um efeito registrado duas vezes são recusados. Um arquivo local também não pode registrar nomes no namespace de outro arquivo.
 * **Tipos, sim, se citam em qualquer ordem (2.0.27).** Todo `type` é declarado antes das defs, então `Tree` e `Forest` podem se referir um ao outro, e uma def pode devolver um tipo declarado abaixo dela. Verificado no nativo.
 * **O tipo de um template não pode citar um tipo declarado depois dele.** `def f(~key: G -> U32, -G: Data, ...)` passa no verificador mas falha no nativo com "expected: a defined name, observed: G". Declare o tipo primeiro, como template: `def f(~G: Data, ~key: G -> U32, ...)`.
 * **(Corrigido no 2.0.26) Dois nomes que só diferem em maiúsculas colidiam no backend nativo.** `def CHECK()` e `def check()` no mesmo arquivo faziam o `-o` morrer com `two names mangle to FID_CHECK`; no 2.0.26 compila e cada um devolve o seu valor.
-* **`match` depois de um `let` comum é rejeitado** ("this name is a def or a consumed binder"; reverificado no 2.0.27): `+k = (n + 1 : U32)` seguido de `match xs:` não compila. Faça o `match` primeiro e os `let`s dentro de cada caso. **Uma desestruturação antes do `match` agora passa** (2.0.27, verificado no nativo): `(a, b) = p` seguido de `match xs:` compila, tanto para `xs` vindo de `p` quanto para outro parâmetro — é o formato do `List.merge.go` da Base.
+* **`match` depois de um `let` comum é rejeitado** ("this name is a def or a consumed binder"; reverificado no 2.0.29): `+k = (n + 1 : U32)` seguido de `match xs:` não compila. Faça o `match` primeiro e os `let`s dentro de cada caso. **Uma desestruturação antes do `match` agora passa** (2.0.27, verificado no nativo): `(a, b) = p` seguido de `match xs:` compila, tanto para `xs` vindo de `p` quanto para outro parâmetro — é o formato do `List.merge.go` da Base.
 * **`+x = x` dentro de um caso de `match` funciona** (verificado no 2.0.16). O que falha é um `let` seguido de um `match` ou de uma desestruturação `(a, v) = par` no mesmo bloco; nesse caso use o `+` direto no padrão: `case Con{+h, t}:`.
 * **`IO.args` é `List<&1, String>`, afim:** só pode ser percorrida uma vez e não aceita `+`. Converta de uma vez para uma lista `Data` (`utils/io.bend`: `numbers` + `num_at` para números, `texts` + `text_at` para caminhos e nomes, e `text_num_at` quando os argumentos misturam os dois — `args` só pode ser convertido uma vez).
 * **Uma lambda não desestrutura o próprio parâmetro.** `r => (a, b) = r ...` é recusado ("a match on a parameter or field"). Num laço de IO, onde o bind entrega um `File & X`, torne esse par um **parâmetro da próxima chamada** do laço e abra-o lá (`gravar_blocos.go` em `utils/arquivos.bend`). Um auxiliar que abre o par e chama o laço de volta seria recursão mútua.
@@ -392,6 +398,33 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 * **O bug que existiu:** `split.snd(s) = step(step(s) xor K)` dava exatamente 0 para `s = 3783986154`, e uma semente 0 vinda da linha de comando também prendia o fluxo. `R.step` agora desvia o 0 para uma constante; não há estado absorvente (testado em `utils/random_test.bend`).
 * **Semente pequena não é um número uniforme:** o xorshift a partir de uma semente pequena produz números pequenos nos primeiros passos. Nunca use a semente direto como probabilidade ou índice: `R.hit`, `R.range`, `R.unit` passam por `R.mix` (meio `lowbias32`, que também espalha os bits altos para os baixos que o `mod` usa).
 * **Custo medido:** um hash completo por passo custaria o dobro do xorshift, e o gerador é chamado em quase toda operação — por isso o hash só entra no `mix`.
+
+---
+
+### 🔴 Armadilha 12: `||` contra uma def constante sai sempre `True` no nativo (2.0.29)
+> **Conceito:** regressão do 2.0.29, na área da correção #1026 ("a boxed Bool from a generic pick reaches Bool.or as a flat tag on C"). Quando um operando de `||` (ou `Bool.or`) é uma comparação contra uma **def nullária** (`U32.is_eq(t, MAX())`, `U32.is_ge(n, Trecho.maximo())`), o C gerado testa o resultado, que já é 0 ou 1, como se fosse um termo (`term_aux(_u) == CID_FALSE`), e esse operando vira sempre `True`.
+
+* **Só no nativo.** `bend arquivo.bend` responde certo e o `--check-only` passa: só um teste rodado no binário pega.
+* **Só no `||`.** Saem certos: `&&`, `Bool.not`, `Bool.pick` e `match` sobre a mesma comparação; um `||` cujo operando chama uma def COM argumentos (`f(x) || ..`); e a comparação com um literal.
+* **O que já mordeu:** `R.hit` acertava sempre (`R.per(1, 2)` virava 100%: o `random_test` e o cruzamento uniforme do `arena_test` falharam), e o `hilbert_detalhe` cortava um trecho por pixel (185 KB em vez de 84 KB, sem erro nenhum).
+* **A saída:** ligue a constante num binder local antes do `||`:
+  ```bend
+  def hit(+seed: U32, +threshold: U32) -> Bool:
+    +max = MAX()                                                  # ✔️
+    U32.is_eq(threshold, max) || U32.is_lt(mix(seed), threshold)
+  ```
+* **Sonda para reverificar ao atualizar** (deve imprimir `F`; o 2.0.29 imprime `T`): `def K() -> U32: 100` e `def h(+x: U32) -> Bool: U32.is_eq(x, K()) || U32.is_eq(x, 50)`, com `x = 9` vindo de runtime (do tamanho de `IO.args`, por exemplo, para o compilador não dobrar a conta).
+
+---
+
+### 🔴 Armadilha 13: janelas — o `Window.frame` desce a árvore uma vez por pixel
+> **Conceito:** um quadro é uma `Image`, uma árvore de quadrantes (`Pix{cor}` ou `Qua{tl, tr, bl, br}`). A raiz é um quadrado de lado 2^k >= max(largura, altura), preso no topo à esquerda; o que passa da janela não aparece. No Linux sem GPU, o `Window.frame` pinta a janela descendo a árvore da raiz até a folha **para cada pixel, numa thread só**, e espera o próximo tique de 60 Hz.
+
+* **Medido** (`exemplos/janela.bend`, uma esfera sombreada, na bateria): 640x480 fica em 60 quadros/s, 1280x720 em ~50 e 1920x1080 em ~35. Montar a árvore custa ~4,6 ms por quadro em 1080p. Uma imagem FIXA de um nível só (`Qua` de quatro `Pix`) já deixa o 1080p em ~48 quadros/s, e um `Pix` só volta aos 60. O gargalo é o preenchimento, não o desenho: `!`, chamada paralela e versão sequencial ficaram dentro do ruído, com 1 ou 12 threads.
+* **Desenhe só onde há detalhe.** Um quadrado todo de uma cor vira um `Pix` na hora, sem descer; só divida onde a figura corta o quadrado. Assim o custo é proporcional à figura, não à janela. A condição "este quadrante é liso?" é calculada por quem pede o quadrante e entra como parâmetro (o padrão da Armadilha 2; os demos `app_pong_game_2d` e `app_triangle_2d` fazem igual).
+* **`App.run` é `Window.open` seguido de `App.loop` com 2^32 quadros de combustível.** Chamar `App.loop(~S, ~app, U32.to_nat(n), janela, estado)` direto roda `n` quadros e deixa medir o tempo. O `tick` precisa responder `None{}` ao `Close{}`, senão o botão de fechar não fecha.
+* **Estado só de escalares** (`F32`, `U32`), que anda em registradores. Para escolher um `F32`, use um seletor tipado com `match` (`def escolhe(c: Bool, a: F32, b: F32) -> F32`), não o `Bool.pick` genérico, que encaixota a palavra.
+* **Testar sem olhar a tela:** `xwd -name "<título>" -silent -out q.xwd` captura a janela em execução. O XWD daqui tem pixels de 3 bytes (BGR) em linhas de `bytes_per_line` bytes (o campo 12 do cabeçalho); com o PIL: `Image.frombytes('RGB', (w, h), dados, 'raw', 'BGR', bpl)`.
 
 ---
 

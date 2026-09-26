@@ -47,6 +47,9 @@ bend exemplos/ola.bend -o bin/ola
 
 # GPU CUDA ou Apple Metal
 ./bin/ola --gpu 1GB
+
+# As opções do runtime (um `--help` vai para o programa)
+./bin/ola --bend-help
 ```
 
 ## Verificando provas
@@ -88,7 +91,6 @@ bend exemplos/primos.bend -o bin/primos
 | `repetindo`, `contando` | recursão, terminação com `Nat`, tail call, laço de IO |
 | `lambda` | closures (afins) vs templates `~` |
 | `listas`, `strings` | `List` e `String` com a Base: `foldl`, `filter`, `sort`, `split`, `join`... |
-| `genericos` | tipos genéricos, `-A` vs `~A`, `Kind(a)` |
 | `monad` | `do` com `Maybe`, `Result` e uma mônada própria (sorteios puros) |
 | `mapas` | `Map` e `Set` da Base (contagem de palavras) |
 | `provas` | `law`, provas por indução, reescrita com `%`, `?objetivo` |
@@ -98,14 +100,14 @@ bend exemplos/primos.bend -o bin/primos
 | `pow`, `fibonacci` | a chamada paralela `a b = f(x) g(y)`, `!` para GPU, escala com threads |
 | `primos`, `crivo` | paralelismo e equilíbrio de carga; o algoritmo certo contra o paralelismo |
 | `sort_merge` | merge sort paralelo: granularidade e localidade de memória |
-| `monte_carlo` | aleatoriedade pura com fluxos independentes por tarefa (`utils/random`) |
+| `monte_carlo` | aleatoriedade pura com fluxos independentes por tarefa (`utils/random`); `!` com tarefas para uma GPU |
 | `histograma` | `Array.fork` + `Array.atomic.*` contra um array por tarefa |
 | `arrays`, `arquivos` | `Array` (leitura devolve o array junto), `utils/arrays`, arquivos em blocos |
-| `bmp`, `mandelbrot` | imagens BMP com `utils/bmp`; Mandelbrot paralelo gravado em BMP |
+| `bmp`, `mandelbrot` | imagens BMP com `utils/bmp`; Mandelbrot paralelo (com zoom e `!`) gravado em BMP |
 | `hilbert`, `hilbert_detalhe` | percurso genérico com callback; um codec de imagem pela curva de Hilbert |
 | `json` | `utils/json`: ler, consultar e escrever JSON |
 | `concorrencia` | `IO.fork`/`IO.join`, `IO.sleep`, canais (produtor/consumidor) |
 | `servidor` | um servidor HTTP mínimo com TCP |
-| `janela` | `App.run` (janela animada) e `App.play` (o mesmo App testado sem janela) |
+| `janela` | uma esfera quicando numa janela de largura x altura: `Image` em quadrantes, `App.loop` |
 
 O motor genético em `genetic/` é um projeto maior, com o próprio README.
