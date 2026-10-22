@@ -19,13 +19,14 @@ import ./../utils/math.bend as M
 #
 # A raiz da árvore é um quadrado de lado 2^k que cobre a janela, com o canto
 # no topo à esquerda; o que passa da largura ou da altura não aparece. A
-# janela mostra no máximo 60 quadros por segundo.
+# janela mostra no máximo um quadro por atualização do monitor (60 Hz aqui).
 #
-# Medido no nativo (i5-1245U, sem GPU, 2.0.29): 640x480 fica nos 60 quadros
-# por segundo; 1280x720 dá ~50 e 1920x1080 ~35, com 1 ou 12 threads. Montar
-# a árvore custa só ~4,6 ms por quadro em 1080p; o que pesa é o
-# `Window.frame` no Linux, que desce a árvore uma vez POR PIXEL da janela,
-# numa thread só (uma imagem fixa de um nível já o deixa em ~48 em 1080p).
+# Medido no nativo (i5-1245U na tomada, sem GPU, 2.0.38): 60 quadros por
+# segundo de 640x480 a 1920x1080, gastando ~55% de um núcleo em 640x480 e
+# ~70% em 1080p (o 2.0.29 gastava ~75% e ~85%, e na bateria caía para ~35
+# quadros em 1080p). Desde o 2.0.32 o `Window.frame` no Linux pinta por
+# QUADRADOS: um `Pix` vira um laço que preenche o quadrado inteiro, e só um
+# `Qua` faz descer mais um nível.
 
 # ----------------------------------------------------------------
 # ESTADO

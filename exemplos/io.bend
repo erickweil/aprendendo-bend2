@@ -28,9 +28,10 @@ def main() -> IO(Unit):
 
     # Os argumentos da linha de comando (veja utils/io.bend para lê-los)
     args : List<String> <- IO.args()
-    IO.print(Nat.show(List.length(&1, String, args)) ++ " argumento(s)")
+    # (o primeiro é o próprio programa, como o `argv[0]` do C)
+    IO.print(Nat.show(List.length(&1, String, args)) ++ " argumento(s), contando o programa")
 
-    # Quantas threads o binário usa (`--threads N`, ou os núcleos da máquina)
+    # Quantas threads o binário usa (`+RTS --threads N`, ou os núcleos da máquina)
     n : U32 <- IO.thread_count()
     IO.print(U32.show(n) ++ " thread(s)")
 

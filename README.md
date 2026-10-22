@@ -39,17 +39,18 @@ Também é possível compilar para nativo c (requer clang instalado)
 ```bash
 bend exemplos/ola.bend -o bin/ola
 
-# CPU single core
+# CPU, com uma thread por núcleo (o padrão)
 ./bin/ola
 
-# CPU multi thread
-./bin/ola --threads 16
+# As opções do runtime vão entre +RTS e -RTS (desde o 2.0.38); o resto vai
+# para o programa, em IO.args. `./bin/ola --threads 1` NÃO limita as threads.
+./bin/ola +RTS --threads 1 -RTS
 
 # GPU CUDA ou Apple Metal
-./bin/ola --gpu 1GB
+./bin/ola +RTS --gpu 1GB -RTS
 
-# As opções do runtime (um `--help` vai para o programa)
-./bin/ola --bend-help
+# As opções do runtime
+./bin/ola +RTS --help
 ```
 
 ## Verificando provas
@@ -58,7 +59,8 @@ bend exemplos/ola.bend -o bin/ola
 (veja `exemplos/provas.bend`). Para só verificar, sem rodar:
 
 ```bash
-bend exemplos/provas.bend --check-only
+bend exemplos/provas.bend --check-only     # ALL PROOFS CHECK ou SOME PROOFS FAIL
+bend exemplos/provas.bend --verdict        # e reconfere com o núcleo provado em Lean
 ```
 
 ## Inspecionando código
@@ -75,12 +77,12 @@ bend exemplos/ola.bend -o app.js
 Cada arquivo em `exemplos/` mostra um recurso da linguagem, do mais simples ao mais
 elaborado. Quase todos aceitam argumentos (tamanho, semente...) e os que medem desempenho
 imprimem o tempo; os números nos comentários foram medidos no binário nativo, variando
-`--threads`.
+`+RTS --threads N -RTS`.
 
 ```bash
 bend exemplos/primos.bend -o bin/primos
-./bin/primos 20000000 --threads 1
-./bin/primos 20000000 --threads 12
+./bin/primos 20000000 +RTS --threads 1 -RTS
+./bin/primos 20000000 +RTS --threads 12 -RTS
 ```
 
 | Exemplo | O que mostra |

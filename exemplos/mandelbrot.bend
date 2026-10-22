@@ -15,7 +15,7 @@ import ./../utils/bmp.bend as Bmp
 #   bend mandelbrot.bend -o ../bin/mandelbrot
 #   ../bin/mandelbrot [k=9: imagem 2^k x 2^k] [iterações=256] [saida.bmp] [zoom=1]
 #   ../bin/mandelbrot 11 256 cavalos.bmp 150      (aproxima 150 vezes)
-#   ../bin/mandelbrot 11 256 m.bmp 1 --threads 1  (compare com --threads 4, 12)
+#   ../bin/mandelbrot 11 256 m.bmp 1 +RTS --threads 1 -RTS  (compare com 4, 12)
 #
 # A vista fica centrada no "vale dos cavalos-marinhos", entre o corpo e a
 # cabeça do conjunto: com zoom 1 aparece o conjunto inteiro. As iterações
@@ -170,7 +170,7 @@ def main() -> IO(Unit):
     +x0 : F32 = (Centro.x() - lado / 2.0 : F32)
     +y0 : F32 = (Centro.y() - lado / 2.0 : F32)
     t0 : Nat <- IO.now()
-    # `!` entrega a chamada à GPU; sem GPU (ou com --gpu off) roda na CPU
+    # `!` entrega a chamada à GPU; sem GPU (ou com +RTS --gpu off) roda na CPU
     img : Bmp.Imagem = Bmp.Imagem{w, w, pixels!(U32.to_nat((2 * k : U32)), 0, w, max, x0, y0, escala)}
     Bmp.gravar(saida, img)
     dt : String <- IOU.tempo_desde(t0)

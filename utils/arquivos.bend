@@ -26,7 +26,7 @@ import ./math.bend as M
 #
 # POR QUE EM BLOCOS. `File.read_bytes` e `File.write_bytes` trocam os bytes
 # como `List<&2, U32>`, uma célula por byte. Medido no nativo (2.0.26,
-# i5-1245U, arquivo de 64 MB, --threads 1):
+# i5-1245U, arquivo de 64 MB, +RTS --threads 1):
 #
 #   ler o arquivo inteiro numa lista só        1,15 s   1,8 GB de pico
 #   ler em blocos de 64 KB..256 KB             1,0 s    265 MB

@@ -19,6 +19,11 @@ import ./../utils/io.bend as IOU
 def Erro() -> Type:
   U32 & String
 
+# Se o envio falha no meio, o erro vem com os bytes que não saíram (para
+# retomar com `TCP.send_bytes`)
+def ErroEnvio() -> Type:
+  Erro() & List<&2, U32>
+
 # Sem `Content-Length`: com `Connection: close`, o fim da conexão marca o
 # fim do corpo (e `String.length` contaria caracteres, não os bytes UTF-8)
 def resposta(+i: U32, pedido: String) -> String:
@@ -26,19 +31,22 @@ def resposta(+i: U32, pedido: String) -> String:
     "Olá do Bend! Você é a visita " ++ U32.show(i) ++ ".\n" ++
     "Primeira linha do seu pedido: " ++ Maybe.default(&2, String, List.head(&2, String, String.lines(pedido)), "") ++ "\n"
 
-def fecha(par: Socket & Result<&1, &1, Erro(), Unit>) -> IO(Unit):
+def fecha(par: Socket & Result<&1, &1, ErroEnvio(), Unit>) -> IO(Unit):
   (s, r) = par
   Socket.close(s)
 
-def responde(par: Socket & Result<&1, &1, Erro(), String>, +i: U32) -> IO(Unit):
+# `TCP.recv` dá `None` se o cliente fechou sem mandar nada
+def responde(par: Socket & Result<&1, &1, Erro(), Maybe<&1, String>>, +i: U32) -> IO(Unit):
   (s, r) = par
   match r:
     case Fail{e}:
       Socket.close(s)
-    case Done{pedido}:
+    case Done{None{}}:
+      Socket.close(s)
+    case Done{Some{pedido}}:
       do IO<Unit>:
         IO.print("visita " ++ U32.show(i))
-        enviado : Socket & Result<&1, &1, Erro(), Unit> <- TCP.send(s, resposta(i, pedido))
+        enviado : Socket & Result<&1, &1, ErroEnvio(), Unit> <- TCP.send(s, resposta(i, pedido))
         fecha(enviado)
 
 def atende(r: Result<&1, &1, Erro(), Socket>, +i: U32) -> IO(Unit):
@@ -47,7 +55,7 @@ def atende(r: Result<&1, &1, Erro(), Socket>, +i: U32) -> IO(Unit):
       IO.print_err("falha ao aceitar")
     case Done{s}:
       do IO<Unit>:
-        pedido : Socket & Result<&1, &1, Erro(), String> <- TCP.recv(s, 4096)
+        pedido : Socket & Result<&1, &1, Erro(), Maybe<&1, String>> <- TCP.recv(s, 4096)
         responde(pedido, i)
 
 # `aceito` é o par devolvido pelo `TCP.accept` anterior
@@ -71,7 +79,8 @@ def main() -> IO(Unit):
     +ns : List<&2, Maybe<&2, U32>> = IOU.numbers(args)
     +porta : U32 = IOU.num_at(ns, 0n, 8080)
     +n : U32 = U32.max(IOU.num_at(ns, 1n, 3), 1)
-    l : Listener <- IO.try(Listener, TCP.listen(porta))
+    # "127.0.0.1" atende só esta máquina; "0.0.0.0", todas as interfaces
+    l : Listener <- IO.try(Listener, TCP.listen("127.0.0.1", porta))
     IO.print("ouvindo em http://localhost:" ++ U32.show(porta) ++ "/ (" ++ U32.show(n) ++ " conexões)")
     primeiro : Listener & Result<&1, &1, Erro(), Socket> <- TCP.accept(l)
     servir(U32.to_nat((n - 1 : U32)), primeiro, 1)
