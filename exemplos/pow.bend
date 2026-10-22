@@ -30,7 +30,7 @@ def pow2_seq(+d: Nat) -> U32:
 
 # Uso: pow [n=24]
 #   bend pow.bend -o ../bin/pow
-#   ../bin/pow 28 --threads 1     (compare com --threads 4, 8, 12)
+#   ../bin/pow 28 +RTS --threads 1 -RTS     (compare com 4, 8, 12)
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
@@ -44,7 +44,7 @@ def main() -> IO(Unit):
     dt1 : String <- IOU.tempo_desde(t1)
     IO.print("  " ++ dt1)
     # `!` entrega a chamada (e todas as chamadas paralelas dentro dela) à
-    # GPU. Sem GPU (ou com --gpu off) ela roda na CPU, em paralelo.
+    # GPU. Sem GPU (ou com +RTS --gpu off) ela roda na CPU, em paralelo.
     t2 : Nat <- IO.now()
     IO.print("na GPU (!):  2^" ++ U32.show(n) ++ " = " ++ U32.show(pow2!(U32.to_nat(n))))
     dt2 : String <- IOU.tempo_desde(t2)

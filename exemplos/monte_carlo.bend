@@ -37,7 +37,7 @@ def paralelo(prof: Nat, +s: U32, +n: U32) -> U32:
       (a + b : U32)
 
 # Uso: monte_carlo [milhões de pontos=16] [semente=0: aleatória]
-#   ../bin/monte_carlo 256 7 --threads 1      (compare com --threads 12)
+#   ../bin/monte_carlo 256 7 +RTS --threads 1 -RTS      (compare com 12)
 #
 # Medido no nativo (256 milhões de pontos): 1,31 s com 1 thread, 0,45 s com
 # 4 e 0,24 s com 8 ou 12 (5,4×). Nenhuma memória compartilhada, trabalho

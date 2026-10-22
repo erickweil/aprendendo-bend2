@@ -65,7 +65,7 @@ def contar(prof: Nat, +lo: U32, +hi: U32) -> U32:
 
 # Uso: primos [n=100000] [prof=6]
 #   bend primos.bend -o ../bin/primos
-#   ../bin/primos 10000000 --threads 1      (compare com --threads 4, 8, 12)
+#   ../bin/primos 10000000 +RTS --threads 1 -RTS      (compare com 4, 8, 12)
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()

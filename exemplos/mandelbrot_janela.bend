@@ -78,7 +78,7 @@ def pixel(+x: U32, +y: U32, +v: Vista) -> U32:
   Mb.ponto(eixo(x, cx, e, w), eixo(y, cy, e, h), Mb.iteracoes(base, nivel), e)
 
 # Quatro quadrantes de uma cor só viram um `Pix` só (o interior do conjunto,
-# o fundo): a árvore fica menor, e a janela desce menos níveis por pixel
+# o fundo): a árvore fica menor, e a janela pinta o quadrado inteiro de uma vez
 def junta.pix(iguais: Bool, +a: U32, +b: U32, +c: U32, +d: U32) -> Image:
   match iguais:
     case True{}: Pix{a}

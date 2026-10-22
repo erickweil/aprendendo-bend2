@@ -6,7 +6,9 @@ import Base
 # ARGUMENTOS. `IO.args()` entrega `List<String>`, isto é `List<&1, String>`:
 # uma lista AFIM, que só pode ser percorrida uma vez e não aceita `+`. Aqui ela
 # é convertida de uma vez numa lista `Data` (`&2`), que pode ser consultada
-# quantas vezes for preciso:
+# quantas vezes for preciso. Desde o 2.0.32 a cabeça de `IO.args()` é o próprio
+# programa (o `argv[0]` do C); os conversores a pulam, então o argumento 0 é o
+# primeiro que o usuário escreveu:
 #
 #   args : List<String> <- IO.args()
 #   +ns : List<&2, Maybe<&2, U32>> = IOU.numbers(args)
@@ -31,13 +33,24 @@ import Base
 # ARGUMENTOS
 # ----------------------------------------------------------------
 
-# Todos os argumentos como números (`None` onde não for número)
-def numbers(args: List<String>) -> List<&2, Maybe<&2, U32>>:
+# Os argumentos sem o nome do programa, que vem na frente
+def sem_programa(args: List<String>) -> List<String>:
+  match args:
+    case Nil{}:
+      Nil{}
+    case Con{programa, rest}:
+      rest
+
+def numbers.go(args: List<String>) -> List<&2, Maybe<&2, U32>>:
   match args:
     case Nil{}:
       Nil{}
     case Con{first, rest}:
-      Con{U32.read(first), numbers(rest)}
+      Con{U32.read(first), numbers.go(rest)}
+
+# Todos os argumentos como números (`None` onde não for número)
+def numbers(args: List<String>) -> List<&2, Maybe<&2, U32>>:
+  numbers.go(sem_programa(args))
 
 # O k-ésimo número (a partir de 0), ou o padrão se faltar ou não for número
 def num_at(l: List<&2, Maybe<&2, U32>>, k: Nat, default: U32) -> U32:
@@ -52,21 +65,27 @@ def numbers_only.poe(m: Maybe<&2, U32>, resto: List<&2, U32>) -> List<&2, U32>:
     case Some{v}:
       Con{v, resto}
 
-# Só os argumentos que são números, em ordem (os outros são ignorados)
-def numbers_only(args: List<String>) -> List<&2, U32>:
+def numbers_only.go(args: List<String>) -> List<&2, U32>:
   match args:
     case Nil{}:
       Nil{}
     case Con{first, rest}:
-      numbers_only.poe(U32.read(first), numbers_only(rest))
+      numbers_only.poe(U32.read(first), numbers_only.go(rest))
+
+# Só os argumentos que são números, em ordem (os outros são ignorados)
+def numbers_only(args: List<String>) -> List<&2, U32>:
+  numbers_only.go(sem_programa(args))
+
+def texts.go(args: List<String>) -> List<&2, String>:
+  match args:
+    case Nil{}:
+      Nil{}
+    case Con{first, rest}:
+      Con{first, texts.go(rest)}
 
 # Todos os argumentos como textos, numa lista `Data`
 def texts(args: List<String>) -> List<&2, String>:
-  match args:
-    case Nil{}:
-      Nil{}
-    case Con{first, rest}:
-      Con{first, texts(rest)}
+  texts.go(sem_programa(args))
 
 # O k-ésimo texto (a partir de 0), ou o padrão se faltar
 def text_at(l: List<&2, String>, k: Nat, default: String) -> String:

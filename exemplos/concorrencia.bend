@@ -33,7 +33,8 @@ def produz(k: Nat, +c: Chan(U32), +i: U32) -> IO(Unit):
       Chan.close(U32, c)
     case 1n+p:
       do IO<Unit>:
-        ok : Bool <- Chan.send(U32, c, i)
+        # `Fail{i}` devolve o valor se o canal já estava fechado
+        ok : Result<&1, &1, U32, Unit> <- Chan.send(U32, c, i)
         produz(p, c, (i + 1 : U32))
 
 # O consumidor soma o que chega até o canal fechar (`None`). O valor

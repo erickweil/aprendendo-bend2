@@ -38,7 +38,7 @@ def sequencia(k: Nat, +i: U32) -> IO(Unit):
 
 # Uso: fibonacci [n=30]    (dá a volta no U32 acima de F(47))
 #   bend fibonacci.bend -o ../bin/fibonacci
-#   ../bin/fibonacci 40 --threads 1        (compare com --threads 12)
+#   ../bin/fibonacci 40 +RTS --threads 1 -RTS        (compare com 12)
 #
 # A recursão faz ~1,6^n chamadas: F(40) são 330 milhões. Medido no nativo,
 # 12 threads calculam 4× mais rápido que 1; o laço faz 40 passos e leva 0 ms.

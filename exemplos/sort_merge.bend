@@ -83,7 +83,7 @@ def mostrar(+l: List<&2, U32>) -> String:
 
 # Uso: sort_merge [n=12] [semente=0: aleatória]
 #   bend sort_merge.bend -o ../bin/sort_merge
-#   ../bin/sort_merge 1000000 7 --threads 1     (compare com --threads 2, 4)
+#   ../bin/sort_merge 1000000 7 +RTS --threads 1 -RTS     (compare com 2, 4)
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
