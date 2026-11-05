@@ -1,6 +1,6 @@
 # AGENTS.md — Guia de Engenharia e Operação em Bend 2
 
-> Verificado contra o **bend 2.0.38**. Ao atualizar o bend, regenere o GUIDE.md (`bend guide > GUIDE.md`), leia o CHANGELOG (`curl -sL https://raw.githubusercontent.com/bendlang/bend/main/CHANGELOG.md`) e reverifique as armadilhas com sondas curtas compiladas para nativo. A versão instalada sai de `bend version`.
+> Verificado contra o **bend 2.0.39**. Ao atualizar o bend, regenere o GUIDE.md (`bend guide > GUIDE.md`), leia o CHANGELOG (`curl -sL https://raw.githubusercontent.com/bendlang/bend/main/CHANGELOG.md`) e reverifique as armadilhas com sondas curtas compiladas para nativo. A versão instalada sai de `bend version`.
 
 ## 1. Como Orquestrar a Execução do Bend 2 com Segurança
 
@@ -14,6 +14,7 @@ Para aprender sobre o BEND2, leia o GUIDE.md gerado pelo comando `bend guide > G
   ```bash
   timeout 60s bend <arquivo.bend>
   ```
+* **Não limite a memória com `ulimit -v`.** O binário nativo reserva espaço virtual ao começar: com `ulimit -v 6000000` (6 GB) ele morre na hora com `bend: reservation failed`, sem rodar nada. (Desde o 2.0.39, segundo o changelog, uma falha de memória termina o programa pelo sinal, SIGSEGV ou SIGBUS, e não com exit 1.)
 * **Controle de Threads na Compilação C:**
   Para cargas maiores de tabalho, priorize rodar o Bend compilado para nativo via `-o`:
   ```bash
@@ -37,6 +38,8 @@ Para aprender sobre o BEND2, leia o GUIDE.md gerado pelo comando `bend guide > G
 
   Com 1 thread os dois empatam, com duas exceções: o `primos` ficou ~20% mais rápido (2720 → 2220 ms; o 2.0.35 passou a fazer `/` e `%` de `U32` direto no host) e o `pow2` paralelo ficou ~20% mais LENTO (780 → 935 ms, repetido três vezes; a versão sequencial do mesmo exemplo não mudou). O ganho com threads vem do 2.0.37, em que threads ociosas pegam os forks de uma expansão lenta: ajuda mais quem tem muitas tarefas (o `primos` com 64 tarefas foi de 3,6× para 5,1×; com 8, só de 2,2× para 2,4×).
 
+  **O 2.0.39 empata com o 2.0.38** nos seis exemplos (dentro de ~5%, medido intercalado com 1 e 12 threads), salvo pelo `pow 28` com 1 thread: o `pow2` paralelo ficou ~11% mais rápido (~950 → ~845 ms) e o sequencial ~8% mais lento (~765 → ~830 ms). Os tempos absolutos dessa sessão não se comparam com os da tabela: com navegador e editor abertos (carga ~3), o `sort_merge` levou ~1650 ms com 1 thread no mesmo 2.0.38 que antes dera ~1000 ms.
+
   **Notebook na bateria: os tempos absolutos dobram** (perfil "balanced", CPU a ~650 MHz em repouso; confira `cat /sys/class/power_supply/BAT*/status`). Os ganhos da tabela quase não mudam, mas não compare um tempo medido na bateria com um medido na tomada: meça as duas versões na mesma sessão. Os números absolutos nos comentários dos exemplos dizem quando foram medidos na bateria.
 
   Quase todos já chegam ao platô com 8 threads. Um platô antes do número de tarefas independentes indica parte sequencial ou desbalanceamento; um platô que piora conforme o volume de dados cresce indica limite de banda de memória.
@@ -45,7 +48,7 @@ Para aprender sobre o BEND2, leia o GUIDE.md gerado pelo comando `bend guide > G
 * **O LSP do editor pode estar atrás do `bend` instalado.** No 2.0.29 o `bend2-lsp` acusava `IO.thread_count` como nome indefinido e o let tipado fora do `do` como erro de sintaxe, e os dois checam e rodam. Quem decide é `bend arquivo.bend --check-only`.
 * **Compilação e Verificação Estática:**
   - Checar sem rodar: `timeout 60s bend <arquivo.bend> --check-only` (checa o arquivo e os imports). Desde o 2.0.32 o veredito é uma linha só: **`ALL PROOFS CHECK`** ou **`SOME PROOFS FAIL`**. Um arquivo que depende de `@unsafe` (como o `exemplos/histograma.bend`, por causa do `Array.fork`) sai `SOME PROOFS FAIL` com `N defs rely on unsafe or foreign code` e mesmo assim compila e roda: leia a mensagem antes de concluir que algo quebrou. Desde o 2.0.29 o erro sublinha o trecho exato (`^^^`), e parte das mensagens vem como `- message : ...` em vez do par `expected`/`observed`.
-  - Reconferir com o núcleo provado: `bend <arquivo.bend> --verdict` (era `--safe` no 2.0.30) traduz para BendTT e checa com um núcleo pequeno provado em Lean. A primeira execução compila o núcleo com o Lean (via `elan`).
+  - Reconferir com o núcleo provado: `bend <arquivo.bend> --verdict` (era `--safe` no 2.0.30) traduz para BendTT e checa com um núcleo pequeno provado em Lean. **Exige o Lean v4.34.0** (o toolchain `leanprover/lean4:v4.34.0` do elan, ou `$BENDTT` apontando para um núcleo já compilado); sem ele, para com `the kernel did not build (lean: Executable not found in $PATH: "lean")`. O Lean não está instalado nesta máquina: nenhum exemplo deste repositório foi conferido com `--verdict`.
   - Verificação de provas e teoremas: `timeout 60s bend PROOF.bend` (veja a seção 4 sobre o par LAWS/PROOF).
   - Inspeção do código gerado: `timeout 60s bend <arquivo.bend> -o saida.c` (emite o fonte C sem compilar).
 
@@ -113,7 +116,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 ---
 
 ### 🔴 Armadilha 3: Paralelismo Só Existe Onde Você Escreve
-> **Conceito:** O Bend não paraleliza sozinho. O único primitivo de paralelismo é a **chamada paralela** `a b = f(x) g(y)`, e o escalonador é fork-join binário: cada tarefa vai para um núcleo uma vez e nunca é movida.
+> **Conceito:** O Bend não paraleliza sozinho. O único primitivo de paralelismo é a **chamada paralela** `a b = f(x) g(y)`, e o escalonador é fork-join binário: cada tarefa vai para um núcleo e, em geral, fica lá até o fim (a exceção, desde o 2.0.37, está em "Balanceie").
 
 * **O Erro:** escrever a recursão sobre uma árvore em duas linhas.
   ```bend
@@ -123,7 +126,8 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
   ```
   Medido no motor genético: com as duas linhas, 12 threads rodavam na mesma velocidade que 1.
 * **Tarefas que compartilham uma estrutura grande não escalam.** Seleção por torneio sobre a população inteira faz toda tarefa segurar uma cópia `+pop` da geração anterior; ela só é liberada quando a última tarefa termina, e por uma thread só. Medido: 1,0× com 12 threads. O mesmo torneio **dentro de ilhas** independentes (`run_archipelago_tourney`) escala 2,8× — perto do teto da máquina.
-* **Um valor tem no máximo 2^24 − 1 cópias vivas** (2.0.36, segundo o changelog: passar disso para o programa com uma mensagem própria, e o limite é proposital). Não foi reproduzido aqui.
+* **Copiar um valor de um tipo faz TODOS os nós daquele tipo contarem referências, compartilhados ou não** (GUIDE, desde o 2.0.39: "copying any value of a datatype makes all its nodes count their fields"; o `bend guide shaders` chama isso de tipo quente). Vale por instância e não dá erro nem aviso. Medido no 2.0.39, 1 thread, montando e somando 100 vezes uma lista de 1 milhão de `U32`: 425 ms sem cópia, e **735 ms (1,7×)** com um único `+v` de uma lista de UM elemento, no começo do programa. Copiar um `List<&2, F32>` ou um tipo irmão de mesma forma não afeta nada (~420 ms). No C gerado, o sinal é a contagem de `rfc_seal` subir (2 → 4). Para uma estrutura percorrida num laço quente, evite copiá-la em qualquer lugar do programa, ou dê a ela um tipo próprio. **Mas meça antes:** no `sort_merge`, tirar todas as cópias de `List<&2, U32>` (e a passada que mostra a lista) só ganhou ~15% (1104 → 920 ms com 12 threads): ali pesam a alocação e a memória.
+* **Um valor tem no máximo 2^24 − 1 cópias vivas** (2.0.36). Reproduzido no 2.0.39: 17 milhões de cópias de uma árvore montada em runtime, guardadas num campo `+`, terminam com `bend: a value has more than 2^24-1 live copies: keep fewer alive at once, or build it again for some of them (each build counts its own copies)` e exit 1. Um registro de um campo só (`Cheia{n}`) e um valor fechado (`def valor() -> Arv: No{..}`, sem dado de runtime) passaram das mesmas 17 milhões sem erro.
 * **Um valor `+` lido por todas as tarefas custa um atômico por leitura** (GUIDE, desde o 2.0.16). Contexto, configuração e população compartilhados entre tarefas pagam isso. O `bend guide shaders` recomenda passar constantes como argumento template `~` (uma def como `Tela.w()`), não como parâmetro: "um parâmetro viaja em toda tarefa".
 * **Um registro `Data` compartilhado só pode conter ESCALARES se for lido por tarefas.** É o caso mais fácil de errar, porque o tipo parece inofensivo. Um contexto de problema `Data` que guarda uma `List` (ou qualquer estrutura de heap) paga contagem de referência COMPARTILHADA a cada duplicação `+`, e o motor duplica o contexto em toda callback de toda tarefa. Medido no sudoku (8 demes, 8 E-cores homogêneos, 5000 gerações): com uma `List` de 81 elementos no contexto, 6,61 s → 4,18 s (**1,58×**); trocando por dois `U32`, 5,61 s → 0,95 s (**5,91×**). O paralelismo quase quadruplicou e o caso de um núcleo ainda ficou mais rápido. Se o caminho frio precisar da estrutura, reconstrua-a lá dentro a partir de um escalar — uma alocação local por chamada fria é muito mais barata que um atômico contestado por leitura.
 * **Descer uma árvore compartilhada é caro mesmo com tudo na cache.** Abrir um nó `+` com `match` entrega os campos como `+` (contagem de referência). Medido: ~25 ns por nível, ~170 ns para achar uma folha entre 64, contra ~3 ns para ler um `Array` local. Para MUITAS leituras aleatórias da mesma estrutura, copie o que precisa para um `Array` local numa travessia só e leia dali: foi o que tirou o torneio do GA da árvore (−11% a −30% no sudoku, conforme o tamanho do torneio).
@@ -132,7 +136,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 * **Desde o 2.0.22 dá para COMPARTILHAR um `Array` entre tarefas**, o que antes era impossível (`Array<T>` tem um dono só). `Array.fork(T, a)` devolve dois handles para o MESMO bloco, `Array.join(T, l, r)` junta de volta, e `Array.atomic.*` (`add sub and or xor min max cas exch`, mais `fadd` em `Array<F32>`) escrevem do jeito certo quando duas tarefas batem no mesmo slot. Verificado no nativo: duas tarefas somando 100 mil vezes no MESMO slot dão exatamente 200000 com `--threads 4` e com `--threads 1`.
   - **`Array.fork`/`Array.join` são `@unsafe`** (nada garante que as escritas não se cruzem): o veredito do `--check-only` passa a nomear as defs que dependem deles, então isso aparece na revisão. Um `match` num handle forkado **copia** a parte, como um `Array.clone` — percorrer estruturalmente um array compartilhado continua proibido.
   - **Custo medido** (10M operações, 1 thread, array de 2^10 na cache): `Array.atomic.add` **4,5 ns**, contra **0,55 ns** de um `Array.get` + `Array.set` comum. São ~8×: o atômico serve para o ponto de encontro (um acumulador, um contador), não para o laço quente.
-  - **Contestado é muito pior** (`exemplos/histograma.bend`, 2.0.38 na tomada): 64M sorteios contados em 16 faixas compartilhadas com `Array.atomic.add` levam 81 ms com 1 thread e **306 ms com 4** — mais threads deixam ~4× mais LENTO. A mesma contagem com um array local por tarefa, somados na volta das chamadas paralelas (`Arr.zip_with`), vai de 37 ms a 6 ms com 12 threads (6×).
+  - **Contestado é muito pior** (`exemplos/histograma.bend`, 2.0.39, argumentos `64 7`): 64M sorteios contados em 16 faixas compartilhadas com `Array.atomic.add` levam 395 ms com 1 thread e **1697 ms com 4** — mais threads deixam ~4× mais LENTO. A mesma contagem com um array local por tarefa, somados na volta das chamadas paralelas (`Arr.zip_with`), vai de 178 ms a 35 ms com 12 threads (5×).
   - Isso é a saída para o caso "tarefas que compartilham uma estrutura grande não escalam" acima: em vez de um `+pop` que paga um atômico por leitura e só é liberado no fim, um `fork` dá leitura direta ao bloco.
 
 * **Volume de dados limita.** O mesmo GA, mesma forma, mesmo trabalho total: 3,16× com genomas de 10 mil genes (cabem em cache), 1,45× com 1 milhão (500 MB, limitado por banda de memória).
@@ -148,7 +152,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
   b = {Box{[0 : U32*4n]} : Box<Array<U32>>}  # ❌ "expected: Data, observed: Type"
   ```
   Um campo de registro **`Type`** aceita, sim (veja a Armadilha 3c): `type Individual<-G: Type> is Type` guarda um `Array`. O que não existe é `Array` dentro de `Data`.
-* **Genéricos sobre o elemento precisam ser template.** Com `-G: Data` (apagado) o verificador aceita, mas o backend nativo recusa com **"an open Array element type"**: ele precisa do tipo concreto. Use `~G: Data`, que especializa em tempo de compilação. **Revalidado no 2.0.38** (igual ao 2.0.27), com uma mudança em relação às versões anteriores: a def de uma linha `def first(-T: Data, a: Array<T>) -> Array<T> & T: Array.get(T, a, 0)` agora compila (é especializada no ponto de uso), mas um **laço recursivo** genérico continua morrendo: `def go(-T: Data, k: Nat, r: Array<T> & T, ..)` que chama `Array.get(T, ..)` dá `ALL PROOFS CHECK` no `--check-only` e `an open Array element type` no `-o`. É o exemplo mínimo de por que o passo 3 do checklist (compilar para nativo) não é opcional.
+* **Genéricos sobre o elemento precisam ser template.** Com `-G: Data` (apagado) o verificador aceita, mas o backend nativo recusa com **"an open Array element type"**: ele precisa do tipo concreto. Use `~G: Data`, que especializa em tempo de compilação. **Verificado no 2.0.38 e no 2.0.39:** tanto a def de uma linha `def first(-T: Data, a: Array<T>) -> Array<T> & T: Array.get(T, a, 0)`, chamada com `first(U32, a)`, quanto um **laço recursivo** `def go(-T: Data, k: Nat, r: Array<T> & T, ..)` que chama `Array.get(T, ..)` dão `ALL PROOFS CHECK` no `--check-only` e `an open Array element type` no `-o`. Com `~T: Data` e `first(~U32, a)`, compila e roda. Só escapa a def que nunca é chamada. (Uma versão anterior deste guia dizia que a def de uma linha compilava.) É o exemplo mínimo de por que o passo 3 do checklist (compilar para nativo) não é opcional.
 * **Ler um `Array` num laço:** `Array.get` devolve o par `(array, valor)`, e desestruturar o retorno de uma chamada é um `match` proibido; o auxiliar óbvio cairia em recursão mútua. A saída é fazer do par o **estado do laço** e desestruturá-lo como parâmetro, dentro de cada caso:
   ```bend
   def read(k: Nat, r: Array<U32> & U32, +acc: U32, +s: U32) -> U32:
@@ -209,6 +213,7 @@ Compreender estas armadilhas é fundamental para programar em Bend 2 sem travar 
 * **Leia e grave em blocos, nunca o arquivo inteiro numa lista.** Medido (64 MB, nativo, 2.0.26): a lista inteira custa **1,8 GB** de pico (~28 bytes por byte do arquivo) e 1,15 s; em blocos de 1 MB via `read_at`, **290 MB** e 0,78 s. Gravar: ~1,1 s e 1,9 GB contra ~0,55 s e 290 MB. O custo fica em ~10 ns por byte, dominado pela construção da lista na Base. Pronto em `utils/arquivos.bend` (`ler_bytes`/`gravar_bytes` usam blocos de 1 MB).
 * **`File.read_*` fazem UMA syscall `read()`**: num arquivo regular vem tudo, mas não há laço de leitura parcial por baixo.
 * **Um arquivo vazio pede tratamento à parte:** a conta de blocos `ceil(n / bloco) - 1` dá a volta para 4 bilhões com `n = 0`.
+* **`File.open(caminho, "x")` (2.0.39)** cria o arquivo e falha com `EEXIST` (`17`, `File exists`) se ele já existir, num passo só. Verificado no nativo.
 * **Imagens:** não há decodificador de PNG/JPEG. `utils/bmp.bend` lê BMP de 24/32 bits sem compressão (de baixo para cima ou de cima para baixo) e grava 24 bits; `exemplos/hilbert_detalhe.bend` é um codec com perdas que usa isso, percorrendo a imagem pela curva de Hilbert.
 
 ### 🔴 Armadilha 4: `Nat` NÃO é caro no nativo (corrigido)
@@ -392,8 +397,9 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 * **`+x = x` dentro de um caso de `match` funciona** (verificado no 2.0.16). O que falha é um `let` seguido de um `match` ou de uma desestruturação `(a, v) = par` no mesmo bloco; nesse caso use o `+` direto no padrão: `case Con{+h, t}:`.
 * **A cabeça de `IO.args` é o próprio programa** (desde o 2.0.32, como o `argv[0]` do C): os argumentos começam no índice 1. Os conversores de `utils/io.bend` (`numbers`, `numbers_only`, `texts`) já pulam o programa, então `num_at(ns, 0n, ..)` continua sendo o primeiro argumento escrito. Quem percorre `IO.args` à mão tem de pular a cabeça.
 * **Efeitos com handle mudaram de forma entre o 2.0.32 e o 2.0.38** (e quebraram `exemplos/concorrencia.bend` e `exemplos/servidor.bend`): `Chan.send` devolve `Result<&1, &1, A, Unit>` em vez de `Bool` (o valor volta em `Fail` se o canal estava fechado); `TCP.recv` devolve `Maybe` (`None` quando o outro lado terminou de mandar); `TCP.send` devolve, junto com o erro, os bytes que não saíram (`(U32 & String) & List<&2, U32>`, para retomar com `TCP.send_bytes`); `TCP.listen` e `UDP.bind` recebem o endereço (`"127.0.0.1"` só esta máquina, `"0.0.0.0"` todas as interfaces). `bend base <nome>` imprime a assinatura atual de qualquer def da Base.
+* **Argumentos e caminhos que não são UTF-8 (2.0.39):** `IO.args_bytes()` dá os bytes de cada argumento (`List<List<&2, U32>>`, com o programa na cabeça, como em `IO.args`), e `File.open_bytes(bytes, modo)` abre um caminho dado em bytes.
 * **`IO.args` é `List<&1, String>`, afim:** só pode ser percorrida uma vez e não aceita `+`. Converta de uma vez para uma lista `Data` (`utils/io.bend`: `numbers` + `num_at` para números, `texts` + `text_at` para caminhos e nomes, e `text_num_at` quando os argumentos misturam os dois — `args` só pode ser convertido uma vez).
-* **Uma lambda não desestrutura o próprio parâmetro.** `r => (a, b) = r ...` é recusado ("a match on a parameter or field"). Num laço de IO, onde o bind entrega um `File & X`, torne esse par um **parâmetro da próxima chamada** do laço e abra-o lá (`gravar_blocos.go` em `utils/arquivos.bend`). Um auxiliar que abre o par e chama o laço de volta seria recursão mútua.
+* **Uma lambda não desestrutura o próprio parâmetro.** `r => (a, b) = r ...` é recusado ("'r' can't be matched in this position"). Num laço de IO, onde o bind entrega um `File & X`, torne esse par um **parâmetro da próxima chamada** do laço e abra-o lá (`gravar_blocos.go` em `utils/arquivos.bend`). Um auxiliar que abre o par e chama o laço de volta seria recursão mútua.
 * **Dentro de `do` não há `match` nem desestruturação.** Um `match` solto dá "a match heads a def body, not a term", e `K{a, b} = x` dá "expected: a pattern". Leve a decisão para uma def e chame-a do bloco.
 * **Anotação como argumento pede parênteses duplos:** `U32.show(pm / 10 : U32)` falha com `expected: a term, observed: ':'`; escreva `U32.show((pm / 10 : U32))`.
 * **`parte * 1000` estoura o `U32` em silêncio** (acima de ~4,3M). Contas de porcentagem sobre tamanhos de arquivo precisam de outra ordem de operações (veja `permil` em `exemplos/hilbert_detalhe.bend`).
@@ -409,8 +415,8 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
 
 ---
 
-### 🟢 Armadilha 12 (corrigida no 2.0.38): `||` contra uma def constante saía sempre `True` no nativo
-> **Não reproduz no 2.0.38:** a sonda abaixo imprime `False` no nativo, e o `random_test` passa. O changelog não nomeia a correção. O binder local da "saída" abaixo continua valendo e não custa nada; o código do repositório pode ficar como está.
+### 🟢 Armadilha 12 (corrigida até o 2.0.38): `||` contra uma def constante saía sempre `True` no nativo
+> **Não reproduz no 2.0.38 nem no 2.0.39:** a sonda abaixo imprime `False` no nativo, e o `random_test` passa. O changelog não nomeia a correção. O binder local da "saída" abaixo continua valendo e não custa nada; o código do repositório pode ficar como está.
 
 > **Conceito (histórico):** regressão do 2.0.29, na área da correção #1026 ("a boxed Bool from a generic pick reaches Bool.or as a flat tag on C"). Quando um operando de `||` (ou `Bool.or`) é uma comparação contra uma **def nullária** (`U32.is_eq(t, MAX())`, `U32.is_ge(n, Trecho.maximo())`), o C gerado testa o resultado, que já é 0 ou 1, como se fosse um termo (`term_aux(_u) == CID_FALSE`), e esse operando vira sempre `True`.
 
@@ -423,7 +429,7 @@ A solução geralmente está em usar Bool.pick ou criar funções auxiliares que
     +max = MAX()                                                  # ✔️
     U32.is_eq(threshold, max) || U32.is_lt(mix(seed), threshold)
   ```
-* **Sonda para reverificar ao atualizar** (deve imprimir `False`; o 2.0.29 imprimia `True` no nativo, o 2.0.38 imprime `False`): `def K() -> U32: 1` e `def main() -> IO(Unit): IO.print(Bool.show(U32.is_eq(0, K()) || False{}))`.
+* **Sonda para reverificar ao atualizar** (deve imprimir `False`; o 2.0.29 imprimia `True` no nativo; o 2.0.38 e o 2.0.39 imprimem `False`): `def K() -> U32: 1` e `def main() -> IO(Unit): IO.print(Bool.show(U32.is_eq(0, K()) || False{}))`.
 
 ---
 
@@ -463,7 +469,7 @@ aprendendo-bend2/
 │   ├── aritmetico.bend        #   codificador aritmético binário adaptativo (range coder do LZMA, em U32)
 │   ├── json.bend              #   parser/serializador JSON (sem `@unsafe` desde o 2.0.27)
 │   └── *_test.bend            #   testes: `bend utils/x_test.bend -o bin/x_test && ./bin/x_test`
-└── genetic/                   # Motor genético (veja genetic/README.md)
+└── genetic/                   # Motor genético: nesta branch só o README; o código está na branch `genetic-v3`
 ```
 
 Convenções dos exemplos: aceitam argumentos (tamanho, semente) com `utils/io.bend`

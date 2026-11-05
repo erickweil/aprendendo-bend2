@@ -17,13 +17,13 @@ import ./../utils/arrays.bend as Arr
 #    das chamadas paralelas. Nada é compartilhado.
 #
 # As duas dão exatamente o mesmo histograma (as tarefas usam os mesmos
-# fluxos de sorteio). Medido no nativo (2.0.38, i5-1245U na tomada), 64
-# milhões de sorteios:
+# fluxos de sorteio). Medido no nativo (2.0.39, i5-1245U), `histograma 64 7`,
+# 64 milhões de sorteios:
 #
 #   threads    A) compartilhado    B) local
-#      1            81 ms            37 ms
-#      4           306 ms            13 ms
-#     12           387 ms             6 ms
+#      1           395 ms           178 ms
+#      4          1697 ms            72 ms
+#     12          2161 ms            35 ms
 #
 # Com 16 faixas, todas as tarefas disputam as mesmas 16 posições: o atômico
 # CONTESTADO faz o programa ficar 4× mais LENTO com mais threads. O atômico

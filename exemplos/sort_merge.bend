@@ -21,7 +21,11 @@ import ./../utils/math.bend as M
 # Na bateria, este programa leva 2,2 s com 1 thread, 1,9 s com 2 e 1,7 s
 # com 4 ou 8; mais threads não ajudam: com listas encadeadas o limite passa a
 # ser a memória, não a CPU. Compare com `pow.bend`, que não toca na memória e
-# escala 4×.
+# escala quase 6×.
+#
+# Copiar uma lista (o `+`) faz todas as `List<&2, U32>` do programa contarem
+# referências, compartilhadas ou não. Aqui isso custa só ~15%; veja a
+# Armadilha 3 do AGENTS.md para um caso em que custa 1,7×.
 
 # Separa os k primeiros elementos: ([k primeiros], resto). A recursão devolve
 # um PAR, e quem o abre é um auxiliar não recursivo que o recebe como
@@ -90,10 +94,8 @@ def main() -> IO(Unit):
     +ns : List<&2, Maybe<&2, U32>> = IOU.numbers(args)
     +n : U32 = IOU.num_at(ns, 0n, 12)
     +s : U32 <- IOU.semente(IOU.num_at(ns, 1n, 0))
-    # duas cópias: uma para mostrar e uma só do merge_sort (uma lista `+`
-    # compartilhada pagaria contagem de referência a cada célula)
-    lista : List<&2, U32> = R.list(U32.to_nat(n), s, 1000000)
-    IO.print("original: " ++ mostrar(R.list(U32.to_nat(n), s, 1000000)))
+    +lista : List<&2, U32> = R.list(U32.to_nat(n), s, 1000000)
+    IO.print("original: " ++ mostrar(lista))
     t0 : Nat <- IO.now()
     +ord : List<&2, U32> = merge_sort(lista)
     IO.print("ordenada: " ++ mostrar(ord) ++ " (em ordem? " ++ Bool.show(ordenada(ord)) ++ ")")

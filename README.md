@@ -60,7 +60,7 @@ bend exemplos/ola.bend -o bin/ola
 
 ```bash
 bend exemplos/provas.bend --check-only     # ALL PROOFS CHECK ou SOME PROOFS FAIL
-bend exemplos/provas.bend --verdict        # e reconfere com o núcleo provado em Lean
+bend exemplos/provas.bend --verdict        # e reconfere com o núcleo provado em Lean (exige o Lean v4.34.0)
 ```
 
 ## Inspecionando código
